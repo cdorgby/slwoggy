@@ -1,0 +1,29 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Linux",
+            "type": "shell",
+            "command": "${workspaceFolder}/build-linux.sh",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build Windows",
+            "type": "shell",
+            "command": "${workspaceFolder}/build-windows.sh",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build All",
+            "type": "shell",
+            "command": "${workspaceFolder}/build-all.sh",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        }
+    ]
+}

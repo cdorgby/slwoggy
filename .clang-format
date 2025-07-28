@@ -1,0 +1,88 @@
+---
+# To install clang-format: sudo apt-get install clang-format
+# This file should be copied to the root project directory
+Language:        Cpp
+Standard:        Cpp11
+AlignAfterOpenBracket: Align
+AlignArrayOfStructures: Left
+AlignConsecutiveAssignments: AcrossComments
+AlignConsecutiveBitFields: AcrossEmptyLinesAndComments
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: AcrossComments
+AlignEscapedNewlines: Left
+AlignTrailingComments: true
+AlignOperands: Align
+AllowAllArgumentsOnNextLine: false
+AllowAllConstructorInitializersOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false 
+
+AllowShortBlocksOnASingleLine: true 
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortEnumsOnASingleLine: true 
+AllowShortFunctionsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLambdasOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
+
+AlwaysBreakAfterReturnType: None
+#AlwaysBreakBeforeMultilineStrings: false
+AlwaysBreakBeforeMultilineStrings: true
+
+BinPackArguments: false
+BinPackParameters: false
+BitFieldColonSpacing: Before
+BreakBeforeBinaryOperators: None
+BreakBeforeBraces: Allman
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakInheritanceList: BeforeColon
+
+ColumnLimit: 120
+ContinuationIndentWidth: 4
+#CommentPragmas:  '^[^ ]'
+CompactNamespaces: false
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+ConstructorInitializerIndentWidth: 0
+Cpp11BracedListStyle: true
+DeriveLineEnding: false
+DerivePointerAlignment: false
+EmptyLineBeforeAccessModifier: Always
+FixNamespaceComments: true
+
+IndentCaseBlocks: false
+IndentCaseLabels: false
+IndentExternBlock: NoIndent
+IndentGotoLabels: false
+IndentPPDirectives: BeforeHash
+IndentWidth: 4
+MaxEmptyLinesToKeep: 1
+
+PointerAlignment: Right
+SpaceAroundPointerQualifiers: After
+SpaceBeforeAssignmentOperators: true 
+SpaceBeforeCaseColon: false
+SpaceBeforeSquareBrackets: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: false
+SpacesInCStyleCastParentheses : false
+SpacesInConditionalStatement : false
+SpacesInContainerLiterals : false
+SpacesInParentheses : false
+SpacesInSquareBrackets : false
+
+SortIncludes: false
+SortUsingDeclarations: false
+
+UseTab: Never
+
+# no new lines after =, EVER!
+PenaltyBreakAssignment: 100
+# try to keep first argument to function on the same line as the call
+PenaltyBreakBeforeFirstCallParameter : 90
+# comments and strings can be broken all they want
+PenaltyBreakComment: 1
+PenaltyBreakString: 0
+# allow a little bit of sneaking over the column limit
+PenaltyExcessCharacter: 1
+# our guidelines don't want return type on it's own line
+# PenaltyReturnTypeOnItsOwnLine: 80
