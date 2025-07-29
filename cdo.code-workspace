@@ -6,7 +6,9 @@
     ],
     "settings": {
         "files.associations": {
-            "unordered_map": "cpp"
+            "unordered_map": "cpp",
+            "log_internal.h": "c",
+            "syslog.h": "c"
         }
     }
 }
