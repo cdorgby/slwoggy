@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.11)
 project(RaylibHelloWorld)
 
+#set(CMAKE_BUILD_TYPE Release)  # Automatically adds -DNDEBUG
+set(CMAKE_BUILD_TYPE Debug)
+
 # Project display name for installers/packages
 set(PROJECT_DISPLAY_NAME "Raylib Hello World")
 
@@ -59,6 +62,18 @@ endif()
 # Make nlohmann/json available
 FetchContent_MakeAvailable(json)
 
+# Function to set per-file compile definitions
+function(set_source_file_compile_definitions TARGET SOURCES)
+    foreach(SOURCE ${SOURCES})
+        # Get relative path from project root
+        file(RELATIVE_PATH REL_PATH ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE})
+        # Set compile definition for this specific source file
+        set_source_files_properties(${SOURCE} PROPERTIES
+            COMPILE_DEFINITIONS "TUBS_SOURCE_DIR=\"${REL_PATH}\""
+        )
+    endforeach()
+endfunction()
+
 # Add source files
 set(SOURCES
     src/main.cpp
@@ -68,10 +83,15 @@ set(SOURCES
     src/lua/LuaState.cpp
     src/lua/LuaManager.cpp
     src/lua/ScriptContext.cpp
+
+    src/log.c
 )
 
 # Add our executable
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+# Set per-file compile definitions
+set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
 
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE 

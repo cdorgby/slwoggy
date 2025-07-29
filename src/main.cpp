@@ -1,3 +1,6 @@
+#include "log.h"
+CLOG_MODULE("main")
+
 #include "raylib.h"
 #include "InputManager.h"
 #include "ResourceManager.h"
@@ -7,6 +10,10 @@
 
 int main(int argc, char *argv[])
 {
+    c_log_init("RaylibHelloWorld", C_LOG_GENERIC, C_LOG_LEVEL_DEBUG3);
+
+    ILOG("Starting Data Center Operations...");
+
     // Initialization
     const int screenWidth  = 800;
     const int screenHeight = 600;
