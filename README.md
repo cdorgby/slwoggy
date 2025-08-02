@@ -1,279 +1,260 @@
-# Raylib Hello World Cross-Platform Project
+# slwoggy
 
-A simple Hello World application using raylib that can be compiled for Linux, Windows (via MinGW), and macOS.
+A high-performance, header-only C++20 logging library featuring lock-free asynchronous processing, structured logging, and compile-time optimization.
 
-## Table of Contents
-- [Development Environment Setup](#development-environment-setup)
-  - [Windows (WSL)](#windows-wsl)
-  - [Linux](#linux)
-  - [macOS](#macos)
-- [Building](#building)
-- [Packaging](#packaging)
-- [Running](#running)
-- [Project Structure](#project-structure)
+## Key Features
 
-## Development Environment Setup
+- **Zero-Copy Architecture**: Pre-allocated buffer pool with reference counting eliminates allocations in the hot path
+- **Lock-Free Performance**: Uses moodycamel::ConcurrentQueue for minimal contention between threads
+- **Structured Logging**: Efficient key-value metadata with binary storage and global key registry
+- **Compile-Time Optimization**: Log sites below `GLOBAL_MIN_LOG_LEVEL` are completely eliminated
+- **Module System**: Per-module runtime log level control with wildcard pattern matching
+- **Asynchronous Processing**: Dedicated worker thread with batch processing for efficient I/O
+- **Type-Erased Sinks**: Flexible output handling with small buffer optimization
+- **Platform Optimized**: Fast platform-specific timestamps (mach_absolute_time, CLOCK_MONOTONIC, etc.)
 
-### Windows (WSL)
+## Quick Start
 
-1. **Install WSL2** (if not already installed):
-   ```powershell
-   wsl --install
-   ```
+```cpp
+#include "log.hpp"
 
-2. **Install Ubuntu in WSL**:
-   ```powershell
-   wsl --install -d Ubuntu
-   ```
+using namespace slwoggy;
 
-3. **Update packages and install build tools**:
-   ```bash
-   sudo apt update && sudo apt upgrade
-   sudo apt install build-essential cmake git
-   ```
+// Module declaration (optional, defaults to "generic")
+LOG_MODULE_NAME("myapp");
 
-4. **Install MinGW for Windows cross-compilation**:
-   ```bash
-   sudo apt install mingw-w64
-   ```
+int main() {
+    // Basic logging
+    LOG(info) << "Application started" << endl;
+    LOG(debug) << "Processing " << 42 << " items" << endl;
+    
+    // Modern C++20 formatting
+    LOG(warn).format("Temperature {}°C exceeds threshold {}°C", 98.5, 95.0);
+    
+    // Structured logging with metadata
+    LOG(error).add("user_id", 12345)
+             .add("error_code", "AUTH_FAILED")
+             .add("ip", "192.168.1.1")
+        << "Authentication failed" << endl;
+    
+    // Printf-style (discouraged but available)
+    LOG(info).printf("Legacy message: %s %d", "value", 123);
+    
+    return 0;
+}
+```
 
-5. **Install packaging tools** (optional):
-   ```bash
-   # For creating Windows installers
-   sudo apt install nsis
-   
-   # For creating Linux packages
-   sudo apt install rpm
-   ```
+## Log Levels
 
-6. **Install VS Code** (on Windows) and the Remote-WSL extension
+- `trace` - Finest-grained debugging information
+- `debug` - Debug messages  
+- `info` - General informational messages
+- `warn` - Warning messages
+- `error` - Error messages
+- `fatal` - Critical errors
 
-### Linux
+## Module System
 
-1. **Ubuntu/Debian**:
-   ```bash
-   sudo apt update
-   sudo apt install build-essential cmake git
-   
-   # For cross-compiling to Windows
-   sudo apt install mingw-w64
-   
-   # Optional: packaging tools
-   sudo apt install nsis rpm
-   ```
+Control logging verbosity by subsystem:
 
-2. **Fedora/RHEL**:
-   ```bash
-   sudo dnf groupinstall "Development Tools"
-   sudo dnf install cmake git
-   
-   # For cross-compiling to Windows
-   sudo dnf install mingw64-gcc mingw64-gcc-c++
-   
-   # Optional: packaging tools
-   sudo dnf install nsis rpm-build
-   ```
+```cpp
+using namespace slwoggy;
 
-3. **Arch Linux**:
-   ```bash
-   sudo pacman -S base-devel cmake git
-   
-   # For cross-compiling to Windows
-   sudo pacman -S mingw-w64-gcc
-   
-   # Optional: packaging tools
-   yay -S nsis
-   ```
+// In network code
+LOG_MODULE_NAME("network");
+LOG_MODULE_LEVEL(log_level::debug);
 
-### macOS
+// In database code  
+LOG_MODULE_NAME("database");
+LOG_MODULE_LEVEL(log_level::warn);
 
-1. **Install Xcode Command Line Tools**:
-   ```bash
-   xcode-select --install
-   ```
+// Runtime control
+auto& registry = log_module_registry::instance();
+registry.set_module_level("network", log_level::info);
+registry.configure_from_string("warn,network=debug,database=error");
+```
 
-2. **Install Homebrew** (if not already installed):
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
+## Structured Logging
 
-3. **Install CMake**:
-   ```bash
-   brew install cmake
-   ```
+Add searchable metadata to any log message:
 
-4. **For cross-compiling to Windows** (optional):
-   ```bash
-   brew install mingw-w64
-   ```
+```cpp
+using namespace slwoggy;
+
+// Pre-register frequently used keys at startup (optional optimization)
+auto& key_registry = structured_log_key_registry::instance();
+key_registry.batch_register({"user_id", "request_id", "latency_ms"});
+
+// Use in logging
+LOG(info).add("user_id", user.id)
+         .add("request_id", req.id)
+         .add("latency_ms", elapsed.count())
+    << "Request completed successfully" << endl;
+```
+
+## Custom Sinks
+
+Create custom output handlers:
+
+```cpp
+using namespace slwoggy;
+
+// JSON output to stdout
+auto json_sink = log_sink{
+    json_formatter{.pretty_print = false, .add_newline = true},
+    file_writer{STDOUT_FILENO}
+};
+
+// File output with color
+auto file_sink = log_sink{
+    raw_formatter{.use_color = false, .add_newline = true},
+    file_writer{"/var/log/myapp.log"}
+};
+
+// Add sinks
+auto& dispatcher = log_line_dispatcher::instance();
+dispatcher.add_sink(std::make_shared<log_sink>(std::move(json_sink)));
+```
+
+## Performance Tuning
+
+### Compile-Time Optimization
+
+Set minimum log level to eliminate code at compile time:
+
+```cpp
+// In log_types.hpp or compile flags
+namespace slwoggy {
+    inline constexpr log_level GLOBAL_MIN_LOG_LEVEL = log_level::info;
+}
+```
+
+### Buffer Pool Configuration
+
+```cpp
+// In log_types.hpp
+namespace slwoggy {
+    inline constexpr size_t BUFFER_POOL_SIZE = 128 * 1024;  // Number of buffers
+    inline constexpr size_t LOG_BUFFER_SIZE = 2048;         // Bytes per buffer
+    inline constexpr size_t METADATA_RESERVE = 256;         // Reserved for structured data
+}
+```
+
+### Metrics Collection
+
+Enable optional metrics at compile time:
+
+```cpp
+#define LOG_COLLECT_BUFFER_POOL_METRICS
+#define LOG_COLLECT_DISPATCHER_METRICS  
+#define LOG_COLLECT_STRUCTURED_METRICS
+#define LOG_COLLECT_DISPATCHER_MSG_RATE
+
+using namespace slwoggy;
+
+// Access metrics
+auto pool_stats = buffer_pool::instance().get_stats();
+auto disp_stats = log_line_dispatcher::instance().get_stats();
+```
+
+## Advanced Features
+
+### Per-Site Control
+
+Control individual log locations:
+
+```cpp
+using namespace slwoggy;
+
+// Runtime control of specific log sites
+log_site_registry::set_site_level("network.cpp", 42, log_level::trace);
+log_site_registry::set_file_level("database/*.cpp", log_level::error);
+```
+
+### Multi-line Support
+
+Multi-line logs are automatically indented:
+
+```cpp
+using namespace slwoggy;
+
+LOG(info) << "Request details:\n"
+          << "  Method: GET\n"  
+          << "  Path: /api/users\n"
+          << "  Status: 200" << endl;
+```
+
+### Smart Pointer Support
+
+```cpp
+using namespace slwoggy;
+
+auto ptr = std::make_shared<MyClass>();
+auto weak = std::weak_ptr<MyClass>(ptr);
+
+LOG(debug) << "Shared: " << ptr;   // Logs address or "nullptr"
+LOG(debug) << "Weak: " << weak;    // Logs address or "(expired)"
+```
 
 ## Building
 
-### Quick Build Commands
+### Requirements
+
+- C++20 compatible compiler
+- CMake 3.11+
+- POSIX threads (Linux/macOS)
+- Windows threads (Windows)
+
+### Build Instructions
 
 ```bash
-# Build for current platform (Linux/macOS)
-./build-linux.sh
-
-# Cross-compile for Windows (from Linux/WSL)
-./build-windows.sh
-
-# Build for all platforms
-./build-all.sh
-```
-
-### Manual Build Process
-
-#### Linux/macOS Native Build
-```bash
-mkdir -p build/native
-cd build/native
-cmake ../..
-make -j$(nproc)  # Linux
-make -j$(sysctl -n hw.ncpu)  # macOS
-```
-
-#### Windows Cross-Compilation (from Linux/WSL)
-```bash
-mkdir -p build/windows
-cd build/windows
-cmake ../.. -DCMAKE_TOOLCHAIN_FILE=../../windows-toolchain.cmake
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
+
+# Run example
+./bin/slwoggy
+
+# Run tests
+make tests && ctest
 ```
 
-## Packaging
+### Build Modes
 
-### Creating Distribution Packages
+- `Release` - Optimized production build
+- `Debug` - Debug symbols, metrics enabled
+- `MemCheck` - AddressSanitizer and UndefinedBehaviorSanitizer
+- `Profile` - Optimized with debug symbols for profiling
 
-```bash
-# Create Linux packages (DEB, RPM, TGZ)
-./package-linux.sh
+## Thread Safety
 
-# Create Windows packages (NSIS installer, ZIP)
-./package-windows.sh
+- All logging operations are thread-safe
+- Log order preserved within each thread
+- Module registry protected by shared_mutex
+- Sink modifications use RCU pattern (rare updates)
 
-# Create macOS package (DMG) - run on macOS
-./package-macos.sh
-
-# Create all packages
-./package-all.sh
-```
-
-### Package Outputs
-
-- **Linux**:
-  - `build/linux/*.deb` - Debian/Ubuntu package
-  - `build/linux/*.rpm` - RedHat/Fedora package
-  - `build/linux/*.tar.gz` - Generic Linux archive
-
-- **Windows**:
-  - `build/windows/*.exe` - NSIS installer
-  - `build/windows/*.zip` - Portable ZIP archive
-
-- **macOS**:
-  - `build/macos/*.dmg` - macOS disk image with app bundle
-
-## Running
-
-### Linux
-```bash
-./build/linux/bin/RaylibHelloWorld
-```
-
-### Windows
-```bash
-# From WSL/Linux (using Wine)
-wine ./build/windows/bin/RaylibHelloWorld.exe
-
-# Or copy to Windows and run natively
-```
-
-### macOS
-```bash
-# Command line
-./build/macos/bin/RaylibHelloWorld
-
-# Or open the app bundle
-open build/macos/RaylibHelloWorld.app
-```
-
-## VS Code Integration
-
-The project includes VS Code configuration for:
-
-1. **Building** (`Ctrl+Shift+B`):
-   - Build Linux (default)
-   - Build Windows
-   - Build All
-
-2. **Debugging** (`F5`):
-   - Debug Linux build with GDB
-
-3. **Tasks** (`Ctrl+Shift+P` → "Tasks: Run Task"):
-   - Various build and package tasks
-
-### Opening in VS Code
-
-From WSL:
-```bash
-code .
-```
-
-From Windows (with WSL Remote):
-1. Open VS Code
-2. Press `Ctrl+Shift+P`
-3. Select "WSL: Open Folder in WSL..."
-4. Navigate to the project directory
-
-## Project Structure
+## Architecture Overview
 
 ```
-.
-├── src/                    # Source files
-│   └── main.cpp           # Main application
-├── assets/                 # Asset files (icons, resources)
-├── cmake/                  # CMake modules (if needed)
-├── build/                  # Build output directory
-│   ├── linux/             # Linux build
-│   ├── windows/           # Windows build
-│   └── macos/             # macOS build
-├── .vscode/               # VS Code configuration
-│   ├── settings.json      # Project settings
-│   ├── tasks.json         # Build tasks
-│   └── launch.json        # Debug configurations
-├── CMakeLists.txt         # Main CMake configuration
-├── windows-toolchain.cmake # Windows cross-compilation toolchain
-├── build-*.sh             # Build scripts
-├── package-*.sh           # Packaging scripts
-└── README.md              # This file
+┌─────────────┐     ┌──────────────┐     ┌─────────────┐
+│   LOG()     │────▶│ Buffer Pool  │────▶│   Queue     │
+│   Macro     │     │ (lock-free)  │     │ (lock-free) │
+└─────────────┘     └──────────────┘     └─────────────┘
+                                                │
+                          ┌─────────────────────▼─────────┐
+                          │      Worker Thread           │
+                          │   (batch processing)         │
+                          └─────────────────────┬─────────┘
+                                                │
+                    ┌───────────────┬───────────▼────────┬─────────────┐
+                    │ Console Sink  │   File Sink       │ Custom Sink │
+                    └───────────────┴────────────────────┴─────────────┘
 ```
 
-## Troubleshooting
+## License
 
-### Common Issues
+[Your license here]
 
-1. **MinGW not found**:
-   ```bash
-   sudo apt install mingw-w64
-   ```
+## Contributing
 
-2. **NSIS not found** (for Windows installer):
-   ```bash
-   sudo apt install nsis
-   ```
-
-3. **CMake version too old**:
-   ```bash
-   # Ubuntu/Debian
-   sudo apt remove cmake
-   sudo snap install cmake --classic
-   ```
-
-4. **Build fails on macOS**:
-   - Ensure Xcode Command Line Tools are installed
-   - Check CMake version (3.11+ required)
-
-5. **Graphics issues in WSL**:
-   - Install WSLg for GUI support
-   - Or use X11 forwarding with VcXsrv/Xming
-
+[Your contributing guidelines here]

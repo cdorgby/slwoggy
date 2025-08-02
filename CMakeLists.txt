@@ -1,66 +1,73 @@
 cmake_minimum_required(VERSION 3.11)
-project(RaylibHelloWorld)
+project(slwoggy)
 
-#set(CMAKE_BUILD_TYPE Release)  # Automatically adds -DNDEBUG
-set(CMAKE_BUILD_TYPE Debug)
+# Set default build type if not specified
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MemCheck" "Profile")
+endif()
+
+# Custom MemCheck build type
+set(CMAKE_CXX_FLAGS_MEMCHECK "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address,undefined -fno-omit-frame-pointer -fno-optimize-sibling-calls" CACHE STRING 
+    "Flags used by the C++ compiler during MemCheck builds." FORCE)
+set(CMAKE_C_FLAGS_MEMCHECK "${CMAKE_C_FLAGS_DEBUG} -fsanitize=address,undefined -fno-omit-frame-pointer -fno-optimize-sibling-calls" CACHE STRING 
+    "Flags used by the C compiler during MemCheck builds." FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_MEMCHECK "${CMAKE_EXE_LINKER_FLAGS_DEBUG} -fsanitize=address,undefined" CACHE STRING 
+    "Flags used for linking binaries during MemCheck builds." FORCE)
+set(CMAKE_SHARED_LINKER_FLAGS_MEMCHECK "${CMAKE_SHARED_LINKER_FLAGS_DEBUG} -fsanitize=address,undefined" CACHE STRING 
+    "Flags used by the shared libraries linker during MemCheck builds." FORCE)
+
+# Custom Profile build type
+set(CMAKE_CXX_FLAGS_PROFILE "-O2 -g -fno-omit-frame-pointer -DNDEBUG" CACHE STRING 
+    "Flags used by the C++ compiler during Profile builds." FORCE)
+set(CMAKE_C_FLAGS_PROFILE "-O2 -g -fno-omit-frame-pointer -DNDEBUG" CACHE STRING 
+    "Flags used by the C compiler during Profile builds." FORCE)
+set(CMAKE_EXE_LINKER_FLAGS_PROFILE "" CACHE STRING 
+    "Flags used for linking binaries during Profile builds." FORCE)
+set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "" CACHE STRING 
+    "Flags used by the shared libraries linker during Profile builds." FORCE)
+
+# Mark advanced variables
+mark_as_advanced(
+    CMAKE_CXX_FLAGS_MEMCHECK
+    CMAKE_C_FLAGS_MEMCHECK
+    CMAKE_EXE_LINKER_FLAGS_MEMCHECK
+    CMAKE_SHARED_LINKER_FLAGS_MEMCHECK
+    CMAKE_CXX_FLAGS_PROFILE
+    CMAKE_C_FLAGS_PROFILE
+    CMAKE_EXE_LINKER_FLAGS_PROFILE
+    CMAKE_SHARED_LINKER_FLAGS_PROFILE)
+
+# Display current build type
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
+# Enable additional debug features for MemCheck builds
+if(CMAKE_BUILD_TYPE STREQUAL "MemCheck")
+    add_compile_definitions(
+        _GLIBCXX_DEBUG  # Enable libstdc++ debug mode
+        _GLIBCXX_DEBUG_PEDANTIC  # Enable pedantic debug mode
+    )
+    # Set environment variable for ASan options at runtime
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MEMCHECK ${CMAKE_BINARY_DIR}/bin)
+    message(STATUS "MemCheck build enabled with AddressSanitizer and UndefinedBehaviorSanitizer")
+    message(STATUS "Run with: ASAN_OPTIONS=detect_leaks=1:check_initialization_order=1:strict_init_order=1")
+endif()
+
+# Enable profiling features for Profile builds
+if(CMAKE_BUILD_TYPE STREQUAL "Profile")
+    message(STATUS "Profile build enabled with optimization level 2 and debug symbols")
+    message(STATUS "Frame pointers preserved for accurate profiling")
+endif()
 
 # Project display name for installers/packages
-set(PROJECT_DISPLAY_NAME "Raylib Hello World")
+set(PROJECT_DISPLAY_NAME "slwoggy")
 
 # Generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Add raylib
-include(FetchContent)
-FetchContent_Declare(
-    raylib
-    GIT_REPOSITORY https://github.com/raysan5/raylib.git
-    GIT_TAG 5.5
-)
-FetchContent_MakeAvailable(raylib)
-
-# Add Lua - always build from source for consistency
-FetchContent_Declare(
-    lua
-    URL https://www.lua.org/ftp/lua-5.4.6.tar.gz
-    URL_HASH SHA256=7d5ea1b9cb6aa0b59ca3dde1c6adcb57ef83a1ba8e5432c0ecd06bf439b3ad88
-)
-
-# Add nlohmann/json
-FetchContent_Declare(
-    json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
-
-FetchContent_GetProperties(lua)
-if(NOT lua_POPULATED)
-    FetchContent_Populate(lua)
-    
-    # Build Lua as a library
-    file(GLOB LUA_SOURCES ${lua_SOURCE_DIR}/src/*.c)
-    list(REMOVE_ITEM LUA_SOURCES ${lua_SOURCE_DIR}/src/lua.c ${lua_SOURCE_DIR}/src/luac.c)
-    
-    add_library(lua STATIC ${LUA_SOURCES})
-    target_include_directories(lua PUBLIC ${lua_SOURCE_DIR}/src)
-    
-    # Platform-specific defines
-    if(UNIX AND NOT APPLE)
-        target_compile_definitions(lua PRIVATE LUA_USE_LINUX)
-    elseif(APPLE)
-        target_compile_definitions(lua PRIVATE LUA_USE_MACOSX)
-    endif()
-    
-    set(LUA_LIBRARIES lua)
-    set(LUA_INCLUDE_DIR ${lua_SOURCE_DIR}/src)
-endif()
-
-# Make nlohmann/json available
-FetchContent_MakeAvailable(json)
 
 # Function to set per-file compile definitions
 function(set_source_file_compile_definitions TARGET SOURCES)
@@ -69,7 +76,7 @@ function(set_source_file_compile_definitions TARGET SOURCES)
         file(RELATIVE_PATH REL_PATH ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE})
         # Set compile definition for this specific source file
         set_source_files_properties(${SOURCE} PROPERTIES
-            COMPILE_DEFINITIONS "TUBS_SOURCE_DIR=\"${REL_PATH}\""
+            COMPILE_DEFINITIONS "SOURCE_FILE_NAME=\"${REL_PATH}\""
         )
     endforeach()
 endfunction()
@@ -77,34 +84,26 @@ endfunction()
 # Add source files
 set(SOURCES
     src/main.cpp
-    src/ResourceManager.cpp
-    src/ApplicationView.cpp
-    src/InputManager.cpp
-    src/lua/LuaState.cpp
-    src/lua/LuaManager.cpp
-    src/lua/ScriptContext.cpp
-
-    src/log.c
 )
 
 # Add our executable
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+# Add include directories
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
 # Set per-file compile definitions
 set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
 
-# Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    include
-    ${LUA_INCLUDE_DIR}
-)
-
-# Link libraries
-target_link_libraries(${PROJECT_NAME} 
-    raylib
-    ${LUA_LIBRARIES}
-    nlohmann_json::nlohmann_json
-)
+# Enable metrics collection for Debug, MemCheck, and Profile builds
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_DISPATCHER_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_DISPATCHER_MSG_RATE
+    )
+endif()
 
 # Set output directories
 set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -127,6 +126,35 @@ elseif(UNIX)
     # Linux-specific settings
     target_link_libraries(${PROJECT_NAME} m pthread dl)
 endif()
+
+# Enable testing support
+enable_testing()
+
+# Include FetchContent module
+include(FetchContent)
+
+# Add Catch2
+FetchContent_Declare(
+    Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.5.0
+)
+
+# Only fetch and build Catch2 when tests are being built
+FetchContent_GetProperties(Catch2)
+if(NOT catch2_POPULATED)
+    FetchContent_Populate(Catch2)
+    # Add Catch2 with EXCLUDE_FROM_ALL so it's not built by default
+    add_subdirectory(${catch2_SOURCE_DIR} ${catch2_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+
+# Include Catch2's CMake utilities
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(CTest)
+include(Catch)
+
+# Add tests subdirectory
+add_subdirectory(tests)
 
 # Installation rules
 if(APPLE)
@@ -153,7 +181,7 @@ endif()
 # CPack configuration
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "Example Company")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A simple Hello World application using raylib")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++20 logging library")
 set(CPACK_PACKAGE_VERSION_MAJOR "1")
 set(CPACK_PACKAGE_VERSION_MINOR "0")
 set(CPACK_PACKAGE_VERSION_PATCH "0")
@@ -176,46 +204,19 @@ elseif(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
     set(CPACK_DMG_VOLUME_NAME "${PROJECT_DISPLAY_NAME}")
     set(CPACK_DMG_FORMAT "UDZO")
-    set(CPACK_PACKAGE_ICON "${CMAKE_SOURCE_DIR}/assets/icon.icns")
 elseif(UNIX)
     # Linux packages
     set(CPACK_GENERATOR "DEB;RPM;TGZ")
     
     # DEB specific
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
-    set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc1")
     
     # RPM specific
     set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-    set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
+    set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
     set(CPACK_RPM_PACKAGE_REQUIRES "glibc, libstdc++, libgcc")
 endif()
-
-# Install assets
-install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/
-    DESTINATION ${CMAKE_INSTALL_PREFIX}/share/${PROJECT_NAME}/assets
-    FILES_MATCHING
-    PATTERN "*.png"
-    PATTERN "*.jpg"
-    PATTERN "*.ttf"
-    PATTERN "*.otf"
-    PATTERN "*.wav"
-    PATTERN "*.ogg"
-    PATTERN "*.mp3"
-    PATTERN "*.obj"
-    PATTERN "*.gltf"
-    PATTERN "*.glb"
-    PATTERN "*.vs"
-    PATTERN "*.fs"
-    PATTERN "*.glsl"
-    PATTERN ".gitkeep" EXCLUDE
-)
-
-# Copy assets to build directory for development
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:${PROJECT_NAME}>/../assets
-)
 
 include(CPack)
