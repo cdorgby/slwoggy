@@ -2,7 +2,9 @@
 
 /**
  * @file log.hpp
- * @brief High-performance, thread-safe logging system with compile-time optimization
+ * @brief Thread-safe asynchronous logging system
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  *
  * This logging system provides:
  * - Zero-allocation for compile-time disabled log levels
@@ -133,7 +135,9 @@
  *
  * Configuration:
  * - GLOBAL_MIN_LOG_LEVEL: Compile-time minimum log level
- * - SOURCE_FILE_NAME: Set by CMake for relative file paths in log output
+ * - SOURCE_FILE_NAME: Set by CMake for relative file paths in log output.
+ *                     When using the amalgamated header without CMake, automatically
+ *                     falls back to __FILE__ for full paths.
  * - LOG_MODULE_NAME: Define per-file module name for categorized logging
  * - LOG_MODULE_LEVEL: Set initial log level for the current module
  *
@@ -271,6 +275,7 @@
  * - No locks in hot paths (dispatch/worker thread)
  * - Approximate queue size to avoid contention
  * - Statistics can be reset for testing via reset_stats() methods
+ *
  */
 
 #include <cstdint>
@@ -298,6 +303,7 @@
 #include "log_sink.hpp"
 #include "log_formatters.hpp"
 #include "log_writers.hpp"
+#include "log_version.hpp"
 
 namespace slwoggy {
 

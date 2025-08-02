@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_formatters.hpp
+ * @brief Log message formatting implementations
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <cstring>
 
 #include "log_types.hpp"

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with th
 
 ## Project Overview
 
-slwoggy is a high-performance, header-only C++20 logging library designed for minimal overhead and maximum flexibility. The library emphasizes lock-free operations, compile-time optimization, and zero-allocation in the hot path.
+slwoggy is a header-only C++20 logging library that provides asynchronous logging with structured data support. The library uses lock-free data structures and pre-allocated buffers to minimize allocations during logging.
 
 ## Architecture
 

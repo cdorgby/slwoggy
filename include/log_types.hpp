@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_types.hpp
+ * @brief Core type definitions and constants for the logging system
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <cstdint>
 #include <array>
 #include <string>

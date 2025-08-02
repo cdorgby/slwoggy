@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_site.hpp
+ * @brief Log site registration and runtime control
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <deque>
 #include <mutex>
 #include <cstring>

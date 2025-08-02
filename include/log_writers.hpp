@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_writers.hpp
+ * @brief Log output writer implementations
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <string>
 #include <cstring>
 #include <stdexcept>

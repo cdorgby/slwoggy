@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_module.hpp
+ * @brief Module-based log level control and registration
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <atomic>
 #include <memory>
 #include <shared_mutex>

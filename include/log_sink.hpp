@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_sink.hpp
+ * @brief Type-erased sink implementation for log output
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <memory>
 #include <utility>
 #include <cstring>

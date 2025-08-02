@@ -1,17 +1,17 @@
 # slwoggy
 
-A high-performance, header-only C++20 logging library featuring lock-free asynchronous processing, structured logging, and compile-time optimization.
+A header-only C++20 logging library featuring asynchronous processing, structured logging, and compile-time filtering.
 
 ## Key Features
 
-- **Zero-Copy Architecture**: Pre-allocated buffer pool with reference counting eliminates allocations in the hot path
-- **Lock-Free Performance**: Uses moodycamel::ConcurrentQueue for minimal contention between threads
-- **Structured Logging**: Efficient key-value metadata with binary storage and global key registry
-- **Compile-Time Optimization**: Log sites below `GLOBAL_MIN_LOG_LEVEL` are completely eliminated
-- **Module System**: Per-module runtime log level control with wildcard pattern matching
-- **Asynchronous Processing**: Dedicated worker thread with batch processing for efficient I/O
-- **Type-Erased Sinks**: Flexible output handling with small buffer optimization
-- **Platform Optimized**: Fast platform-specific timestamps (mach_absolute_time, CLOCK_MONOTONIC, etc.)
+- **Pre-allocated Buffer Pool**: Uses a fixed-size buffer pool with reference counting
+- **Lock-Free Queue**: Uses moodycamel::ConcurrentQueue for thread communication
+- **Structured Logging**: Key-value metadata support with binary storage
+- **Compile-Time Filtering**: Log calls below `GLOBAL_MIN_LOG_LEVEL` are eliminated at compile time
+- **Module System**: Runtime log level control per module with wildcard pattern matching
+- **Asynchronous Processing**: Dedicated worker thread processes log messages
+- **Type-Erased Sinks**: Output handling using type erasure with small buffer optimization
+- **Platform-Specific Timestamps**: Uses platform APIs for timestamp generation
 
 ## Quick Start
 
@@ -219,6 +219,23 @@ make -j$(nproc)
 make tests && ctest
 ```
 
+### Single-Header Version
+
+To create a single-header amalgamation that includes all dependencies:
+
+```bash
+# Using the shell script
+./create-amalgamation.sh
+
+# Or using CMake
+cd build
+make amalgamation
+```
+
+This creates `include/slwoggy.hpp` which includes the moodycamel library and all slwoggy headers in one file. Simply copy this file to your project and `#include "slwoggy.hpp"`.
+
+**Note about file paths**: When building with CMake, `SOURCE_FILE_NAME` is defined to show relative paths in log output. The amalgamated header automatically falls back to `__FILE__` when `SOURCE_FILE_NAME` is not defined, so it works out of the box without any build system configuration.
+
 ### Build Modes
 
 - `Release` - Optimized production build
@@ -236,25 +253,44 @@ make tests && ctest
 ## Architecture Overview
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   LOG()     │────▶│ Buffer Pool  │────▶│   Queue     │
-│   Macro     │     │ (lock-free)  │     │ (lock-free) │
-└─────────────┘     └──────────────┘     └─────────────┘
-                                                │
-                          ┌─────────────────────▼─────────┐
-                          │      Worker Thread           │
-                          │   (batch processing)         │
-                          └─────────────────────┬─────────┘
-                                                │
-                    ┌───────────────┬───────────▼────────┬─────────────┐
-                    │ Console Sink  │   File Sink       │ Custom Sink │
-                    └───────────────┴────────────────────┴─────────────┘
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌─────────────┐
+│   LOG()     │────▶│   log_line   │────▶│ Buffer Pool  │────▶│   Buffer    │
+│   Macro     │     │   (RAII)     │     │ (lock-free)  │     │   + Data    │
+└─────────────┘     └──────────────┘     └──────────────┘     └──────┬──────┘
+                                                                     │
+                                                                     ▼
+                                                              ┌───────────────┐
+                                                              │    Queue      │
+                                                              │ (lock-free)   │
+                                                              └───────┬───────┘
+                                                                      │
+                          ┌───────────────────────────────────────────▼─────────┐
+                          │                 Worker Thread                       │
+                          │            (batch processing)                       │
+                          └───────────────────────────────────────────┬─────────┘
+                                                                      │
+                    ┌───────────────┬─────────────────────┬───────────▼────────┐
+                    │ Console Sink  │    File Sink        │   Custom Sink      │
+                    └───────────────┴─────────────────────┴────────────────────┘
+```
+
+## Versioning
+
+slwoggy uses [Semantic Versioning](https://semver.org/). Version information is:
+- Tracked via git tags (e.g., `v1.0.0`)
+- Automatically embedded in amalgamated headers
+- Available at runtime via `slwoggy::VERSION`
+
+```cpp
+#include <iostream>
+#include "slwoggy.hpp"
+
+int main() {
+    std::cout << "Using slwoggy version: " << slwoggy::VERSION << std::endl;
+    return 0;
+}
 ```
 
 ## License
 
-[Your license here]
-
-## Contributing
-
-[Your contributing guidelines here]
+MIT License - see [LICENSE](LICENSE) file for details.

@@ -1,5 +1,12 @@
 #pragma once
 
+/**
+ * @file log_buffer.hpp
+ * @brief Log buffer management and structured logging support
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
+
 #include <cstdint>
 #include <cstring>
 #include <string_view>

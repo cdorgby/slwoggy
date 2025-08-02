@@ -1,5 +1,21 @@
 cmake_minimum_required(VERSION 3.11)
+
+# Get version from git tags
+execute_process(
+    COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT GIT_VERSION)
+    set(GIT_VERSION "dev")
+endif()
+
 project(slwoggy)
+
+# Make git version available
+add_compile_definitions(SLWOGGY_VERSION_STRING="${GIT_VERSION}")
 
 # Set default build type if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -220,3 +236,16 @@ elseif(UNIX)
 endif()
 
 include(CPack)
+
+# Amalgamation target
+add_custom_target(amalgamation
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create-amalgamation.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Creating single-header amalgamation"
+    VERBATIM
+)
+
+# Install amalgamation header if it exists
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/slwoggy.hpp)
+    install(FILES slwoggy.hpp DESTINATION include)
+endif()

@@ -1,0 +1,9 @@
+{
+    "target": "../include/slwoggy.hpp",
+    "sources": [
+        "include/log.hpp"
+    ],
+    "include_paths": [
+        "include"
+    ]
+}
