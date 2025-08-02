@@ -39,6 +39,16 @@ inline  constexpr size_t LINE_BUFFER_SIZE      = 64;  // Buffer for line number 
 // #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
 // #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires LOG_COLLECT_DISPATCHER_METRICS)
 
+
+/**
+ * @brief Concept for types that can be logged
+ * @tparam T The type to check
+ */
+template <typename T>
+concept Loggable = requires(T value, std::string &str) {
+    { std::format("{}", value) } -> std::convertible_to<std::string>;
+};
+
 /**
  * @brief Enumeration of available log levels in ascending order of severity
  */
@@ -122,6 +132,7 @@ inline const char *string_from_log_level(log_level level)
     default: return "unknown";
     }
 }
+} // namespace slwoggy
 
 // Platform-specific fast timing utilities
 #ifdef __APPLE__
@@ -180,4 +191,3 @@ inline const char *string_from_log_level(log_level level)
     }
 #endif
 
-} // namespace slwoggy

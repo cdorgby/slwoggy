@@ -9,8 +9,6 @@
 
 namespace slwoggy {
 
-// Version will be set by build process or amalgamation script
-// Fallback to development version if not defined
 #ifndef SLWOGGY_VERSION_STRING
 #define SLWOGGY_VERSION_STRING "dev"
 #endif

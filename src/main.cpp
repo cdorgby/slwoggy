@@ -6,6 +6,7 @@
 #include <iostream>
 #include <iomanip>
 #include "log.hpp"
+#include "log_dispatcher.hpp"
 
 using namespace slwoggy;
 
@@ -19,6 +20,9 @@ int main(int argc, char *argv[])
     key_registry.get_or_register_key(std::string_view("iteration"));
     key_registry.get_or_register_key(std::string_view("hi"));
     key_registry.get_or_register_key(std::string_view("hello"));
+
+    auto sink = make_stdout_sink();
+    log_line_dispatcher::instance().add_sink(std::make_shared<log_sink>(std::move(sink)));
 
     // Create threads that will blast logs simultaneously
     std::mutex start_mutex;
@@ -57,8 +61,7 @@ int main(int argc, char *argv[])
         }
     };
 
-    // Create 10 threads
-    for (int i = 0; i < 1; ++i) {
+    for (int i = 0; i < 4; ++i) {
         threads.emplace_back(thread_func, i);
     }
     

@@ -14,6 +14,42 @@
 
 namespace slwoggy {
 
+/**
+ * @brief No-operation formatter that optionally copies raw buffer content
+ * 
+ * This formatter performs minimal processing, either copying the raw buffer
+ * content as-is or just calculating sizes without copying. Useful for:
+ * - Benchmarking and testing
+ * - Pass-through scenarios
+ * - Custom sink implementations that need raw access
+ */
+class nop_formatter
+{
+  public:
+    bool do_copy = false;
+
+    size_t calculate_size(const log_buffer *buffer) const
+    {
+        return buffer ? buffer->len() : 0;
+    }
+
+    size_t format(const log_buffer *buffer, char *output, size_t max_size) const
+    {
+        if (!buffer || max_size == 0) return 0;
+
+        if (do_copy)
+        {
+            size_t len = buffer->len();
+            if (len > max_size) len = max_size;
+            std::memcpy(output, buffer->get_text().data(), len);
+            return len;
+        }
+
+        // Just return the size without copying
+        return buffer->len();
+    }
+};
+
 class raw_formatter
 {
   public:

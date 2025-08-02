@@ -1,0 +1,548 @@
+#pragma once
+
+#include "log_line.hpp"
+#include "log_dispatcher.hpp"
+
+namespace slwoggy
+{
+
+inline log_line_dispatcher::log_line_dispatcher()
+: start_time_(log_fast_timestamp()),
+  start_time_us_(std::chrono::duration_cast<std::chrono::microseconds>(start_time_.time_since_epoch()).count()),
+  queue_(MAX_DISPATCH_QUEUE_SIZE), // Initial capacity
+  worker_thread_(&log_line_dispatcher::worker_thread_func, this)
+{
+#ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
+    // Initialize last_rate_sample_time_ to current time to avoid huge initial delta
+    last_rate_sample_time_ = log_fast_timestamp();
+#endif
+
+    // Initialize with empty sink config
+    auto initial_config = std::make_unique<sink_config>();
+    current_sinks_.store(initial_config.release(), std::memory_order_release);
+
+    //auto sink1 = make_stdout_sink();
+    //add_sink(std::make_shared<log_sink>(std::move(sink1)));
+    // static log_sink_file log_sink_file("/tmp/log.txt");
+    // add_sink(&log_sink_file);
+
+    // static log_sink_json log_sink_json;
+    // add_sink(&log_sink_json);
+}
+
+inline log_line_dispatcher::~log_line_dispatcher()
+{
+    // Signal shutdown
+    shutdown_.store(true);
+
+    // Enqueue sentinel to ensure worker wakes up
+    // (Important: we must ensure an element arrives per the docs)
+    queue_.enqueue(nullptr);
+
+    // Wait for worker to finish
+    if (worker_thread_.joinable()) { worker_thread_.join(); }
+
+    // Clean up sink config
+    auto *config = current_sinks_.load(std::memory_order_acquire);
+    delete config;
+}
+
+inline void log_line_dispatcher::dispatch(struct log_line &line)
+{
+    // Add this check
+    if (shutdown_.load(std::memory_order_relaxed))
+    {
+        // The dispatcher is shutting down or is already dead.
+        // It's no longer safe to enqueue. We must drop the log.
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+        messages_dropped_++;
+#endif
+        return;
+    }
+
+    if (line.buffer_ && (line.buffer_->len() > 0 || line.buffer_->get_kv_count() > 0))
+    {
+        // Buffer has text content and/or structured metadata
+
+        // Swap buffer - line gets fresh buffer, we get the buffer to dispatch
+        auto *buffer_to_dispatch = line.swap_buffer();
+        if (!buffer_to_dispatch)
+        {
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+            messages_dropped_++;
+#endif
+            return;
+        }
+
+        thread_local moodycamel::ProducerToken thread_local_token(queue_);
+        if (!queue_.enqueue(thread_local_token, buffer_to_dispatch))
+        {
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+            queue_enqueue_failures_++;
+#endif
+            buffer_to_dispatch->release();
+        }
+        else
+        {
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+            total_dispatched_++;
+
+            // Track max queue size
+            auto queue_size = queue_.size_approx();
+            update_atomic_max(max_queue_size_, queue_size);
+#endif
+        }
+    }
+}
+
+// Worker thread function implementation
+inline void log_line_dispatcher::worker_thread_func()
+{
+    moodycamel::ConsumerToken consumer_token(queue_);
+    log_buffer *buffers[MAX_BATCH_SIZE];
+    size_t dequeued_count;
+    bool should_shutdown = false;
+
+    while (!should_shutdown)
+    {
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+        worker_iterations_++;
+#endif
+
+        // Try to dequeue a batch of buffers
+        dequeued_count = queue_.wait_dequeue_bulk_timed(consumer_token, buffers, MAX_BATCH_SIZE, std::chrono::milliseconds(10));
+
+        // If no items after timeout, check if we should shut down
+        if (dequeued_count == 0)
+        {
+            if (shutdown_.load(std::memory_order_relaxed)) { break; }
+            continue;
+        }
+
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+        // Track batch statistics
+        update_batch_stats(dequeued_count);
+
+        // Track batch dispatch timing
+        auto dispatch_start = log_fast_timestamp();
+#endif
+
+        // Get sink config once for the batch
+        auto *config = current_sinks_.load(std::memory_order_acquire);
+
+        // Process buffers using batch processing
+        size_t buf_idx = 0;
+        while (buf_idx < dequeued_count)
+        {
+            log_buffer *buffer = buffers[buf_idx];
+
+            // Check for shutdown marker
+            if (!buffer)
+            {
+                // Process remaining buffers before shutting down
+                if (buf_idx + 1 < dequeued_count && config && !config->sinks.empty())
+                {
+                    size_t remaining_count = dequeued_count - buf_idx - 1;
+                    size_t processed       = 0;
+
+                    // Dispatch remaining buffers as batch to all sinks
+                    for (size_t i = 0; i < config->sinks.size(); ++i)
+                    {
+                        if (config->sinks[i])
+                        {
+                            size_t sink_processed = config->sinks[i]->process_batch(&buffers[buf_idx + 1], remaining_count);
+
+#ifndef NDEBUG
+                            if (i == 0) { processed = sink_processed; }
+                            else
+                            {
+                                // All sinks must process the same number of buffers
+                                assert(sink_processed == processed);
+                            }
+#else
+                            processed = sink_processed;
+#endif
+                        }
+                    }
+
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+                    // Track in-flight time for processed buffers
+                    track_inflight_times(buffers, buf_idx + 1, processed);
+#endif
+
+                    // Release all buffers (processed and unprocessed)
+                    for (size_t j = buf_idx + 1; j < dequeued_count; ++j)
+                    {
+                        if (buffers[j]) buffers[j]->release();
+                    }
+                }
+                should_shutdown = true;
+                break;
+            }
+
+            // Check for flush marker
+            if (buffer->is_flush_marker())
+            {
+                buffer->release();
+                {
+                    std::lock_guard lk(flush_mutex_);
+                    flush_done_.fetch_add(1, std::memory_order_release);
+                    flush_cv_.notify_all();
+                }
+                buf_idx++;
+                continue;
+            }
+
+            // Process batch starting from current position
+            if (config && !config->sinks.empty())
+            {
+                size_t remaining = dequeued_count - buf_idx;
+                size_t processed = 0;
+
+                // Dispatch batch to all sinks
+                for (size_t i = 0; i < config->sinks.size(); ++i)
+                {
+                    if (config->sinks[i])
+                    {
+                        size_t sink_processed = config->sinks[i]->process_batch(&buffers[buf_idx], remaining);
+
+#ifndef NDEBUG
+                        if (i == 0) { processed = sink_processed; }
+                        else
+                        {
+                            // All sinks must process the same number of buffers
+                            assert(sink_processed == processed);
+                        }
+#else
+                        processed = sink_processed;
+#endif
+                    }
+                }
+
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+                // Track in-flight time for processed buffers
+                track_inflight_times(buffers, buf_idx, processed);
+#endif
+
+                // Release processed buffers
+                for (size_t j = 0; j < processed; ++j) { buffers[buf_idx + j]->release(); }
+
+                // If no buffers were processed (all sinks are null), skip this buffer
+                if (processed == 0)
+                {
+                    buffers[buf_idx]->release();
+                    processed = 1;
+                }
+
+                buf_idx += processed;
+            }
+            else
+            {
+                // No sinks - check each buffer individually for markers
+                while (buf_idx < dequeued_count)
+                {
+                    log_buffer *buf = buffers[buf_idx];
+
+                    // Stop at markers to process them properly
+                    if (!buf || buf->is_flush_marker()) { break; }
+
+                    // Release regular buffer
+                    buf->release();
+                    buf_idx++;
+                }
+            }
+        }
+
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+        // Track dispatch time for the entire batch
+        update_dispatch_timing_stats(dispatch_start, dequeued_count);
+
+    #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
+        // Record throughput sample (throttled to avoid too many samples)
+        update_message_rate_sample();
+    #endif
+#endif
+    }
+
+    // Drain remaining buffers on shutdown using batch dequeue
+    while ((dequeued_count = queue_.try_dequeue_bulk(consumer_token, buffers, MAX_BATCH_SIZE)) > 0)
+    {
+        auto *config = current_sinks_.load(std::memory_order_acquire);
+
+        // Process buffers in batches, respecting markers even during shutdown
+        size_t buf_idx = 0;
+        while (buf_idx < dequeued_count)
+        {
+            log_buffer *buffer = buffers[buf_idx];
+
+            // Skip null buffers and flush markers during shutdown
+            if (!buffer || buffer->is_flush_marker())
+            {
+                if (buffer) buffer->release();
+                buf_idx++;
+                continue;
+            }
+
+            if (config && !config->sinks.empty())
+            {
+                // Process batch from current position
+                size_t remaining = dequeued_count - buf_idx;
+                size_t processed = 0;
+
+                // Dispatch batch to all sinks
+                for (size_t i = 0; i < config->sinks.size(); ++i)
+                {
+                    if (config->sinks[i])
+                    {
+                        size_t sink_processed = config->sinks[i]->process_batch(&buffers[buf_idx], remaining);
+
+#ifndef NDEBUG
+                        if (i == 0) { processed = sink_processed; }
+                        else
+                        {
+                            // All sinks must process the same number of buffers
+                            assert(sink_processed == processed);
+                        }
+#else
+                        processed = sink_processed;
+#endif
+                    }
+                }
+
+                // Release processed buffers
+                for (size_t j = 0; j < processed; ++j) { buffers[buf_idx + j]->release(); }
+
+                // If no buffers were processed (all sinks are null), skip this buffer
+                if (processed == 0)
+                {
+                    buffers[buf_idx]->release();
+                    processed = 1;
+                }
+
+                buf_idx += processed;
+            }
+            else
+            {
+                // No sinks - check each buffer individually for markers
+                while (buf_idx < dequeued_count)
+                {
+                    log_buffer *buf = buffers[buf_idx];
+
+                    // Stop at markers to process them properly
+                    if (!buf || buf->is_flush_marker()) { break; }
+
+                    // Release regular buffer
+                    buf->release();
+                    buf_idx++;
+                }
+            }
+        }
+    }
+}
+
+// Helper to update sink configuration
+inline void log_line_dispatcher::update_sink_config(std::unique_ptr<sink_config> new_config)
+{
+    auto *old_config = current_sinks_.exchange(new_config.release(), std::memory_order_acq_rel);
+
+    if (old_config)
+    {
+        // Simple but safe approach: flush to ensure worker thread is done with old config
+        // Since sink modifications are extremely rare, this is acceptable
+        flush();
+        delete old_config;
+    }
+}
+
+// Flush implementation
+inline void log_line_dispatcher::flush()
+{
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+    total_flushes_.fetch_add(1, std::memory_order_relaxed);
+#endif
+
+    auto *marker = buffer_pool::instance().acquire();
+    if (!marker) return;
+
+    marker->level_ = log_level::nolog;
+
+    const uint64_t my_seq = flush_seq_.fetch_add(1, std::memory_order_relaxed) + 1;
+    {
+        std::unique_lock lk(flush_mutex_);
+        queue_.enqueue(marker);
+        flush_cv_.wait(lk, [&] { return flush_done_.load(std::memory_order_acquire) >= my_seq; });
+    }
+}
+
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+// Get statistics implementation
+inline log_line_dispatcher::stats log_line_dispatcher::get_stats() const
+{
+    stats s;
+    s.total_dispatched       = total_dispatched_;
+    s.queue_enqueue_failures = queue_enqueue_failures_;
+    s.current_queue_size     = queue_.size_approx();
+    s.max_queue_size         = max_queue_size_.load(std::memory_order_relaxed);
+    s.total_flushes          = total_flushes_.load(std::memory_order_relaxed);
+    s.messages_dropped       = messages_dropped_;
+    s.queue_usage_percent    = (s.current_queue_size * 100.0f) / MAX_DISPATCH_QUEUE_SIZE;
+    s.worker_iterations      = worker_iterations_;
+
+    // Get active sinks count
+    auto *config   = current_sinks_.load(std::memory_order_acquire);
+    s.active_sinks = config ? config->sinks.size() : 0;
+
+    // Calculate average dispatch time
+    if (dispatch_count_for_avg_ > 0)
+    {
+        s.avg_dispatch_time_us = static_cast<double>(total_dispatch_time_us_) / dispatch_count_for_avg_;
+    }
+    else { s.avg_dispatch_time_us = 0.0; }
+
+    // Get max dispatch time
+    s.max_dispatch_time_us = max_dispatch_time_us_.load(std::memory_order_relaxed);
+
+    // Calculate uptime
+    s.uptime = log_fast_timestamp() - start_time_;
+
+    #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
+    // Calculate message rates for different windows
+    s.messages_per_second_1s  = calculate_rate_for_window(std::chrono::seconds(1));
+    s.messages_per_second_10s = calculate_rate_for_window(std::chrono::seconds(10));
+    s.messages_per_second_60s = calculate_rate_for_window(std::chrono::seconds(60));
+    #endif
+
+    // Calculate batch statistics
+    s.total_batches  = total_batches_;
+    s.max_batch_size = max_batch_size_.load(std::memory_order_relaxed);
+    if (total_batches_ > 0) { s.avg_batch_size = static_cast<double>(total_batch_messages_) / total_batches_; }
+    else { s.avg_batch_size = 0.0; }
+
+    // Calculate in-flight time statistics
+    s.min_inflight_time_us = min_inflight_time_us_.load(std::memory_order_relaxed);
+    s.max_inflight_time_us = max_inflight_time_us_.load(std::memory_order_relaxed);
+
+    // Handle case where no messages have been processed
+    if (s.min_inflight_time_us == UINT64_MAX) { s.min_inflight_time_us = 0; }
+
+    if (inflight_count_ > 0)
+    {
+        s.avg_inflight_time_us = static_cast<double>(total_inflight_time_us_) / inflight_count_;
+    }
+    else { s.avg_inflight_time_us = 0.0; }
+
+    return s;
+}
+
+// Reset statistics implementation
+inline void log_line_dispatcher::reset_stats()
+{
+    total_dispatched_       = 0;
+    queue_enqueue_failures_ = 0;
+    messages_dropped_       = 0;
+    worker_iterations_      = 0;
+    total_dispatch_time_us_ = 0;
+    dispatch_count_for_avg_ = 0;
+    total_batches_          = 0;
+    total_batch_messages_   = 0;
+    total_inflight_time_us_ = 0;
+    inflight_count_         = 0;
+    max_queue_size_.store(0, std::memory_order_relaxed);
+    total_flushes_.store(0, std::memory_order_relaxed);
+    max_dispatch_time_us_.store(0, std::memory_order_relaxed);
+    max_batch_size_.store(0, std::memory_order_relaxed);
+    min_inflight_time_us_.store(UINT64_MAX, std::memory_order_relaxed);
+    max_inflight_time_us_.store(0, std::memory_order_relaxed);
+
+    #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
+    rate_write_idx_        = 0;
+    rate_sample_count_     = 0;
+    last_rate_sample_time_ = std::chrono::steady_clock::time_point{};
+    #endif
+}
+#endif
+
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+// Helper function implementations
+
+inline void log_line_dispatcher::update_atomic_min(std::atomic<uint64_t>& atomic_val, uint64_t new_val)
+{
+    uint64_t current = atomic_val.load(std::memory_order_relaxed);
+    while (new_val < current)
+    {
+        if (atomic_val.compare_exchange_weak(current, new_val, std::memory_order_relaxed, std::memory_order_relaxed))
+        {
+            break;
+        }
+    }
+}
+
+inline void log_line_dispatcher::update_atomic_max(std::atomic<uint64_t>& atomic_val, uint64_t new_val)
+{
+    uint64_t current = atomic_val.load(std::memory_order_relaxed);
+    while (new_val > current)
+    {
+        if (atomic_val.compare_exchange_weak(current, new_val, std::memory_order_relaxed, std::memory_order_relaxed))
+        {
+            break;
+        }
+    }
+}
+
+inline void log_line_dispatcher::update_batch_stats(size_t dequeued_count)
+{
+    total_batches_++;
+    total_batch_messages_ += dequeued_count;
+    
+    // Update max batch size
+    update_atomic_max(max_batch_size_, dequeued_count);
+}
+
+inline void log_line_dispatcher::track_inflight_times(log_buffer** buffers, size_t start_idx, size_t count)
+{
+    auto now = log_fast_timestamp();
+    
+    for (size_t j = 0; j < count; ++j)
+    {
+        log_buffer *proc_buffer = buffers[start_idx + j];
+        if (proc_buffer && !proc_buffer->is_flush_marker())
+        {
+            auto inflight_us = std::chrono::duration_cast<std::chrono::microseconds>(now - proc_buffer->timestamp_).count();
+            total_inflight_time_us_ += inflight_us;
+            inflight_count_++;
+
+            // Update min/max
+            update_atomic_min(min_inflight_time_us_, static_cast<uint64_t>(inflight_us));
+            update_atomic_max(max_inflight_time_us_, static_cast<uint64_t>(inflight_us));
+        }
+    }
+}
+
+inline void log_line_dispatcher::update_dispatch_timing_stats(std::chrono::steady_clock::time_point start, size_t message_count)
+{
+    auto dispatch_end = log_fast_timestamp();
+    auto dispatch_us = std::chrono::duration_cast<std::chrono::microseconds>(dispatch_end - start).count();
+    total_dispatch_time_us_ += dispatch_us;
+    dispatch_count_for_avg_ += message_count;
+
+    // Update max dispatch time (per buffer average for batch)
+    auto per_buffer_us = dispatch_us / message_count;
+    update_atomic_max(max_dispatch_time_us_, static_cast<uint64_t>(per_buffer_us));
+}
+
+#ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
+inline void log_line_dispatcher::update_message_rate_sample()
+{
+    auto now = log_fast_timestamp();
+    if (now - last_rate_sample_time_ >= RATE_SAMPLE_INTERVAL)
+    {
+        rate_samples_[rate_write_idx_] = {now, total_dispatched_};
+        rate_write_idx_ = (rate_write_idx_ + 1) % RATE_WINDOW_SIZE;
+        if (rate_sample_count_ < RATE_WINDOW_SIZE) rate_sample_count_++;
+        last_rate_sample_time_ = now;
+    }
+}
+#endif
+#endif // LOG_COLLECT_DISPATCHER_METRICS
+
+} // namespace slwoggy
