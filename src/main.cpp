@@ -6,6 +6,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <random>
 #include "log.hpp"
 #include "log_dispatcher.hpp"
 #include "log_sinks.hpp"
@@ -102,11 +103,31 @@ int main(int argc, char *argv[])
     bool start_signal = false;
     std::vector<std::thread> threads;
     
-    // Create padding string for message size
-    std::string padding;
-    if (message_size > 30) {
-        padding = std::string(message_size - 30, 'X');
+    // Generate array of random message sizes for more realistic testing
+    constexpr size_t RANDOM_SIZE_COUNT = 1000;
+    std::vector<int> random_sizes(RANDOM_SIZE_COUNT);
+    {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        // Create distribution: 80% small (10-50 bytes), 20% larger (up to message_size)
+        std::discrete_distribution<> size_type({80, 20});
+        std::uniform_int_distribution<> small_size(10, 50);
+        std::uniform_int_distribution<> large_size(51, message_size);
+        
+        for (size_t i = 0; i < RANDOM_SIZE_COUNT; ++i) {
+            if (size_type(gen) == 0) {
+                random_sizes[i] = small_size(gen);
+            } else {
+                random_sizes[i] = large_size(gen);
+            }
+        }
     }
+    
+    // Pre-create a large padding buffer to avoid allocations
+    constexpr size_t MAX_PADDING = 10000;
+    char padding_buffer[MAX_PADDING];
+    std::memset(padding_buffer, 'X', MAX_PADDING);
+    padding_buffer[MAX_PADDING - 1] = '\0';  // Ensure null termination
 
     // Thread function
     auto thread_func = [&](int thread_id) {
@@ -116,18 +137,34 @@ int main(int argc, char *argv[])
             start_cv.wait(lock, [&] { return start_signal; });
         }
 
-        // Blast logs
+        // Blast logs with variable sizes
         for (int i = 0; i < messages_per_thread; ++i)
         {
-            if (padding.empty())
-            {
-                //LOG(info).add("i", i).add("tid", thread_id).printf("Thread %d iteration %d", thread_id, i);
-                LOG(info).printf("Thread %d iteration %d", thread_id, i);
+            // Get size for this message from pre-generated array
+            int target_size = random_sizes[i % RANDOM_SIZE_COUNT];
+            
+            // Base message is ~20-25 chars: "Thread X iteration Y"
+            const int base_size = 25;
+            
+            if (target_size <= base_size) {
+                // Small message - no padding
+                auto l = LOG(info);
+                l.printf("T%d i%d", thread_id, i);
+                l.add("thread_id", thread_id);
+                l.add("iteration", i);
             }
-            else
-            {
-                //LOG(info).add("tid", thread_id).add("i", i).printf("Thread %d iteration %d %s", thread_id, i, padding.c_str());
-                LOG(info).printf("Thread %d iteration %d %s", thread_id, i, padding.c_str());
+            else {
+                // Add padding to reach target size using printf precision
+                int pad_size = target_size - base_size;
+                if (pad_size > MAX_PADDING - 1) pad_size = MAX_PADDING - 1;
+
+                // Use %.*s to specify exact number of characters from padding buffer
+                auto l = LOG(info);
+                
+                l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
+
+                l.add("iteration", i);
+                l.add("thread_id", thread_id);
             }
         }
     };
@@ -220,8 +257,46 @@ int main(int argc, char *argv[])
         std::cerr << "  Total acquires: " << pool_stats.total_acquires << "\n";
         std::cerr << "  Total releases: " << pool_stats.total_releases << "\n";
         std::cerr << "  Acquire failures: " << pool_stats.acquire_failures << "\n";
+        
+        std::cerr << "Buffer Area Usage:\n";
+        if (pool_stats.metadata_usage.sample_count > 0) {
+            std::cerr << "  Metadata (header):\n";
+            std::cerr << "    Min: " << pool_stats.metadata_usage.min_bytes << " bytes\n";
+            std::cerr << "    Max: " << pool_stats.metadata_usage.max_bytes << " bytes\n";
+            std::cerr << "    Avg: " << std::fixed << std::setprecision(1) 
+                      << pool_stats.metadata_usage.avg_bytes << " bytes\n";
+            
+            std::cerr << "  Text (message):\n";
+            std::cerr << "    Min: " << pool_stats.text_usage.min_bytes << " bytes\n";
+            std::cerr << "    Max: " << pool_stats.text_usage.max_bytes << " bytes\n";
+            std::cerr << "    Avg: " << std::fixed << std::setprecision(1) 
+                      << pool_stats.text_usage.avg_bytes << " bytes\n";
+            
+            std::cerr << "  Total buffer usage:\n";
+            std::cerr << "    Min: " << pool_stats.total_usage.min_bytes << " bytes ("
+                      << std::fixed << std::setprecision(1) 
+                      << (pool_stats.total_usage.min_bytes * 100.0 / LOG_BUFFER_SIZE) << "%)\n";
+            std::cerr << "    Max: " << pool_stats.total_usage.max_bytes << " bytes ("
+                      << std::fixed << std::setprecision(1) 
+                      << (pool_stats.total_usage.max_bytes * 100.0 / LOG_BUFFER_SIZE) << "%)\n";
+            std::cerr << "    Avg: " << std::fixed << std::setprecision(1) 
+                      << pool_stats.total_usage.avg_bytes << " bytes ("
+                      << std::fixed << std::setprecision(1) 
+                      << (pool_stats.total_usage.avg_bytes * 100.0 / LOG_BUFFER_SIZE) << "%)\n";
+            std::cerr << "    Samples: " << pool_stats.total_usage.sample_count << "\n";
+        }
         std::cerr << "=========================================\n";
     }
+#endif
+
+#ifdef LOG_COLLECT_STRUCTURED_METRICS
+    auto key_stats = structured_log_key_registry::instance().get_stats();
+    std::cerr << "========== STRUCTURED LOG KEYS ==========\n";
+    std::cerr << "  Total keys: " << key_stats.key_count << "\n";
+    std::cerr << "  Max keys: " << key_stats.max_keys << "\n";
+    std::cerr << "  Usage percent: " << std::fixed << std::setprecision(1) << key_stats.usage_percent << "%\n";
+    std::cerr << "  Estimated memory: " << key_stats.estimated_memory_kb << " KB\n";
+    std::cerr << "=========================================\n";
 #endif
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS

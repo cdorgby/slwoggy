@@ -80,9 +80,9 @@ struct log_line
 
     ~log_line();
 
-    void print(std::string_view str)
+    log_line &print(std::string_view str)
     {
-        if (!buffer_) { return; }
+        if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
         if (needs_header_)
@@ -92,11 +92,12 @@ struct log_line
         }
 
         buffer_->write_with_padding(str);
+        return *this;
     }
 
-    template <typename... Args> void printf(const char *format, Args &&...args)
+    template <typename... Args> log_line &printf(const char *format, Args &&...args) &
     {
-        if (!buffer_) { return; }
+        if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
         if (needs_header_)
@@ -107,6 +108,14 @@ struct log_line
 
         // Forward to buffer's printf implementation
         buffer_->printf_with_padding(format, std::forward<Args>(args)...);
+
+        return *this;
+    }
+
+    template <typename... Args> log_line &&printf(const char *format, Args &&...args) &&
+    {
+        printf(format, std::forward<Args>(args)...);
+        return std::move(*this);
     }
 
     // Helper method that returns *this for chaining
@@ -208,7 +217,7 @@ struct log_line
      *       << "User login completed";
      * @endcode
      */
-    template <typename T> log_line &add(std::string_view key, T &&value)
+    template <typename T> log_line &add(std::string_view key, T &&value) &
     {
         if (!buffer_) return *this;
 
@@ -225,6 +234,12 @@ struct log_line
         }
 
         return *this;
+    }
+
+    template <typename T> log_line &&add(std::string_view key, T &&value) &&
+    {
+        add(key, value);
+        return std::move(*this);
     }
 
     // Swap buffer with a new one from pool, return old buffer

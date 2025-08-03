@@ -493,16 +493,17 @@ public:
         // Message
         c.key("message");
         c.string(buffer->get_message());
+        c.member();
 
         // Structured data
         auto metadata = buffer->get_metadata_adapter();
         auto iter = metadata.get_iterator();
         while (iter.has_next()) {
-            c.member();
             auto kv = iter.next();
             auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
             c.key(key_name);
             c.string(kv.value);
+            c.member();
         }
 
         c.end_object();
