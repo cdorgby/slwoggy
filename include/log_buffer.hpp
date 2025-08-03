@@ -404,7 +404,6 @@ class log_buffer_metadata_adapter
     {
         // Conservative estimate: assume formatted value won't exceed 128 bytes
         // This covers most integers, floats, and reasonable strings
-        constexpr size_t MAX_FORMATTED_SIZE = 128;
         size_t header_size                  = sizeof(uint16_t) + sizeof(uint16_t);
 
         // Check if we have enough space for headers + max formatted size
@@ -795,6 +794,18 @@ class buffer_pool
         float usage_percent;       ///< Pool usage percentage
         size_t pool_memory_kb;     ///< Total memory used by buffer pool
         uint64_t high_water_mark;  ///< Maximum buffers ever in use
+        
+        // Buffer area usage statistics
+        struct area_stats {
+            size_t min_bytes;      ///< Minimum bytes used
+            size_t max_bytes;      ///< Maximum bytes used
+            double avg_bytes;      ///< Average bytes used
+            uint64_t sample_count; ///< Number of samples
+        };
+        
+        area_stats metadata_usage;  ///< Metadata area usage stats
+        area_stats text_usage;      ///< Text area usage stats
+        area_stats total_usage;     ///< Total buffer usage stats
     };
 #endif
 
@@ -809,6 +820,21 @@ class buffer_pool
     std::atomic<uint64_t> total_releases_{0};
     std::atomic<uint64_t> buffers_in_use_{0};
     std::atomic<uint64_t> high_water_mark_{0};
+    
+    // Area usage tracking - using atomics for lock-free updates
+    std::atomic<uint64_t> metadata_total_bytes_{0};
+    std::atomic<uint64_t> metadata_min_bytes_{UINT64_MAX};
+    std::atomic<uint64_t> metadata_max_bytes_{0};
+    
+    std::atomic<uint64_t> text_total_bytes_{0};
+    std::atomic<uint64_t> text_min_bytes_{UINT64_MAX};
+    std::atomic<uint64_t> text_max_bytes_{0};
+    
+    std::atomic<uint64_t> total_bytes_used_{0};
+    std::atomic<uint64_t> total_min_bytes_{UINT64_MAX};
+    std::atomic<uint64_t> total_max_bytes_{0};
+    
+    std::atomic<uint64_t> usage_samples_{0};
 #endif
 
     buffer_pool()
@@ -863,15 +889,83 @@ class buffer_pool
     {
         if (buffer)
         {
-            available_buffers_.enqueue(buffer);
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
             total_releases_.fetch_add(1, std::memory_order_relaxed);
             buffers_in_use_.fetch_sub(1, std::memory_order_relaxed);
 #endif
+            available_buffers_.enqueue(buffer);
         }
     }
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
+public:
+    /**
+     * @brief Track buffer usage statistics
+     * @param buffer Buffer being released back to pool
+     */
+    void track_buffer_usage(const log_buffer* buffer)
+    {
+        if (!buffer) return;
+        
+        // Skip flush markers as they're not real log messages
+        if (buffer->is_flush_marker()) return;
+        
+        // Get usage sizes
+        size_t metadata_bytes = buffer->len_meta();
+        size_t text_bytes = buffer->len();
+        size_t total_bytes = metadata_bytes + text_bytes;
+        
+        // Skip completely empty buffers (no content was ever written)
+        if (total_bytes == 0) return;
+        
+        // Update totals for averaging
+        metadata_total_bytes_.fetch_add(metadata_bytes, std::memory_order_relaxed);
+        text_total_bytes_.fetch_add(text_bytes, std::memory_order_relaxed);
+        total_bytes_used_.fetch_add(total_bytes, std::memory_order_relaxed);
+        usage_samples_.fetch_add(1, std::memory_order_relaxed);
+        
+        // Update min/max for metadata
+        update_min(metadata_min_bytes_, metadata_bytes);
+        update_max(metadata_max_bytes_, metadata_bytes);
+        
+        // Update min/max for text
+        update_min(text_min_bytes_, text_bytes);
+        update_max(text_max_bytes_, text_bytes);
+        
+        // Update min/max for total
+        update_min(total_min_bytes_, total_bytes);
+        update_max(total_max_bytes_, total_bytes);
+    }
+    
+    void update_min(std::atomic<uint64_t>& min_var, uint64_t value)
+    {
+        uint64_t current_min = min_var.load(std::memory_order_relaxed);
+        while (value < current_min)
+        {
+            if (min_var.compare_exchange_weak(current_min, value, 
+                                              std::memory_order_relaxed,
+                                              std::memory_order_relaxed))
+            {
+                break;
+            }
+        }
+    }
+    
+    void update_max(std::atomic<uint64_t>& max_var, uint64_t value)
+    {
+        uint64_t current_max = max_var.load(std::memory_order_relaxed);
+        while (value > current_max)
+        {
+            if (max_var.compare_exchange_weak(current_max, value,
+                                              std::memory_order_relaxed,
+                                              std::memory_order_relaxed))
+            {
+                break;
+            }
+        }
+    }
+
+public:
     /**
      * @brief Get current buffer pool statistics
      * @return Statistics snapshot
@@ -888,6 +982,37 @@ class buffer_pool
         s.usage_percent     = (s.in_use_buffers * 100.0f) / s.total_buffers;
         s.pool_memory_kb    = (s.total_buffers * LOG_BUFFER_SIZE) / 1024;
         s.high_water_mark   = high_water_mark_.load(std::memory_order_relaxed);
+        
+        // Populate area usage stats
+        uint64_t samples = usage_samples_.load(std::memory_order_relaxed);
+        if (samples > 0)
+        {
+            // Metadata usage
+            s.metadata_usage.sample_count = samples;
+            s.metadata_usage.min_bytes = metadata_min_bytes_.load(std::memory_order_relaxed);
+            s.metadata_usage.max_bytes = metadata_max_bytes_.load(std::memory_order_relaxed);
+            s.metadata_usage.avg_bytes = static_cast<double>(metadata_total_bytes_.load(std::memory_order_relaxed)) / samples;
+            
+            // Text usage
+            s.text_usage.sample_count = samples;
+            s.text_usage.min_bytes = text_min_bytes_.load(std::memory_order_relaxed);
+            s.text_usage.max_bytes = text_max_bytes_.load(std::memory_order_relaxed);
+            s.text_usage.avg_bytes = static_cast<double>(text_total_bytes_.load(std::memory_order_relaxed)) / samples;
+            
+            // Total usage
+            s.total_usage.sample_count = samples;
+            s.total_usage.min_bytes = total_min_bytes_.load(std::memory_order_relaxed);
+            s.total_usage.max_bytes = total_max_bytes_.load(std::memory_order_relaxed);
+            s.total_usage.avg_bytes = static_cast<double>(total_bytes_used_.load(std::memory_order_relaxed)) / samples;
+        }
+        else
+        {
+            // No samples yet - initialize to zero
+            s.metadata_usage = {};
+            s.text_usage = {};
+            s.total_usage = {};
+        }
+        
         return s;
     }
 
@@ -900,6 +1025,21 @@ class buffer_pool
         acquire_failures_.store(0, std::memory_order_relaxed);
         total_releases_.store(0, std::memory_order_relaxed);
         // Note: don't reset buffers_in_use_ or high_water_mark_ as they reflect current state
+        
+        // Reset area usage stats
+        metadata_total_bytes_.store(0, std::memory_order_relaxed);
+        metadata_min_bytes_.store(UINT64_MAX, std::memory_order_relaxed);
+        metadata_max_bytes_.store(0, std::memory_order_relaxed);
+        
+        text_total_bytes_.store(0, std::memory_order_relaxed);
+        text_min_bytes_.store(UINT64_MAX, std::memory_order_relaxed);
+        text_max_bytes_.store(0, std::memory_order_relaxed);
+        
+        total_bytes_used_.store(0, std::memory_order_relaxed);
+        total_min_bytes_.store(UINT64_MAX, std::memory_order_relaxed);
+        total_max_bytes_.store(0, std::memory_order_relaxed);
+        
+        usage_samples_.store(0, std::memory_order_relaxed);
     }
 #endif
 };
@@ -908,7 +1048,11 @@ inline void log_buffer::release()
 {
     if (ref_count_.fetch_sub(1, std::memory_order_acq_rel) == 1)
     {
-        // Last reference, reset buffer before returning to pool
+        // Last reference - track usage before reset
+#ifdef LOG_COLLECT_BUFFER_POOL_METRICS
+        buffer_pool::instance().track_buffer_usage(this);
+#endif
+        // Reset buffer before returning to pool
         reset();
         buffer_pool::instance().release(this);
     }

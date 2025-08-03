@@ -342,6 +342,10 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 } // namespace std
 
 
+#ifndef SOURCE_FILE_NAME
+// Fallback to __FILE__ if SOURCE_FILE_NAME is not defined
+#define SOURCE_FILE_NAME __FILE__
+#endif
 /**
  * @brief Creates a log line with specified level and automatic source location.
  *
