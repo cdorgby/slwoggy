@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
     int messages_per_thread = 1000000;
     int message_size = 50;
     std::string sink_type = "json";
-    std::string output_file = "/tmp/log.txt";
+    std::string output_file = "/dev/null";
     bool show_detailed_stats = false;
 
     // Parse command line arguments
@@ -135,7 +135,6 @@ int main(int argc, char *argv[])
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back(thread_func, i);
     }
-    
 
     // Give threads time to reach wait state
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
