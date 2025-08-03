@@ -15,16 +15,18 @@
 
 namespace slwoggy {
 
+
 // Buffer pool constants
-inline constexpr size_t BUFFER_POOL_SIZE        = 16 * 1024; // Number of pre-allocated buffers
+inline constexpr size_t BUFFER_POOL_SIZE        = 32 * 1024; // Number of pre-allocated buffers
 inline constexpr size_t LOG_SINK_BUFFER_SIZE    = 64 * 1024; // Intermediate buffer for batching buffers for writes
-inline constexpr size_t MAX_BATCH_SIZE          = 16 * 1024; // Maximum buffers to dequeue in one batch
-inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 8 * 1024;  // Maximum size of the dispatch queue
+inline constexpr size_t MAX_BATCH_SIZE          = 4 * 1024;  // Number of buffer pulled from the queue during dispatch
+inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 32 * 1024; // Max size of buffers waiting to be processed by the
+                                                             // dispatcher
 
 // Log buffer constants
 inline constexpr size_t LOG_BUFFER_SIZE       = 2048;
-inline constexpr size_t METADATA_RESERVE      = 256;       // Reserve bytes for structured metadata
-inline constexpr uint32_t MAX_STRUCTURED_KEYS = 256;       // Maximum structured keys
+inline constexpr size_t METADATA_RESERVE      = 256; // Reserve bytes for structured metadata
+inline constexpr uint32_t MAX_STRUCTURED_KEYS = 256; // Maximum structured keys
 
 // JSON formatting constants
 inline  constexpr size_t UNICODE_ESCAPE_SIZE   = 7;   // \uXXXX + null terminator
