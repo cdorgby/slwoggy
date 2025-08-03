@@ -156,4 +156,19 @@ public:
     }
 };
 
+class discard_writer
+{
+  public:
+    discard_writer() = default;
+
+    // Copy constructor
+    discard_writer(const discard_writer &) = default;
+
+    // Copy assignment
+    discard_writer &operator=(const discard_writer &) = default;
+
+    // Write method that does nothing
+    ssize_t write(const char *, size_t) const { return 0; }
+};
+
 } // namespace slwoggy

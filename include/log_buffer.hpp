@@ -199,6 +199,11 @@ struct structured_log_key_registry
      *
      * @note This method uses a thread-local cache to avoid lock contention.
      *       The fast path (cache hit) requires no locking at all.
+     *
+     * @warning Memory usage: Each thread that logs structured data will allocate
+     *          approximately (MAX_STRUCTURED_KEYS * average_key_length) bytes
+     *          for its thread-local cache. With the default MAX_STRUCTURED_KEYS=256,
+     *          this is typically 2-4KB per thread.
      */
     uint16_t get_or_register_key(const std::string &key)
     {

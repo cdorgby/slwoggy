@@ -287,6 +287,8 @@
  * - Queue growth: Worker thread may be CPU starved or sinks too slow
  * - Metadata drops: Reduce metadata size or increase METADATA_RESERVE
  * - Key registry full: Audit key usage, use consistent key names
+ * - Thread-local cache memory: Each thread logging structured data uses
+ *   ~2-4KB for key caching (scales with thread count)
  *
  * Statistics are designed for production use with minimal overhead:
  * - Single-writer counters avoid atomic operations where possible

@@ -11,6 +11,7 @@
 #include <mutex>
 #include <cstring>
 #include "log_types.hpp"
+#include "log_utils.hpp"
 
 namespace slwoggy {
 
@@ -172,28 +173,10 @@ struct log_site_registry
 
         if (has_wildcard)
         {
-            // Simple wildcard matching
-            bool starts_with = (file_pattern.back() == '*');
-            bool ends_with   = (file_pattern.front() == '*');
-
-            std::string pattern = file_pattern;
-            if (starts_with) pattern.pop_back();
-            if (ends_with) pattern.erase(0, 1);
-
+            // Use common wildcard matching utility
             for (auto &site : sites())
             {
-                std::string site_file(site.file);
-                bool match = false;
-
-                if (starts_with && ends_with) { match = (site_file.find(pattern) != std::string::npos); }
-                else if (starts_with) { match = (site_file.substr(0, pattern.length()) == pattern); }
-                else if (ends_with)
-                {
-                    match = (site_file.length() >= pattern.length() &&
-                             site_file.substr(site_file.length() - pattern.length()) == pattern);
-                }
-
-                if (match)
+                if (detail::wildcard_match(site.file, file_pattern))
                 {
                     site.min_level = level;
                     count++;

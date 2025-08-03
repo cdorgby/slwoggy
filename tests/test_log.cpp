@@ -1,8 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include "log.hpp"
-#include "log_buffer.hpp"
-#include "log_sink.hpp"
 #include <thread>
 #include <vector>
 #include <atomic>

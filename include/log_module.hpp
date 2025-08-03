@@ -18,6 +18,7 @@
 #include <algorithm>
 
 #include "log_types.hpp"
+#include "log_utils.hpp"
 
 namespace slwoggy {
 
@@ -269,29 +270,14 @@ class log_module_registry
                     // Wildcard matching - get all modules and match pattern
                     auto modules = get_all_modules();
 
-                    // Simple wildcard matching
-                    bool starts_with = (module_pattern.back() == '*');
-                    bool ends_with   = (module_pattern.front() == '*');
-
-                    std::string pattern = module_pattern;
-                    if (starts_with) pattern.pop_back();
-                    if (ends_with) pattern.erase(0, 1);
-
+                    // Use common wildcard matching utility
                     for (const auto *module : modules)
                     {
                         if (!module) continue;
-                        std::string module_name(module->name);
-
-                        bool match = false;
-                        if (starts_with && ends_with) { match = (module_name.find(pattern) != std::string::npos); }
-                        else if (starts_with) { match = (module_name.substr(0, pattern.length()) == pattern); }
-                        else if (ends_with)
-                        {
-                            match = (module_name.length() >= pattern.length() &&
-                                     module_name.substr(module_name.length() - pattern.length()) == pattern);
+                        
+                        if (detail::wildcard_match(module->name, module_pattern)) {
+                            set_module_level(module->name, level);
                         }
-
-                        if (match) { set_module_level(module->name, level); }
                     }
                 }
                 else

@@ -38,11 +38,11 @@ inline std::shared_ptr<log_sink> make_writev_file_sink(const std::string_view &f
     );
 }
 
-inline std::shared_ptr<log_sink> make_json_sink()
+inline std::shared_ptr<log_sink> make_json_sink(const std::string_view &filename)
 {
     return std::make_shared<log_sink>(
         json_formatter{true, true},
-        file_writer{STDOUT_FILENO}
+        file_writer{std::string(filename)}
     );
 }
 

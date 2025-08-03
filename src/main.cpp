@@ -8,6 +8,7 @@
 #include <cstring>
 #include "log.hpp"
 #include "log_dispatcher.hpp"
+#include "log_sinks.hpp"
 
 using namespace slwoggy;
 
@@ -19,7 +20,7 @@ void print_usage(const char* prog_name) {
               << "  -t <threads>      Number of threads (default: 5)\n"
               << "  -m <messages>     Messages per thread (default: 1000000)\n"
               << "  -s <size>         Message size in bytes (default: 50)\n"
-              << "  -w <sink>         Sink type: raw, writev, stdout (default: writev)\n"
+              << "  -w <sink>         Sink type: raw, writev, json, stdout (default: writev)\n"
               << "  -f <file>         Output file (default: /tmp/log.txt)\n"
               << "  -d                Show detailed statistics\n"
               << "  -h                Show this help\n";
@@ -31,7 +32,7 @@ int main(int argc, char *argv[])
     int num_threads = 5;
     int messages_per_thread = 1000000;
     int message_size = 50;
-    std::string sink_type = "stdout";
+    std::string sink_type = "json";
     std::string output_file = "/tmp/log.txt";
     bool show_detailed_stats = false;
 
@@ -85,6 +86,8 @@ int main(int argc, char *argv[])
         log_line_dispatcher::instance().add_sink(make_raw_file_sink(output_file));
     } else if (sink_type == "writev") {
         log_line_dispatcher::instance().add_sink(make_writev_file_sink(output_file));
+    } else if (sink_type == "json") {
+        log_line_dispatcher::instance().add_sink(make_json_sink(output_file));
     } else if (sink_type == "stdout") {
         // Use the default stdout sink
     } else {
@@ -118,11 +121,13 @@ int main(int argc, char *argv[])
         {
             if (padding.empty())
             {
-                LOG(info).add("i", i).add("tid", thread_id).printf("Thread %d iteration %d", thread_id, i);
+                //LOG(info).add("i", i).add("tid", thread_id).printf("Thread %d iteration %d", thread_id, i);
+                LOG(info).printf("Thread %d iteration %d", thread_id, i);
             }
             else
             {
-                LOG(info).add("tid", thread_id).add("i", i).printf("Thread %d iteration %d %s", thread_id, i, padding.c_str());
+                //LOG(info).add("tid", thread_id).add("i", i).printf("Thread %d iteration %d %s", thread_id, i, padding.c_str());
+                LOG(info).printf("Thread %d iteration %d %s", thread_id, i, padding.c_str());
             }
         }
     };

@@ -96,47 +96,13 @@ struct log_line_dispatcher
     void flush();                         // Flush pending logs
     void worker_thread_func();            // Worker thread function
 
-private:
-    static log_line_dispatcher*& get_instance_ptr()
-    {
-        static log_line_dispatcher* instance_ptr = nullptr;
-        return instance_ptr;
-    }
-
 public:
     static log_line_dispatcher &instance()
     {
-        auto& ptr = get_instance_ptr();
-        if (!ptr) {
-            ptr = new log_line_dispatcher();
-        }
-        return *ptr;
+        static log_line_dispatcher instance_;
+        return instance_;
     }
     
-    /**
-     * @brief Shutdown the dispatcher and wait for all logs to be processed
-     * 
-     * This method will:
-     * 1. Stop accepting new logs
-     * 2. Flush all pending logs  
-     * 3. Shutdown the worker thread
-     * 4. Clean up resources
-     * 
-     * After shutdown, the next call to instance() will create a new dispatcher.
-     * 
-     * @warning The caller must ensure no other threads are using the dispatcher
-     *          during shutdown. This is not thread-safe with concurrent instance() calls.
-     * 
-     * @note This method blocks until shutdown is complete
-     */
-    static void shutdown()
-    {
-        auto& ptr = get_instance_ptr();
-        if (ptr) {
-            delete ptr;
-            ptr = nullptr;
-        }
-    }
 
     constexpr auto start_time() const noexcept { return start_time_; }
     constexpr auto start_time_us() const noexcept { return start_time_us_; }

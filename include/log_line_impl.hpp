@@ -70,7 +70,7 @@ inline size_t log_line::write_header()
 
 } // namespace slwoggy
 
-namespace std {
+namespace {
 
 // our own endl for log_line
 inline slwoggy::log_line &endl(slwoggy::log_line &line)
