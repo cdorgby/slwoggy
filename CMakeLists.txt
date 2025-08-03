@@ -75,9 +75,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Profile")
     message(STATUS "Frame pointers preserved for accurate profiling")
 endif()
 
-# Project display name for installers/packages
-set(PROJECT_DISPLAY_NAME "slwoggy")
-
 # Generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -129,15 +126,11 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 # Platform-specific settings
 if(WIN32)
     # Windows-specific settings
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        SUFFIX ".exe"
-    )
     if(MINGW)
         target_link_libraries(${PROJECT_NAME} -static-libgcc -static-libstdc++)
     endif()
 elseif(APPLE)
-    # macOS-specific settings
-    target_link_libraries(${PROJECT_NAME} "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
+    # macOS-specific settings - no special frameworks needed for this test app
 elseif(UNIX)
     # Linux-specific settings
     target_link_libraries(${PROJECT_NAME} m pthread dl)
@@ -172,70 +165,10 @@ include(Catch)
 # Add tests subdirectory
 add_subdirectory(tests)
 
-# Installation rules
-if(APPLE)
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        MACOSX_BUNDLE TRUE
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.${PROJECT_NAME}"
-        MACOSX_BUNDLE_BUNDLE_NAME "${PROJECT_DISPLAY_NAME}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
-        MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
-    )
-    
-    # Install bundle
-    install(TARGETS ${PROJECT_NAME}
-        BUNDLE DESTINATION .
-        RUNTIME DESTINATION bin
-    )
-else()
-    # Install executable
-    install(TARGETS ${PROJECT_NAME}
-        RUNTIME DESTINATION bin
-    )
-endif()
-
-# CPack configuration
-set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
-set(CPACK_PACKAGE_VENDOR "Example Company")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "C++20 logging library")
-set(CPACK_PACKAGE_VERSION_MAJOR "1")
-set(CPACK_PACKAGE_VERSION_MINOR "0")
-set(CPACK_PACKAGE_VERSION_PATCH "0")
-set(CPACK_PACKAGE_CONTACT "your-email@example.com")
-
-# Platform-specific packaging
-if(WIN32)
-    # Windows installer
-    set(CPACK_GENERATOR "NSIS;ZIP")
-    set(CPACK_NSIS_DISPLAY_NAME "${PROJECT_DISPLAY_NAME}")
-    set(CPACK_NSIS_PACKAGE_NAME "${PROJECT_DISPLAY_NAME}")
-    set(CPACK_NSIS_CREATE_ICONS_EXTRA
-        "CreateShortCut '$SMPROGRAMS\\\\$STARTMENU_FOLDER\\\\${PROJECT_DISPLAY_NAME}.lnk' '$INSTDIR\\\\bin\\\\${PROJECT_NAME}.exe'"
-    )
-    set(CPACK_NSIS_DELETE_ICONS_EXTRA
-        "Delete '$SMPROGRAMS\\\\$START_MENU\\\\${PROJECT_DISPLAY_NAME}.lnk'"
-    )
-elseif(APPLE)
-    # macOS bundle
-    set(CPACK_GENERATOR "DragNDrop")
-    set(CPACK_DMG_VOLUME_NAME "${PROJECT_DISPLAY_NAME}")
-    set(CPACK_DMG_FORMAT "UDZO")
-elseif(UNIX)
-    # Linux packages
-    set(CPACK_GENERATOR "DEB;RPM;TGZ")
-    
-    # DEB specific
-    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
-    set(CPACK_DEBIAN_PACKAGE_SECTION "libs")
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc1")
-    
-    # RPM specific
-    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-    set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
-    set(CPACK_RPM_PACKAGE_REQUIRES "glibc, libstdc++, libgcc")
-endif()
-
-include(CPack)
+# Simple installation rule - just install the executable
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION bin
+)
 
 # Amalgamation target
 add_custom_target(amalgamation

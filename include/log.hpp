@@ -19,13 +19,14 @@
  *
  * Basic Usage:
  * @code
+ * // The logger starts with a default stdout sink, so this works immediately:
+ * LOG(info) << "Application started";
  *
  * // Preferred: Modern C++20 format style
  * LOG(warn).format("Temperature {}°C exceeds threshold {}°C", temp, max_temp);
  * LOG(info).format("User {} logged in from {}", username, ip_address);
  *
  * // Stream style with operator<<
- * LOG(info) << "Application started";
  * LOG(debug) << "Processing " << count << " items from " << source;
  * LOG(error) << "Failed to connect: " << error_msg;
  *
@@ -88,6 +89,23 @@
  *
  * // Find specific log site
  * auto* site = log_site_registry::find_site("main.cpp", 42);
+ * @endcode
+ *
+ * Sink Configuration:
+ * @code
+ * // By default, logs go to stdout. No configuration needed:
+ * LOG(info) << "This appears on stdout immediately";
+ * 
+ * // To use a custom sink, the first add_sink() replaces the default:
+ * log_line_dispatcher::instance().add_sink(make_raw_file_sink("/var/log/app.log"));
+ * 
+ * // Now logs go to the file instead of stdout
+ * LOG(info) << "This goes to the file";
+ * 
+ * // Add additional sinks (they append, not replace):
+ * log_line_dispatcher::instance().add_sink(make_json_sink());
+ * 
+ * // Now logs go to both the file and stdout (as JSON)
  * @endcode
  *
  * Log Levels (in order of severity):
@@ -283,16 +301,17 @@
 #include <format>
 #include <memory>
 #include <sys/types.h>
-#include <unistd.h> // For write() and STDOUT_FILENO
+#include <unistd.h>
 #include <fcntl.h>
 
-#include "log_types.hpp"  // IWYU pragma: keep
-#include "log_site.hpp"   // IWYU pragma: keep
-#include "log_module.hpp" // IWYU pragma: keep
-#include "log_buffer.hpp" // IWYU pragma: keep
-#include "log_sink.hpp"
-#include "log_formatters.hpp"
-#include "log_writers.hpp"
+#include "log_types.hpp"      // IWYU pragma: keep
+#include "log_site.hpp"       // IWYU pragma: keep
+#include "log_module.hpp"     // IWYU pragma: keep
+#include "log_buffer.hpp"     // IWYU pragma: keep
+#include "log_sink.hpp"       // IWYU pragma: keep
+#include "log_formatters.hpp" // IWYU pragma: keep
+#include "log_writers.hpp"    // IWYU pragma: keep
+#include "log_sinks.hpp"      // IWYU pragma: keep
 #include "log_version.hpp"    // IWYU pragma: keep
 #include "log_line.hpp"       // IWYU pragma: keep
 #include "log_dispatcher.hpp" // IWYU pragma: keep
@@ -320,24 +339,6 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 };
 } // namespace std
 
-namespace slwoggy {
-
-inline log_sink make_stdout_sink()
-{
-    return log_sink{
-        raw_formatter{true, true},
-        file_writer{STDOUT_FILENO}
-    };
-}
-
-inline log_sink make_json_sink()
-{
-    return log_sink{
-        json_formatter{true, true},
-        file_writer{STDOUT_FILENO}
-    };
-}
-} // namespace slwoggy
 
 /**
  * @brief Creates a log line with specified level and automatic source location.

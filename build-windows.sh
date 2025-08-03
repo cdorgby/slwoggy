@@ -50,5 +50,3 @@ else
 fi
 
 make -j$CORES
-
-echo "Windows build complete! Binary at: build/windows/bin/RaylibHelloWorld.exe"

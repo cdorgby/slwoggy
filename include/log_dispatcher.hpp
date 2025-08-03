@@ -1,4 +1,17 @@
 
+/**
+ * @file log_dispatcher.hpp
+ * @brief Asynchronous log message dispatcher implementation
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ * 
+ * The log dispatcher initializes with a default stdout sink for convenience.
+ * This default sink is automatically replaced when the first sink is added
+ * via add_sink(). Calls to set_sink() or remove_sink() also disable the
+ * default sink behavior. This ensures logs are visible by default while
+ * allowing full customization when needed.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -83,10 +96,46 @@ struct log_line_dispatcher
     void flush();                         // Flush pending logs
     void worker_thread_func();            // Worker thread function
 
+private:
+    static log_line_dispatcher*& get_instance_ptr()
+    {
+        static log_line_dispatcher* instance_ptr = nullptr;
+        return instance_ptr;
+    }
+
+public:
     static log_line_dispatcher &instance()
     {
-        static log_line_dispatcher instance;
-        return instance;
+        auto& ptr = get_instance_ptr();
+        if (!ptr) {
+            ptr = new log_line_dispatcher();
+        }
+        return *ptr;
+    }
+    
+    /**
+     * @brief Shutdown the dispatcher and wait for all logs to be processed
+     * 
+     * This method will:
+     * 1. Stop accepting new logs
+     * 2. Flush all pending logs  
+     * 3. Shutdown the worker thread
+     * 4. Clean up resources
+     * 
+     * After shutdown, the next call to instance() will create a new dispatcher.
+     * 
+     * @warning The caller must ensure no other threads are using the dispatcher
+     *          during shutdown. This is not thread-safe with concurrent instance() calls.
+     * 
+     * @note This method blocks until shutdown is complete
+     */
+    static void shutdown()
+    {
+        auto& ptr = get_instance_ptr();
+        if (ptr) {
+            delete ptr;
+            ptr = nullptr;
+        }
     }
 
     constexpr auto start_time() const noexcept { return start_time_; }
@@ -113,6 +162,13 @@ struct log_line_dispatcher
         if (!current) return;
 
         auto new_config = current->copy();
+        
+        // If this is the first add_sink call and we have the default sink, replace it
+        if (has_default_sink_) {
+            new_config->sinks.clear();
+            has_default_sink_ = false;
+        }
+        
         new_config->sinks.push_back(sink);
 
         // Store new config and schedule old for deletion
@@ -142,6 +198,8 @@ struct log_line_dispatcher
         auto current = current_sinks_.load(std::memory_order_acquire);
         if (!current) return;
 
+        has_default_sink_ = false; // Clear the default sink flag
+
         auto new_config = current->copy();
         if (index >= new_config->sinks.size()) { new_config->sinks.resize(index + 1); }
         new_config->sinks[index] = sink;
@@ -154,6 +212,8 @@ struct log_line_dispatcher
         std::lock_guard<std::mutex> lock(sink_modify_mutex_);
         auto current = current_sinks_.load(std::memory_order_acquire);
         if (!current || index >= current->sinks.size()) return;
+
+        has_default_sink_ = false; // Clear the default sink flag
 
         auto new_config = current->copy();
         new_config->sinks.erase(new_config->sinks.begin() + index);
@@ -243,7 +303,8 @@ struct log_line_dispatcher
 
     // Lock-free sink access
     std::atomic<sink_config *> current_sinks_{nullptr};
-    std::mutex sink_modify_mutex_; // Only for modifications
+    std::mutex sink_modify_mutex_;
+    bool has_default_sink_{true}; // Flag to track if we still have the default stdout sink // Only for modifications
 
     // Async processing members
     moodycamel::BlockingConcurrentQueue<log_buffer *> queue_;

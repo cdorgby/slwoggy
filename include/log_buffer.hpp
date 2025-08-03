@@ -573,6 +573,7 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
 
     constexpr size_t size() const { return data_.size(); }
     constexpr size_t len() const { return write_pos_ - log_buffer_metadata_adapter::TEXT_START; }
+    constexpr size_t available() const { return size() - write_pos_; }
 
     // Get metadata length from header
     size_t len_meta() const
@@ -627,6 +628,22 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
         }
 
         return to_write;
+    }
+
+    // Append a character if there's room, otherwise replace the last character
+    void append_or_replace_last(char c)
+    {
+        if (write_pos_ < size())
+        {
+            // Room to append
+            data_[write_pos_++] = c;
+        }
+        else if (write_pos_ > log_buffer_metadata_adapter::TEXT_START)
+        {
+            // Buffer full - replace last character
+            data_[write_pos_ - 1] = c;
+        }
+        // else: no text to replace, do nothing
     }
 
     // Write string with newline padding

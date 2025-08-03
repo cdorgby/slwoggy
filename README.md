@@ -24,8 +24,14 @@ using namespace slwoggy;
 LOG_MODULE_NAME("myapp");
 
 int main() {
-    // Basic logging
+    // The logger starts with a default stdout sink, so logs are immediately visible
     LOG(info) << "Application started" << endl;
+    
+    // Optionally configure custom sinks
+    // Note: The first add_sink() call replaces the default stdout sink
+    log_line_dispatcher::instance().add_sink(make_raw_file_sink("/tmp/app.log"));
+    
+    // Now logs go to the file instead of stdout
     LOG(debug) << "Processing " << 42 << " items" << endl;
     
     // Modern C++20 formatting
@@ -43,6 +49,17 @@ int main() {
     return 0;
 }
 ```
+
+## Default Sink Behavior
+
+The logging system initializes with a default stdout sink for convenience. This ensures that logs are immediately visible without any configuration. The default sink behavior is:
+
+- **Initial state**: All logs go to stdout with raw formatting
+- **First `add_sink()` call**: Replaces the default stdout sink with your custom sink
+- **`set_sink()` or `remove_sink()` calls**: Also disable the default sink behavior
+- **Multiple sinks**: After the first sink is added, subsequent `add_sink()` calls append to the sink list
+
+This design provides a zero-configuration experience while allowing full customization when needed.
 
 ## Log Levels
 

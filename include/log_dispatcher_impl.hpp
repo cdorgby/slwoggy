@@ -2,6 +2,7 @@
 
 #include "log_line.hpp"
 #include "log_dispatcher.hpp"
+#include "log_sinks.hpp" // For make_stdout_sink
 
 namespace slwoggy
 {
@@ -17,17 +18,10 @@ inline log_line_dispatcher::log_line_dispatcher()
     last_rate_sample_time_ = log_fast_timestamp();
 #endif
 
-    // Initialize with empty sink config
+    // Initialize with default stdout sink
     auto initial_config = std::make_unique<sink_config>();
+    initial_config->sinks.push_back(make_stdout_sink());
     current_sinks_.store(initial_config.release(), std::memory_order_release);
-
-    //auto sink1 = make_stdout_sink();
-    //add_sink(std::make_shared<log_sink>(std::move(sink1)));
-    // static log_sink_file log_sink_file("/tmp/log.txt");
-    // add_sink(&log_sink_file);
-
-    // static log_sink_json log_sink_json;
-    // add_sink(&log_sink_json);
 }
 
 inline log_line_dispatcher::~log_line_dispatcher()

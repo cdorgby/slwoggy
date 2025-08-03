@@ -39,17 +39,3 @@ else
 fi
 
 make -j$CORES
-
-echo "Linux build complete! Binary at: build/linux/bin/RaylibHelloWorld"
-
-if [ "$BUILD_TYPE" = "MemCheck" ]; then
-    echo ""
-    echo "To run with sanitizers:"
-    echo "ASAN_OPTIONS=detect_leaks=1:check_initialization_order=1:strict_init_order=1 ./build/linux/bin/RaylibHelloWorld"
-elif [ "$BUILD_TYPE" = "Profile" ]; then
-    echo ""
-    echo "Profile build ready for profiling tools:"
-    echo "- Instruments: instruments -t 'Time Profiler' ./build/linux/bin/RaylibHelloWorld"
-    echo "- Sample: ./build/linux/bin/RaylibHelloWorld & sample \$! 5"
-    echo "- DTrace: sudo dtrace -n 'pid\$target::*mutex*:entry { @[probefunc] = count(); }' -p \$!"
-fi
