@@ -83,8 +83,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Compiler flags
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    # GCC-specific flags
     add_compile_options(-Wno-interference-size)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Clang-specific flags (if needed)
 endif()
 
 # Function to set per-file compile definitions
@@ -108,7 +111,12 @@ set(SOURCES
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 # Add include directories
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(${PROJECT_NAME} PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+# Link with taocpp/json
+target_link_libraries(${PROJECT_NAME} PRIVATE taocppjson)
 
 # Set per-file compile definitions
 set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
@@ -132,13 +140,13 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 if(WIN32)
     # Windows-specific settings
     if(MINGW)
-        target_link_libraries(${PROJECT_NAME} -static-libgcc -static-libstdc++)
+        target_link_libraries(${PROJECT_NAME} PRIVATE -static-libgcc -static-libstdc++)
     endif()
 elseif(APPLE)
     # macOS-specific settings - no special frameworks needed for this test app
 elseif(UNIX)
     # Linux-specific settings
-    target_link_libraries(${PROJECT_NAME} m pthread dl)
+    target_link_libraries(${PROJECT_NAME} PRIVATE m pthread dl)
 endif()
 
 # Enable testing support
@@ -154,6 +162,13 @@ FetchContent_Declare(
     GIT_TAG v3.5.0
 )
 
+# Add taocpp/json
+FetchContent_Declare(
+    taocppjson
+    GIT_REPOSITORY https://github.com/taocpp/json.git
+    GIT_TAG 1.0.0-beta.14
+)
+
 # Only fetch and build Catch2 when tests are being built
 FetchContent_GetProperties(Catch2)
 if(NOT catch2_POPULATED)
@@ -161,6 +176,16 @@ if(NOT catch2_POPULATED)
     # Add Catch2 with EXCLUDE_FROM_ALL so it's not built by default
     add_subdirectory(${catch2_SOURCE_DIR} ${catch2_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
+
+# Fetch taocpp/json (header-only library)
+FetchContent_GetProperties(taocppjson)
+if(NOT taocppjson_POPULATED)
+    FetchContent_Populate(taocppjson)
+endif()
+
+# Make taocpp/json available as a target
+add_library(taocppjson INTERFACE)
+target_include_directories(taocppjson INTERFACE ${taocppjson_SOURCE_DIR}/include)
 
 # Include Catch2's CMake utilities
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
