@@ -19,7 +19,7 @@ public:
         
         // Ensure clean state before resetting stats
         log_line_dispatcher::instance().flush();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         
         // Reset all statistics at start of test
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS

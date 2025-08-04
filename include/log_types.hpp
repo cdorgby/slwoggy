@@ -23,6 +23,10 @@ inline constexpr size_t MAX_BATCH_SIZE          = 4 * 1024;  // Number of buffer
 inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 32 * 1024; // Max size of buffers waiting to be processed by the
                                                              // dispatcher
 
+// Batching configuration constants
+inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(100); // Max time to collect a batch
+inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(10);  // Polling interval when collecting
+
 // Log buffer constants
 inline constexpr size_t LOG_BUFFER_SIZE       = 2048;
 inline constexpr size_t METADATA_RESERVE      = 256; // Reserve bytes for structured metadata
@@ -161,9 +165,8 @@ inline std::chrono::steady_clock::time_point log_fast_timestamp()
 inline std::chrono::steady_clock::time_point log_fast_timestamp()
 {
     struct timespec ts;
-    // Use CLOCK_MONOTONIC_COARSE for speed (1-4ms resolution)
-    // Change to CLOCK_MONOTONIC for microsecond precision
-    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+    // Use CLOCK_MONOTONIC for microsecond precision
+    clock_gettime(CLOCK_MONOTONIC, &ts);
 
     auto duration = std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec);
     return std::chrono::steady_clock::time_point(duration);

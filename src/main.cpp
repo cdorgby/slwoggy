@@ -149,9 +149,10 @@ int main(int argc, char *argv[])
             if (target_size <= base_size) {
                 // Small message - no padding
                 auto l = LOG(info);
-                l.printf("T%d i%d", thread_id, i);
-                l.add("thread_id", thread_id);
-                l.add("iteration", i);
+                // l.printf("T%d i%d", thread_id, i);
+                l.format("Thread {} iteration {}", thread_id, i);
+                //l.add("thread_id", thread_id);
+                //l.add("iteration", i);
             }
             else {
                 // Add padding to reach target size using printf precision
@@ -161,10 +162,11 @@ int main(int argc, char *argv[])
                 // Use %.*s to specify exact number of characters from padding buffer
                 auto l = LOG(info);
                 
-                l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
+                //l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
+                l.format("Thread {} iteration {} {}", thread_id, i, std::string_view(padding_buffer, pad_size));
 
-                l.add("iteration", i);
-                l.add("thread_id", thread_id);
+                //l.add("iteration", i);
+                //l.add("thread_id", thread_id);
             }
         }
     };
@@ -218,6 +220,7 @@ int main(int argc, char *argv[])
         
         std::cerr << "Batch Processing:\n";
         std::cerr << "  Total batches: " << dispatcher_stats.total_batches << "\n";
+        std::cerr << "  Min batch size: " << dispatcher_stats.min_batch_size << "\n";
         std::cerr << "  Avg batch size: " << std::fixed << std::setprecision(2) << dispatcher_stats.avg_batch_size << "\n";
         std::cerr << "  Max batch size: " << dispatcher_stats.max_batch_size << "\n";
         
@@ -234,6 +237,11 @@ int main(int argc, char *argv[])
         std::cerr << "  Min in-flight time: " << dispatcher_stats.min_inflight_time_us << " µs\n";
         std::cerr << "  Avg in-flight time: " << std::fixed << std::setprecision(2) << dispatcher_stats.avg_inflight_time_us << " µs\n";
         std::cerr << "  Max in-flight time: " << dispatcher_stats.max_inflight_time_us << " µs\n";
+        
+        std::cerr << "Dequeue Timing:\n";
+        std::cerr << "  Min dequeue time: " << dispatcher_stats.min_dequeue_time_us << " µs\n";
+        std::cerr << "  Avg dequeue time: " << std::fixed << std::setprecision(2) << dispatcher_stats.avg_dequeue_time_us << " µs\n";
+        std::cerr << "  Max dequeue time: " << dispatcher_stats.max_dequeue_time_us << " µs\n";
         std::cerr << "========================================\n";
     }
 #endif
