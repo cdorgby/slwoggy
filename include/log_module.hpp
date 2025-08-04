@@ -11,12 +11,12 @@
 #include <memory>
 #include <shared_mutex>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 #include <cstring>
 #include <cctype>
 #include <algorithm>
 
+#include "robin_hood.h"
 #include "log_types.hpp"
 #include "log_utils.hpp"
 
@@ -76,7 +76,7 @@ class log_module_registry
     log_module_info_detail generic_module_{"generic", GLOBAL_MIN_LOG_LEVEL};
 
     // Registry of all modules by name
-    std::unordered_map<std::string_view, std::unique_ptr<log_module_info_detail>> modules_;
+    robin_hood::unordered_map<std::string_view, std::unique_ptr<log_module_info_detail>> modules_;
     mutable std::shared_mutex mutex_; // Allow concurrent reads
 
     log_module_registry()
