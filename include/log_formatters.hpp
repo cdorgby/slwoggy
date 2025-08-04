@@ -1,11 +1,10 @@
-#pragma once
-
 /**
  * @file log_formatters.hpp
  * @brief Log message formatting implementations
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  */
+#pragma once
 
 #include <cstring>
 #include <streambuf>
@@ -16,11 +15,12 @@
 #include "log_types.hpp"
 #include "log_buffer.hpp"
 
-namespace slwoggy {
+namespace slwoggy
+{
 
 /**
  * @brief No-operation formatter that optionally copies raw buffer content
- * 
+ *
  * This formatter performs minimal processing, either copying the raw buffer
  * content as-is or just calculating sizes without copying. Useful for:
  * - Benchmarking and testing
@@ -32,10 +32,7 @@ class nop_formatter
   public:
     bool do_copy = false;
 
-    size_t calculate_size(const log_buffer *buffer) const
-    {
-        return buffer ? buffer->len() : 0;
-    }
+    size_t calculate_size(const log_buffer *buffer) const { return buffer ? buffer->len() : 0; }
 
     size_t format(const log_buffer *buffer, char *output, size_t max_size) const
     {
@@ -57,7 +54,7 @@ class nop_formatter
 class raw_formatter
 {
   public:
-    bool use_color = true;
+    bool use_color   = true;
     bool add_newline = false;
 
     size_t calculate_size(const log_buffer *buffer) const
@@ -77,16 +74,16 @@ class raw_formatter
 
         // Structured data
         auto metadata = buffer->get_metadata_adapter();
-        auto iter = metadata.get_iterator();
+        auto iter     = metadata.get_iterator();
         while (iter.has_next())
         {
-            auto kv = iter.next();
+            auto kv       = iter.next();
             auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
-            
+
             size += 1; // space
             size += key_name.size();
             size += 1; // equals
-            
+
             // Check if needs quotes
             bool needs_quotes = kv.value.find_first_of(" \t\n\r\"'") != std::string_view::npos;
             if (needs_quotes) size += 2; // quotes
@@ -98,12 +95,12 @@ class raw_formatter
         {
             size += 4; // "\033[0m"
         }
-        
+
         if (add_newline)
         {
             size += 1; // newline
         }
-        
+
         return size;
     }
 
@@ -135,32 +132,32 @@ class raw_formatter
 
         // Add structured data
         auto metadata = buffer->get_metadata_adapter();
-        auto iter = metadata.get_iterator();
+        auto iter     = metadata.get_iterator();
 
         while (iter.has_next())
         {
-            auto kv = iter.next();
+            auto kv       = iter.next();
             auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
-            
+
             if (ptr >= end) return ptr - output;
             *ptr++ = ' ';
-            
+
             if (!append(key_name)) return ptr - output;
-            
+
             if (ptr >= end) return ptr - output;
             *ptr++ = '=';
-            
+
             // Check if needs quotes
             bool needs_quotes = kv.value.find_first_of(" \t\n\r\"'") != std::string_view::npos;
-            
+
             if (needs_quotes)
             {
                 if (ptr >= end) return ptr - output;
                 *ptr++ = '"';
             }
-            
+
             if (!append(kv.value)) return ptr - output;
-            
+
             if (needs_quotes)
             {
                 if (ptr >= end) return ptr - output;
@@ -175,10 +172,7 @@ class raw_formatter
         }
 
         // Newline
-        if (add_newline && ptr < end)
-        {
-            *ptr++ = '\n';
-        }
+        if (add_newline && ptr < end) { *ptr++ = '\n'; }
 
         return ptr - output;
     }
@@ -188,7 +182,7 @@ class json_formatter
 {
   public:
     bool pretty_print = false;
-    bool add_newline = false;
+    bool add_newline  = false;
 
     size_t calculate_size(const log_buffer *buffer) const
     {
@@ -224,14 +218,17 @@ class json_formatter
 
         // Calculate timestamp size: max int64 is 19 digits + dot + 3 decimal places = 23 chars
         char timestamp_buf[32];
-        int timestamp_len = std::snprintf(timestamp_buf, sizeof(timestamp_buf), "%lld.%03lld", 
-                                         static_cast<long long>(ms), static_cast<long long>(us));
+        int timestamp_len = std::snprintf(timestamp_buf,
+                                          sizeof(timestamp_buf),
+                                          "%lld.%03lld",
+                                          static_cast<long long>(ms),
+                                          static_cast<long long>(us));
 
         // Pre-calculate sizes for all fields
-        auto text = buffer->get_message();
+        auto text            = buffer->get_message();
         size_t level_str_len = std::strlen(log_level_names[static_cast<int>(buffer->level_)]);
-        size_t file_len = buffer->file_.size();
-        
+        size_t file_len      = buffer->file_.size();
+
         // Calculate line number size
         char line_buf[16];
         int line_len = std::snprintf(line_buf, sizeof(line_buf), "%u", buffer->line_);
@@ -257,10 +254,10 @@ class json_formatter
 
         // Add k/v overhead if any
         auto metadata = buffer->get_metadata_adapter();
-        auto iter = metadata.get_iterator();
+        auto iter     = metadata.get_iterator();
         while (iter.has_next())
         {
-            auto kv = iter.next();
+            auto kv       = iter.next();
             auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
             json_size += 3; // ,"
             json_size += calculate_escaped_size(key_name);
@@ -336,11 +333,12 @@ class json_formatter
         auto us = timestamp_us % 1000;
 
         // Start with timestamp and basic fields
-        ptr += std::snprintf(ptr, end - ptr,
-                            "{\"timestamp\":%lld.%03lld,\"level\":\"%s\",\"file\":\"",
-                            static_cast<long long>(ms),
-                            static_cast<long long>(us),
-                            log_level_names[static_cast<int>(buffer->level_)]);
+        ptr += std::snprintf(ptr,
+                             end - ptr,
+                             "{\"timestamp\":%lld.%03lld,\"level\":\"%s\",\"file\":\"",
+                             static_cast<long long>(ms),
+                             static_cast<long long>(us),
+                             log_level_names[static_cast<int>(buffer->level_)]);
 
         if (ptr >= end) return ptr - output;
 
@@ -356,10 +354,10 @@ class json_formatter
 
         // Add structured data as JSON fields
         auto metadata = buffer->get_metadata_adapter();
-        auto iter = metadata.get_iterator();
+        auto iter     = metadata.get_iterator();
         while (iter.has_next())
         {
-            auto kv = iter.next();
+            auto kv       = iter.next();
             auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
 
             if (ptr + 7 >= end) return ptr - output; // Minimum space for ,"":{""
@@ -378,29 +376,25 @@ class json_formatter
         if (ptr >= end) return ptr - output;
         *ptr++ = '}';
 
-        if (add_newline && ptr < end)
-        {
-            *ptr++ = '\n';
-        }
+        if (add_newline && ptr < end) { *ptr++ = '\n'; }
 
         return ptr - output;
     }
 };
 
-
 /**
  * @brief JSON formatter using taocpp/json library
- * 
+ *
  * This formatter uses the taocpp/json library for robust JSON serialization
  * with proper escaping and Unicode handling. It maintains slwoggy's zero-allocation
  * principle by using a custom streambuf that writes directly to the output buffer.
- * 
+ *
  * Features:
  * - Leverages taocpp/json's optimized JSON serialization
  * - Supports both compact and pretty-print output
  * - Zero intermediate allocations
  * - Proper JSON escaping and Unicode handling
- * 
+ *
  * Usage:
  * @code
  * taocpp_json_formatter formatter;
@@ -408,36 +402,38 @@ class json_formatter
  * formatter.add_newline = true;   // Add newline after JSON
  * @endcode
  */
-class taocpp_json_formatter {
-private:
+class taocpp_json_formatter
+{
+  private:
     /**
      * @brief Custom streambuf that writes directly to a char buffer
-     * 
+     *
      * This streambuf implementation allows us to use taocpp/json's stream-based
      * API while maintaining zero-allocation by writing directly to the pre-allocated
      * log buffer.
      */
-    class direct_buffer_streambuf : public std::streambuf {
-    private:
-        char* begin_;
-        char* end_;
-        char* current_;
+    class direct_buffer_streambuf : public std::streambuf
+    {
+      private:
+        char *begin_;
+        char *end_;
+        char *current_;
 
-    public:
-        direct_buffer_streambuf(char* buffer, size_t size) 
-            : begin_(buffer), end_(buffer + size), current_(buffer) {
+      public:
+        direct_buffer_streambuf(char *buffer, size_t size) : begin_(buffer), end_(buffer + size), current_(buffer)
+        {
             // Set up the put area for the entire buffer
             setp(begin_, end_);
         }
 
-        size_t written() const { 
-            return pptr() - begin_; 
-        }
+        size_t written() const { return pptr() - begin_; }
 
-    protected:
+      protected:
         // Called when the buffer is full
-        int_type overflow(int_type ch) override {
-            if (ch != traits_type::eof()) {
+        int_type overflow(int_type ch) override
+        {
+            if (ch != traits_type::eof())
+            {
                 // Buffer is full, can't write more
                 return traits_type::eof();
             }
@@ -445,33 +441,29 @@ private:
         }
     };
 
-public:
+  public:
     bool pretty_print = false;
-    bool add_newline = false;
+    bool add_newline  = false;
 
     /**
      * @brief Template method that produces JSON events for a log buffer
-     * 
+     *
      * This method follows taocpp/json's producer pattern, making it reusable
      * with different consumers (size calculation, formatting, etc.)
      */
-    template<typename Consumer>
-    void produce_log_json(Consumer& c, const log_buffer* buffer) const {
+    template <typename Consumer> void produce_log_json(Consumer &c, const log_buffer *buffer) const
+    {
         c.begin_object();
 
         // Timestamp (as milliseconds.microseconds)
         c.key("timestamp");
-        auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            buffer->timestamp_.time_since_epoch()).count();
+        auto timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(buffer->timestamp_.time_since_epoch()).count();
         auto ms = timestamp_us / 1000;
         auto us = timestamp_us % 1000;
-        
+
         // Format as "123456.789" (milliseconds with 3 decimal places)
         char timestamp_buf[32];
-        int len = std::snprintf(timestamp_buf, sizeof(timestamp_buf), 
-                               "%lld.%03lld", 
-                               static_cast<long long>(ms), 
-                               static_cast<long long>(us));
+        int len = std::snprintf(timestamp_buf, sizeof(timestamp_buf), "%lld.%03lld", static_cast<long long>(ms), static_cast<long long>(us));
         c.string(std::string_view(timestamp_buf, len));
         c.member();
 
@@ -497,9 +489,10 @@ public:
 
         // Structured data
         auto metadata = buffer->get_metadata_adapter();
-        auto iter = metadata.get_iterator();
-        while (iter.has_next()) {
-            auto kv = iter.next();
+        auto iter     = metadata.get_iterator();
+        while (iter.has_next())
+        {
+            auto kv       = iter.next();
             auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
             c.key(key_name);
             c.string(kv.value);
@@ -509,49 +502,55 @@ public:
         c.end_object();
     }
 
-    size_t calculate_size(const log_buffer* buffer) const {
+    size_t calculate_size(const log_buffer *buffer) const
+    {
         if (!buffer) return 0;
 
         // We need to actually format to get exact size with taocpp/json
         // since it doesn't provide a size_consumer. We'll use a counting streambuf.
-        class counting_streambuf : public std::streambuf {
+        class counting_streambuf : public std::streambuf
+        {
             size_t count_ = 0;
-        protected:
-            int_type overflow(int_type ch) override {
-                if (ch != traits_type::eof()) {
-                    ++count_;
-                }
+
+          protected:
+            int_type overflow(int_type ch) override
+            {
+                if (ch != traits_type::eof()) { ++count_; }
                 return ch;
             }
-            std::streamsize xsputn(const char*, std::streamsize n) override {
+            std::streamsize xsputn(const char *, std::streamsize n) override
+            {
                 count_ += n;
                 return n;
             }
-        public:
+
+          public:
             size_t count() const { return count_; }
         };
 
         counting_streambuf counter;
         std::ostream stream(&counter);
-        
-        if (pretty_print) {
+
+        if (pretty_print)
+        {
             tao::json::events::to_pretty_stream consumer(stream, 2);
             produce_log_json(consumer, buffer);
-        } else {
+        }
+        else
+        {
             tao::json::events::to_stream consumer(stream);
             produce_log_json(consumer, buffer);
         }
-        
+
         stream.flush();
         size_t size = counter.count();
-        
-        if (add_newline) {
-            size += 1;
-        }
+
+        if (add_newline) { size += 1; }
         return size;
     }
 
-    size_t format(const log_buffer* buffer, char* output, size_t max_size) const {
+    size_t format(const log_buffer *buffer, char *output, size_t max_size) const
+    {
         if (!buffer || max_size == 0) return 0;
 
         // Create our custom streambuf that writes to the provided buffer
@@ -559,11 +558,14 @@ public:
         std::ostream stream(&streambuf);
 
         // Use taocpp/json's to_stream consumer
-        if (pretty_print) {
+        if (pretty_print)
+        {
             // Pretty print with 2-space indent
             tao::json::events::to_pretty_stream consumer(stream, 2);
             produce_log_json(consumer, buffer);
-        } else {
+        }
+        else
+        {
             // Compact output
             tao::json::events::to_stream consumer(stream);
             produce_log_json(consumer, buffer);
@@ -575,13 +577,10 @@ public:
         size_t written_size = streambuf.written();
 
         // Add newline if requested and there's space
-        if (add_newline && written_size < max_size) {
-            output[written_size++] = '\n';
-        }
+        if (add_newline && written_size < max_size) { output[written_size++] = '\n'; }
 
         return written_size;
     }
 };
-
 
 } // namespace slwoggy

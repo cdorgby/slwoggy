@@ -1,11 +1,10 @@
-#pragma once
-
 /**
  * @file log_buffer.hpp
  * @brief Log buffer management and structured logging support
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  */
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -25,7 +24,8 @@
 
 #include "log_types.hpp"
 
-namespace slwoggy {
+namespace slwoggy
+{
 
 // Cache line size detection
 #if defined(__cpp_lib_hardware_interference_size)
@@ -81,7 +81,7 @@ struct structured_log_key_registry
     {
         // Fast path: check thread-local cache (no lock needed)
         if (auto it = tl_cache_.key_to_id.find(key); it != tl_cache_.key_to_id.end()) { return it->second; }
-        
+
         // Medium path: check global registry with shared lock
         {
             std::shared_lock lock(mutex_);
@@ -91,7 +91,7 @@ struct structured_log_key_registry
                 return it->second;
             }
         }
-        
+
         // Need to register - now we must allocate a string
         return get_or_register_key(std::string(key));
     }
@@ -252,7 +252,6 @@ struct structured_log_key_registry
         return id;
     }
 
-
   private:
     // Thread-local cache for fast key lookups
     struct thread_cache
@@ -272,11 +271,10 @@ struct structured_log_key_registry
     // Global registry data (protected by mutex_)
     mutable std::shared_mutex mutex_;
     robin_hood::unordered_map<std::string_view, uint16_t> key_to_id_;
-    std::vector<std::string> keys_;                            // Stable storage
+    std::vector<std::string> keys_; // Stable storage
     robin_hood::unordered_map<uint16_t, std::string_view> id_to_key_;
     uint16_t next_key_id_{0};
 };
-
 
 /**
  * @brief Adapter for reading and writing structured metadata in log buffers
@@ -405,7 +403,7 @@ class log_buffer_metadata_adapter
     {
         // Conservative estimate: assume formatted value won't exceed 128 bytes
         // This covers most integers, floats, and reasonable strings
-        size_t header_size                  = sizeof(uint16_t) + sizeof(uint16_t);
+        size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
 
         // Check if we have enough space for headers + max formatted size
         if (metadata_pos_ + header_size + MAX_FORMATTED_SIZE > METADATA_RESERVE)
@@ -471,8 +469,8 @@ class log_buffer_metadata_adapter
     bool add_kv_formatted(uint16_t key_id, std::string_view value)
     {
         size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
-        size_t value_size = value.size();
-        
+        size_t value_size  = value.size();
+
         // Check exact space needed
         if (metadata_pos_ + header_size + value_size > METADATA_RESERVE)
         {
@@ -482,61 +480,61 @@ class log_buffer_metadata_adapter
 #endif
             return false;
         }
-        
+
         // Write key_id
         *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
         metadata_pos_ += sizeof(uint16_t);
-        
+
         // Write length
         *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
         metadata_pos_ += sizeof(uint16_t);
-        
+
         // Direct memcpy of string data
         if (value_size > 0)
         {
             std::memcpy(data_ + metadata_pos_, value.data(), value_size);
             metadata_pos_ += value_size;
         }
-        
+
         // Update header
         auto *header = get_header();
         header->kv_count++;
         header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
-        
+
         return true;
     }
-    
+
     // Fast-path specialization for const char*
-    bool add_kv_formatted(uint16_t key_id, const char* value)
+    bool add_kv_formatted(uint16_t key_id, const char *value)
     {
         if (!value) return add_kv_formatted(key_id, std::string_view("null"));
         return add_kv_formatted(key_id, std::string_view(value));
     }
-    
+
     // Fast-path specialization for std::string
-    bool add_kv_formatted(uint16_t key_id, const std::string& value)
+    bool add_kv_formatted(uint16_t key_id, const std::string &value)
     {
         return add_kv_formatted(key_id, std::string_view(value));
     }
-    
+
     // Fast-path specialization for integers using std::to_chars
-    template<typename IntType>
+    template <typename IntType>
     typename std::enable_if<std::is_integral_v<IntType> && !std::is_same_v<IntType, bool>, bool>::type
     add_kv_formatted_int(uint16_t key_id, IntType value)
     {
         // Stack buffer for integer conversion (max 20 chars for int64_t)
         char temp_buffer[32];
         auto [ptr, ec] = std::to_chars(temp_buffer, temp_buffer + sizeof(temp_buffer), value);
-        
+
         if (ec != std::errc())
         {
             // Fallback to fmt if to_chars fails
             return add_kv_formatted(key_id, static_cast<int64_t>(value));
         }
-        
-        size_t value_size = ptr - temp_buffer;
+
+        size_t value_size  = ptr - temp_buffer;
         size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
-        
+
         // Check exact space needed
         if (metadata_pos_ + header_size + value_size > METADATA_RESERVE)
         {
@@ -546,27 +544,27 @@ class log_buffer_metadata_adapter
 #endif
             return false;
         }
-        
+
         // Write key_id
         *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
         metadata_pos_ += sizeof(uint16_t);
-        
+
         // Write length
         *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
         metadata_pos_ += sizeof(uint16_t);
-        
+
         // Copy converted string
         std::memcpy(data_ + metadata_pos_, temp_buffer, value_size);
         metadata_pos_ += value_size;
-        
+
         // Update header
         auto *header = get_header();
         header->kv_count++;
         header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
-        
+
         return true;
     }
-    
+
     // Integer specializations - use fundamental types to avoid platform-specific duplicates
     bool add_kv_formatted(uint16_t key_id, int value) { return add_kv_formatted_int(key_id, value); }
     bool add_kv_formatted(uint16_t key_id, unsigned int value) { return add_kv_formatted_int(key_id, value); }
@@ -578,7 +576,7 @@ class log_buffer_metadata_adapter
     bool add_kv_formatted(uint16_t key_id, unsigned char value) { return add_kv_formatted_int(key_id, value); }
     bool add_kv_formatted(uint16_t key_id, short value) { return add_kv_formatted_int(key_id, value); }
     bool add_kv_formatted(uint16_t key_id, unsigned short value) { return add_kv_formatted_int(key_id, value); }
-    
+
     // Fast-path specialization for bool
     bool add_kv_formatted(uint16_t key_id, bool value)
     {
@@ -914,18 +912,19 @@ class buffer_pool
         float usage_percent;       ///< Pool usage percentage
         size_t pool_memory_kb;     ///< Total memory used by buffer pool
         uint64_t high_water_mark;  ///< Maximum buffers ever in use
-        
+
         // Buffer area usage statistics
-        struct area_stats {
+        struct area_stats
+        {
             size_t min_bytes;      ///< Minimum bytes used
             size_t max_bytes;      ///< Maximum bytes used
             double avg_bytes;      ///< Average bytes used
             uint64_t sample_count; ///< Number of samples
         };
-        
-        area_stats metadata_usage;  ///< Metadata area usage stats
-        area_stats text_usage;      ///< Text area usage stats
-        area_stats total_usage;     ///< Total buffer usage stats
+
+        area_stats metadata_usage; ///< Metadata area usage stats
+        area_stats text_usage;     ///< Text area usage stats
+        area_stats total_usage;    ///< Total buffer usage stats
     };
 #endif
 
@@ -940,20 +939,20 @@ class buffer_pool
     std::atomic<uint64_t> total_releases_{0};
     std::atomic<uint64_t> buffers_in_use_{0};
     std::atomic<uint64_t> high_water_mark_{0};
-    
+
     // Area usage tracking - using atomics for lock-free updates
     std::atomic<uint64_t> metadata_total_bytes_{0};
     std::atomic<uint64_t> metadata_min_bytes_{UINT64_MAX};
     std::atomic<uint64_t> metadata_max_bytes_{0};
-    
+
     std::atomic<uint64_t> text_total_bytes_{0};
     std::atomic<uint64_t> text_min_bytes_{UINT64_MAX};
     std::atomic<uint64_t> text_max_bytes_{0};
-    
+
     std::atomic<uint64_t> total_bytes_used_{0};
     std::atomic<uint64_t> total_min_bytes_{UINT64_MAX};
     std::atomic<uint64_t> total_max_bytes_{0};
-    
+
     std::atomic<uint64_t> usage_samples_{0};
 #endif
 
@@ -1018,74 +1017,71 @@ class buffer_pool
     }
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
-public:
+
+  public:
     /**
      * @brief Track buffer usage statistics
      * @param buffer Buffer being released back to pool
      */
-    void track_buffer_usage(const log_buffer* buffer)
+    void track_buffer_usage(const log_buffer *buffer)
     {
         if (!buffer) return;
-        
+
         // Skip flush markers as they're not real log messages
         if (buffer->is_flush_marker()) return;
-        
+
         // Get usage sizes
         size_t metadata_bytes = buffer->len_meta();
-        size_t text_bytes = buffer->len();
-        size_t total_bytes = metadata_bytes + text_bytes;
-        
+        size_t text_bytes     = buffer->len();
+        size_t total_bytes    = metadata_bytes + text_bytes;
+
         // Skip completely empty buffers (no content was ever written)
         if (total_bytes == 0) return;
-        
+
         // Update totals for averaging
         metadata_total_bytes_.fetch_add(metadata_bytes, std::memory_order_relaxed);
         text_total_bytes_.fetch_add(text_bytes, std::memory_order_relaxed);
         total_bytes_used_.fetch_add(total_bytes, std::memory_order_relaxed);
         usage_samples_.fetch_add(1, std::memory_order_relaxed);
-        
+
         // Update min/max for metadata
         update_min(metadata_min_bytes_, metadata_bytes);
         update_max(metadata_max_bytes_, metadata_bytes);
-        
+
         // Update min/max for text
         update_min(text_min_bytes_, text_bytes);
         update_max(text_max_bytes_, text_bytes);
-        
+
         // Update min/max for total
         update_min(total_min_bytes_, total_bytes);
         update_max(total_max_bytes_, total_bytes);
     }
-    
-    void update_min(std::atomic<uint64_t>& min_var, uint64_t value)
+
+    void update_min(std::atomic<uint64_t> &min_var, uint64_t value)
     {
         uint64_t current_min = min_var.load(std::memory_order_relaxed);
         while (value < current_min)
         {
-            if (min_var.compare_exchange_weak(current_min, value, 
-                                              std::memory_order_relaxed,
-                                              std::memory_order_relaxed))
-            {
-                break;
-            }
-        }
-    }
-    
-    void update_max(std::atomic<uint64_t>& max_var, uint64_t value)
-    {
-        uint64_t current_max = max_var.load(std::memory_order_relaxed);
-        while (value > current_max)
-        {
-            if (max_var.compare_exchange_weak(current_max, value,
-                                              std::memory_order_relaxed,
-                                              std::memory_order_relaxed))
+            if (min_var.compare_exchange_weak(current_min, value, std::memory_order_relaxed, std::memory_order_relaxed))
             {
                 break;
             }
         }
     }
 
-public:
+    void update_max(std::atomic<uint64_t> &max_var, uint64_t value)
+    {
+        uint64_t current_max = max_var.load(std::memory_order_relaxed);
+        while (value > current_max)
+        {
+            if (max_var.compare_exchange_weak(current_max, value, std::memory_order_relaxed, std::memory_order_relaxed))
+            {
+                break;
+            }
+        }
+    }
+
+  public:
     /**
      * @brief Get current buffer pool statistics
      * @return Statistics snapshot
@@ -1102,37 +1098,37 @@ public:
         s.usage_percent     = (s.in_use_buffers * 100.0f) / s.total_buffers;
         s.pool_memory_kb    = (s.total_buffers * LOG_BUFFER_SIZE) / 1024;
         s.high_water_mark   = high_water_mark_.load(std::memory_order_relaxed);
-        
+
         // Populate area usage stats
         uint64_t samples = usage_samples_.load(std::memory_order_relaxed);
         if (samples > 0)
         {
             // Metadata usage
             s.metadata_usage.sample_count = samples;
-            s.metadata_usage.min_bytes = metadata_min_bytes_.load(std::memory_order_relaxed);
-            s.metadata_usage.max_bytes = metadata_max_bytes_.load(std::memory_order_relaxed);
+            s.metadata_usage.min_bytes    = metadata_min_bytes_.load(std::memory_order_relaxed);
+            s.metadata_usage.max_bytes    = metadata_max_bytes_.load(std::memory_order_relaxed);
             s.metadata_usage.avg_bytes = static_cast<double>(metadata_total_bytes_.load(std::memory_order_relaxed)) / samples;
-            
+
             // Text usage
             s.text_usage.sample_count = samples;
-            s.text_usage.min_bytes = text_min_bytes_.load(std::memory_order_relaxed);
-            s.text_usage.max_bytes = text_max_bytes_.load(std::memory_order_relaxed);
+            s.text_usage.min_bytes    = text_min_bytes_.load(std::memory_order_relaxed);
+            s.text_usage.max_bytes    = text_max_bytes_.load(std::memory_order_relaxed);
             s.text_usage.avg_bytes = static_cast<double>(text_total_bytes_.load(std::memory_order_relaxed)) / samples;
-            
+
             // Total usage
             s.total_usage.sample_count = samples;
-            s.total_usage.min_bytes = total_min_bytes_.load(std::memory_order_relaxed);
-            s.total_usage.max_bytes = total_max_bytes_.load(std::memory_order_relaxed);
+            s.total_usage.min_bytes    = total_min_bytes_.load(std::memory_order_relaxed);
+            s.total_usage.max_bytes    = total_max_bytes_.load(std::memory_order_relaxed);
             s.total_usage.avg_bytes = static_cast<double>(total_bytes_used_.load(std::memory_order_relaxed)) / samples;
         }
         else
         {
             // No samples yet - initialize to zero
             s.metadata_usage = {};
-            s.text_usage = {};
-            s.total_usage = {};
+            s.text_usage     = {};
+            s.total_usage    = {};
         }
-        
+
         return s;
     }
 
@@ -1145,20 +1141,20 @@ public:
         acquire_failures_.store(0, std::memory_order_relaxed);
         total_releases_.store(0, std::memory_order_relaxed);
         // Note: don't reset buffers_in_use_ or high_water_mark_ as they reflect current state
-        
+
         // Reset area usage stats
         metadata_total_bytes_.store(0, std::memory_order_relaxed);
         metadata_min_bytes_.store(UINT64_MAX, std::memory_order_relaxed);
         metadata_max_bytes_.store(0, std::memory_order_relaxed);
-        
+
         text_total_bytes_.store(0, std::memory_order_relaxed);
         text_min_bytes_.store(UINT64_MAX, std::memory_order_relaxed);
         text_max_bytes_.store(0, std::memory_order_relaxed);
-        
+
         total_bytes_used_.store(0, std::memory_order_relaxed);
         total_min_bytes_.store(UINT64_MAX, std::memory_order_relaxed);
         total_max_bytes_.store(0, std::memory_order_relaxed);
-        
+
         usage_samples_.store(0, std::memory_order_relaxed);
     }
 #endif

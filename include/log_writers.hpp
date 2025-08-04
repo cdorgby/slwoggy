@@ -1,11 +1,10 @@
-#pragma once
-
 /**
  * @file log_writers.hpp
  * @brief Log output writer implementations
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  */
+#pragma once
 
 #include <cstdio>
 #include <string>
@@ -17,7 +16,8 @@
 
 #include "log_buffer.hpp"
 
-namespace slwoggy {
+namespace slwoggy
+{
 
 class file_writer
 {
@@ -30,41 +30,40 @@ class file_writer
     file_writer(int fd, bool close_fd = false) : filename_(""), fd_(fd), close_fd_(close_fd) {}
 
     // Copy constructor - dup the file descriptor
-    file_writer(const file_writer& other) 
-        : filename_(other.filename_), fd_(-1), close_fd_(other.close_fd_)
+    file_writer(const file_writer &other) : filename_(other.filename_), fd_(-1), close_fd_(other.close_fd_)
     {
-        if (other.fd_ >= 0 && other.close_fd_) {
+        if (other.fd_ >= 0 && other.close_fd_)
+        {
             fd_ = dup(other.fd_);
-            if (fd_ < 0) {
-                throw std::runtime_error("Failed to dup file descriptor");
-            }
-        } else {
+            if (fd_ < 0) { throw std::runtime_error("Failed to dup file descriptor"); }
+        }
+        else
+        {
             // For stdout/stderr, don't dup, just share
-            fd_ = other.fd_;
+            fd_       = other.fd_;
             close_fd_ = false;
         }
     }
 
     // Copy assignment
-    file_writer& operator=(const file_writer& other)
+    file_writer &operator=(const file_writer &other)
     {
         if (this != &other)
         {
             // Close our current fd if needed
-            if (close_fd_ && fd_ >= 0) {
-                close(fd_);
-            }
-            
+            if (close_fd_ && fd_ >= 0) { close(fd_); }
+
             filename_ = other.filename_;
             close_fd_ = other.close_fd_;
-            
-            if (other.fd_ >= 0 && other.close_fd_) {
+
+            if (other.fd_ >= 0 && other.close_fd_)
+            {
                 fd_ = dup(other.fd_);
-                if (fd_ < 0) {
-                    throw std::runtime_error("Failed to dup file descriptor");
-                }
-            } else {
-                fd_ = other.fd_;
+                if (fd_ < 0) { throw std::runtime_error("Failed to dup file descriptor"); }
+            }
+            else
+            {
+                fd_       = other.fd_;
                 close_fd_ = false;
             }
         }
@@ -85,10 +84,7 @@ class file_writer
         if (fd_ < 0) { return -1; } // Not initialized
 
         ssize_t written = ::write(fd_, data, len);
-        if (written < 0)
-        {
-            perror("Failed to write to log file");
-        }
+        if (written < 0) { perror("Failed to write to log file"); }
         return written;
     }
 
@@ -101,12 +97,12 @@ class file_writer
 // High-performance writer using writev for zero-copy bulk writes
 class writev_file_writer : public file_writer
 {
-public:
-    using file_writer::file_writer;  // Inherit constructors
+  public:
+    using file_writer::file_writer; // Inherit constructors
 
     // Bulk write implementation using writev
-    template<typename Formatter>
-    size_t bulk_write(log_buffer **buffers, size_t count, const Formatter& formatter) const
+    template <typename Formatter>
+    size_t bulk_write(log_buffer **buffers, size_t count, const Formatter &formatter) const
     {
         if (fd_ < 0 || count == 0) return 0;
 
@@ -114,35 +110,29 @@ public:
         constexpr size_t MAX_IOV = 1024;
         struct iovec iov[MAX_IOV];
         size_t iov_count = 0;
-        
+
         // Check if formatter wants newlines
         bool add_newline = false;
-        if constexpr (requires { formatter.add_newline; })
-        {
-            add_newline = formatter.add_newline;
-        }
-        
+        if constexpr (requires { formatter.add_newline; }) { add_newline = formatter.add_newline; }
+
         size_t i;
         for (i = 0; i < count && iov_count < MAX_IOV; ++i)
         {
-            log_buffer* buf = buffers[i];
-            
+            log_buffer *buf = buffers[i];
+
             // Skip empty buffers
             if (buf->len() == 0) continue;
-            
+
             // If we need to add newline, append it to the buffer
-            if (add_newline)
-            {
-                buf->append_or_replace_last('\n');
-            }
-            
+            if (add_newline) { buf->append_or_replace_last('\n'); }
+
             // Add buffer to iovec
-            auto text = buf->get_text();
-            iov[iov_count].iov_base = const_cast<char*>(text.data());
-            iov[iov_count].iov_len = text.size();
+            auto text               = buf->get_text();
+            iov[iov_count].iov_base = const_cast<char *>(text.data());
+            iov[iov_count].iov_len  = text.size();
             iov_count++;
         }
-        
+
         // Single syscall to write everything
         ssize_t written = writev(fd_, iov, iov_count);
         if (written < 0)
@@ -150,7 +140,7 @@ public:
             perror("writev failed");
             return 0;
         }
-        
+
         // Return number of buffers consumed from input array (not iov_count)
         return i;
     }
