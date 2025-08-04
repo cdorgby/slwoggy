@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
                 // Small message - no padding
                 auto l = LOG(info);
                 l.printf("T%d i%d", thread_id, i);
-                //l.add("thread_id", thread_id);
+                l.add("thread_id", thread_id);
                 l.add("iteration", i);
             }
             else {

@@ -14,7 +14,6 @@
 #include <chrono>
 #include <atomic>
 #include <shared_mutex>
-#include <unordered_map>
 #include <vector>
 #include <stdexcept>
 #include <fmt/format.h>
@@ -22,6 +21,7 @@
 #include <charconv>
 
 #include "moodycamel/concurrentqueue.h"
+#include "robin_hood.h"
 
 #include "log_types.hpp"
 
@@ -258,7 +258,7 @@ struct structured_log_key_registry
     struct thread_cache
     {
         // Maps string_view (pointing to keys_ storage) to ID
-        std::unordered_map<std::string_view, uint16_t> key_to_id;
+        robin_hood::unordered_map<std::string_view, uint16_t> key_to_id;
 
         // Constructor reserves capacity to avoid rehashing
         thread_cache()
@@ -271,9 +271,9 @@ struct structured_log_key_registry
 
     // Global registry data (protected by mutex_)
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string_view, uint16_t> key_to_id_;
+    robin_hood::unordered_map<std::string_view, uint16_t> key_to_id_;
     std::vector<std::string> keys_;                            // Stable storage
-    std::unordered_map<uint16_t, std::string_view> id_to_key_;
+    robin_hood::unordered_map<uint16_t, std::string_view> id_to_key_;
     uint16_t next_key_id_{0};
 };
 
