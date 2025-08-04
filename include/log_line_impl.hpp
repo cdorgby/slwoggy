@@ -1,3 +1,9 @@
+/**
+ * @file log_line_impl.hpp
+ * @brief Implementation of log_line methods and operators
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
 #pragma once
 
 #include "log_line.hpp"
@@ -70,7 +76,8 @@ inline size_t log_line::write_header()
 
 } // namespace slwoggy
 
-namespace {
+namespace
+{
 
 // our own endl for log_line
 inline slwoggy::log_line &endl(slwoggy::log_line &line)
@@ -79,4 +86,4 @@ inline slwoggy::log_line &endl(slwoggy::log_line &line)
     return line;
 }
 
-}
+} // namespace

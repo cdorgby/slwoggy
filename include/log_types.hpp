@@ -1,11 +1,10 @@
-#pragma once
-
 /**
  * @file log_types.hpp
  * @brief Core type definitions and constants for the logging system
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  */
+#pragma once
 
 #include <cstdint>
 #include <array>
@@ -14,8 +13,8 @@
 #include <chrono>
 #include <fmt/format.h>
 
-namespace slwoggy {
-
+namespace slwoggy
+{
 
 // Buffer pool constants
 inline constexpr size_t BUFFER_POOL_SIZE        = 32 * 1024; // Number of pre-allocated buffers
@@ -31,18 +30,18 @@ inline constexpr uint32_t MAX_STRUCTURED_KEYS = 256; // Maximum structured keys
 inline constexpr size_t MAX_FORMATTED_SIZE    = 128; // max size of values when allowed in the metadata
 
 // JSON formatting constants
-inline  constexpr size_t UNICODE_ESCAPE_SIZE   = 7;   // \uXXXX + null terminator
-inline  constexpr size_t UNICODE_ESCAPE_CHARS  = 6;   // \uXXXX
-inline  constexpr size_t TIMESTAMP_BUFFER_SIZE = 256; // Buffer for timestamp formatting
-inline  constexpr size_t LINE_BUFFER_SIZE      = 64;  // Buffer for line number formatting
+inline constexpr size_t UNICODE_ESCAPE_SIZE   = 7;   // \uXXXX + null terminator
+inline constexpr size_t UNICODE_ESCAPE_CHARS  = 6;   // \uXXXX
+inline constexpr size_t TIMESTAMP_BUFFER_SIZE = 256; // Buffer for timestamp formatting
+inline constexpr size_t LINE_BUFFER_SIZE      = 64;  // Buffer for line number formatting
 
 // Metrics collection configuration
 // Define these before including log.hpp to enable metrics collection:
 // #define LOG_COLLECT_BUFFER_POOL_METRICS 1 // Enable buffer pool statistics
 // #define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
 // #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
-// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires LOG_COLLECT_DISPATCHER_METRICS)
-
+// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
+// LOG_COLLECT_DISPATCHER_METRICS)
 
 /**
  * @brief Concept for types that can be logged
@@ -73,14 +72,7 @@ enum class log_level : int8_t
 inline constexpr log_level GLOBAL_MIN_LOG_LEVEL = log_level::trace;
 
 // Log level names for formatting
-inline const char *log_level_names[] = {
-    "TRACE",
-    "DEBUG",
-    "INFO ",
-    "WARN ",
-    "ERROR",
-    "FATAL"
-};
+inline const char *log_level_names[] = {"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "FATAL"};
 
 inline const std::array<const char *, 6> log_level_colors = {
     "\033[37m", // trace
@@ -141,57 +133,55 @@ inline const char *string_from_log_level(log_level level)
 // Platform-specific fast timing utilities
 #ifdef __APPLE__
     #include <mach/mach_time.h>
-    
-    inline std::chrono::steady_clock::time_point log_fast_timestamp()
+
+inline std::chrono::steady_clock::time_point log_fast_timestamp()
+{
+    static struct
     {
-        static struct {
-            mach_timebase_info_data_t timebase;
-            bool initialized = false;
-        } info;
-        
-        if (!info.initialized) {
-            mach_timebase_info(&info.timebase);
-            info.initialized = true;
-        }
-        
-        uint64_t mach_time = mach_absolute_time();
-        uint64_t nanos = mach_time * info.timebase.numer / info.timebase.denom;
-        
-        auto duration = std::chrono::nanoseconds(nanos);
-        return std::chrono::steady_clock::time_point(duration);
+        mach_timebase_info_data_t timebase;
+        bool initialized = false;
+    } info;
+
+    if (!info.initialized)
+    {
+        mach_timebase_info(&info.timebase);
+        info.initialized = true;
     }
-    
+
+    uint64_t mach_time = mach_absolute_time();
+    uint64_t nanos     = mach_time * info.timebase.numer / info.timebase.denom;
+
+    auto duration = std::chrono::nanoseconds(nanos);
+    return std::chrono::steady_clock::time_point(duration);
+}
+
 #elif defined(__linux__)
     #include <time.h>
-    
-    inline std::chrono::steady_clock::time_point log_fast_timestamp()
-    {
-        struct timespec ts;
-        // Use CLOCK_MONOTONIC_COARSE for speed (1-4ms resolution)
-        // Change to CLOCK_MONOTONIC for microsecond precision
-        clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
-        
-        auto duration = std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec);
-        return std::chrono::steady_clock::time_point(duration);
-    }
-    
+
+inline std::chrono::steady_clock::time_point log_fast_timestamp()
+{
+    struct timespec ts;
+    // Use CLOCK_MONOTONIC_COARSE for speed (1-4ms resolution)
+    // Change to CLOCK_MONOTONIC for microsecond precision
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
+
+    auto duration = std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec);
+    return std::chrono::steady_clock::time_point(duration);
+}
+
 #elif defined(_WIN32)
     #include <windows.h>
-    
-    inline std::chrono::steady_clock::time_point log_fast_timestamp()
-    {
-        // GetTickCount64 is fast but only millisecond precision
-        // For microsecond precision, use QueryPerformanceCounter (slower)
-        uint64_t ticks = GetTickCount64();
-        auto duration = std::chrono::milliseconds(ticks);
-        return std::chrono::steady_clock::time_point(duration);
-    }
-    
-#else
-    // Fallback to standard chrono
-    inline std::chrono::steady_clock::time_point log_fast_timestamp()
-    {
-        return std::chrono::steady_clock::now();
-    }
-#endif
 
+inline std::chrono::steady_clock::time_point log_fast_timestamp()
+{
+    // GetTickCount64 is fast but only millisecond precision
+    // For microsecond precision, use QueryPerformanceCounter (slower)
+    uint64_t ticks = GetTickCount64();
+    auto duration  = std::chrono::milliseconds(ticks);
+    return std::chrono::steady_clock::time_point(duration);
+}
+
+#else
+  // Fallback to standard chrono
+inline std::chrono::steady_clock::time_point log_fast_timestamp() { return std::chrono::steady_clock::now(); }
+#endif

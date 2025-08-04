@@ -1,3 +1,9 @@
+/**
+ * @file log_dispatcher_impl.hpp
+ * @brief Implementation of log message dispatcher and worker thread
+ * @author dorgby.net
+ * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
+ */
 #pragma once
 
 #include "log_line.hpp"
@@ -459,7 +465,7 @@ inline void log_line_dispatcher::reset_stats()
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
 // Helper function implementations
 
-inline void log_line_dispatcher::update_atomic_min(std::atomic<uint64_t>& atomic_val, uint64_t new_val)
+inline void log_line_dispatcher::update_atomic_min(std::atomic<uint64_t> &atomic_val, uint64_t new_val)
 {
     uint64_t current = atomic_val.load(std::memory_order_relaxed);
     while (new_val < current)
@@ -471,7 +477,7 @@ inline void log_line_dispatcher::update_atomic_min(std::atomic<uint64_t>& atomic
     }
 }
 
-inline void log_line_dispatcher::update_atomic_max(std::atomic<uint64_t>& atomic_val, uint64_t new_val)
+inline void log_line_dispatcher::update_atomic_max(std::atomic<uint64_t> &atomic_val, uint64_t new_val)
 {
     uint64_t current = atomic_val.load(std::memory_order_relaxed);
     while (new_val > current)
@@ -487,15 +493,15 @@ inline void log_line_dispatcher::update_batch_stats(size_t dequeued_count)
 {
     total_batches_++;
     total_batch_messages_ += dequeued_count;
-    
+
     // Update max batch size
     update_atomic_max(max_batch_size_, dequeued_count);
 }
 
-inline void log_line_dispatcher::track_inflight_times(log_buffer** buffers, size_t start_idx, size_t count)
+inline void log_line_dispatcher::track_inflight_times(log_buffer **buffers, size_t start_idx, size_t count)
 {
     auto now = log_fast_timestamp();
-    
+
     for (size_t j = 0; j < count; ++j)
     {
         log_buffer *proc_buffer = buffers[start_idx + j];
@@ -515,7 +521,7 @@ inline void log_line_dispatcher::track_inflight_times(log_buffer** buffers, size
 inline void log_line_dispatcher::update_dispatch_timing_stats(std::chrono::steady_clock::time_point start, size_t message_count)
 {
     auto dispatch_end = log_fast_timestamp();
-    auto dispatch_us = std::chrono::duration_cast<std::chrono::microseconds>(dispatch_end - start).count();
+    auto dispatch_us  = std::chrono::duration_cast<std::chrono::microseconds>(dispatch_end - start).count();
     total_dispatch_time_us_ += dispatch_us;
     dispatch_count_for_avg_ += message_count;
 
@@ -524,19 +530,19 @@ inline void log_line_dispatcher::update_dispatch_timing_stats(std::chrono::stead
     update_atomic_max(max_dispatch_time_us_, static_cast<uint64_t>(per_buffer_us));
 }
 
-#ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
+    #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
 inline void log_line_dispatcher::update_message_rate_sample()
 {
     auto now = log_fast_timestamp();
     if (now - last_rate_sample_time_ >= RATE_SAMPLE_INTERVAL)
     {
         rate_samples_[rate_write_idx_] = {now, total_dispatched_};
-        rate_write_idx_ = (rate_write_idx_ + 1) % RATE_WINDOW_SIZE;
+        rate_write_idx_                = (rate_write_idx_ + 1) % RATE_WINDOW_SIZE;
         if (rate_sample_count_ < RATE_WINDOW_SIZE) rate_sample_count_++;
         last_rate_sample_time_ = now;
     }
 }
-#endif
+    #endif
 #endif // LOG_COLLECT_DISPATCHER_METRICS
 
 } // namespace slwoggy

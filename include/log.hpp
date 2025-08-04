@@ -1,5 +1,3 @@
-#pragma once
-
 /**
  * @file log.hpp
  * @brief Thread-safe asynchronous logging system
@@ -297,6 +295,7 @@
  * - Statistics can be reset for testing via reset_stats() methods
  *
  */
+#pragma once
 
 #include <cstring>
 #include <cstdlib>

@@ -1,17 +1,15 @@
-
 /**
  * @file log_dispatcher.hpp
  * @brief Asynchronous log message dispatcher implementation
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
- * 
+ *
  * The log dispatcher initializes with a default stdout sink for convenience.
  * This default sink is automatically replaced when the first sink is added
  * via add_sink(). Calls to set_sink() or remove_sink() also disable the
  * default sink behavior. This ensures logs are visible by default while
  * allowing full customization when needed.
  */
-
 #pragma once
 
 #include <cstdint>
@@ -28,7 +26,6 @@
 #include <mutex>
 #include <unistd.h> // For write() and STDOUT_FILENO
 #include <fcntl.h>
-
 
 #include "moodycamel/concurrentqueue.h"
 #include "moodycamel/blockingconcurrentqueue.h"
@@ -96,13 +93,12 @@ struct log_line_dispatcher
     void flush();                         // Flush pending logs
     void worker_thread_func();            // Worker thread function
 
-public:
+  public:
     static log_line_dispatcher &instance()
     {
         static log_line_dispatcher instance_;
         return instance_;
     }
-    
 
     constexpr auto start_time() const noexcept { return start_time_; }
     constexpr auto start_time_us() const noexcept { return start_time_us_; }
@@ -128,13 +124,14 @@ public:
         if (!current) return;
 
         auto new_config = current->copy();
-        
+
         // If this is the first add_sink call and we have the default sink, replace it
-        if (has_default_sink_) {
+        if (has_default_sink_)
+        {
             new_config->sinks.clear();
             has_default_sink_ = false;
         }
-        
+
         new_config->sinks.push_back(sink);
 
         // Store new config and schedule old for deletion
@@ -210,13 +207,13 @@ public:
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
     // Helper functions for statistics collection
     void update_batch_stats(size_t dequeued_count);
-    void track_inflight_times(log_buffer** buffers, size_t start_idx, size_t count);
+    void track_inflight_times(log_buffer **buffers, size_t start_idx, size_t count);
     void update_dispatch_timing_stats(std::chrono::steady_clock::time_point start, size_t message_count);
     void update_message_rate_sample();
-    
+
     // Atomic min/max update helpers
-    static void update_atomic_min(std::atomic<uint64_t>& atomic_val, uint64_t new_val);
-    static void update_atomic_max(std::atomic<uint64_t>& atomic_val, uint64_t new_val);
+    static void update_atomic_min(std::atomic<uint64_t> &atomic_val, uint64_t new_val);
+    static void update_atomic_max(std::atomic<uint64_t> &atomic_val, uint64_t new_val);
 
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
     double calculate_rate_for_window(std::chrono::seconds window_duration) const

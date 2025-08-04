@@ -4,10 +4,7 @@
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  */
-
-
 #pragma once
-
 
 #include <cstdint>
 #include <string_view>
@@ -20,7 +17,8 @@
 #include "log_buffer.hpp"
 #include "log_module.hpp"
 
-namespace slwoggy {
+namespace slwoggy
+{
 
 /**
  * @brief Represents a single log message with metadata
@@ -193,26 +191,18 @@ struct log_line
     }
 
     // Special handling for shared_ptr
-    template <typename T>
-    log_line &operator<<(const std::shared_ptr<T> &ptr)
+    template <typename T> log_line &operator<<(const std::shared_ptr<T> &ptr)
     {
-        if (ptr) {
-            print(fmt::format("{}", static_cast<const void *>(ptr.get())));
-        } else {
-            print("nullptr");
-        }
+        if (ptr) { print(fmt::format("{}", static_cast<const void *>(ptr.get()))); }
+        else { print("nullptr"); }
         return *this;
     }
 
     // Special handling for weak_ptr
-    template <typename T>
-    log_line &operator<<(const std::weak_ptr<T> &ptr)
+    template <typename T> log_line &operator<<(const std::weak_ptr<T> &ptr)
     {
-        if (auto sp = ptr.lock()) {
-            print(fmt::format("{}", static_cast<const void *>(sp.get())));
-        } else {
-            print("(expired)");
-        }
+        if (auto sp = ptr.lock()) { print(fmt::format("{}", static_cast<const void *>(sp.get()))); }
+        else { print("(expired)"); }
         return *this;
     }
 
