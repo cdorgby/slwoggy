@@ -314,8 +314,7 @@ public:
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
     // Sliding window rate calculation
     static constexpr size_t RATE_WINDOW_SIZE   = 120;                            // 2 minutes of samples at 1/sec
-    static constexpr auto RATE_SAMPLE_INTERVAL = std::chrono::milliseconds(100); // Sample every 100ms for better
-                                                                                 // granularity
+    static constexpr auto RATE_SAMPLE_INTERVAL = std::chrono::milliseconds(100); // Sample every 100ms
 
     struct rate_sample
     {
