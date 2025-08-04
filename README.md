@@ -12,6 +12,7 @@ A header-only C++20 logging library featuring asynchronous processing, structure
 - **Asynchronous Processing**: Dedicated worker thread processes log messages
 - **Type-Erased Sinks**: Output handling using type erasure with small buffer optimization
 - **Platform-Specific Timestamps**: Uses platform APIs for timestamp generation
+- **Adaptive Batching**: Three-phase batching algorithm that adapts to workload patterns
 
 ## Quick Start
 
@@ -157,6 +158,34 @@ namespace slwoggy {
 }
 ```
 
+### Batching Configuration
+
+The dispatcher uses an adaptive three-phase batching algorithm:
+
+1. **Idle Wait**: Blocks indefinitely with zero CPU usage until messages arrive
+2. **Bounded Collection**: Collects messages for up to 100μs after first arrival
+3. **Adaptive Phase**: Continues collecting while messages keep flowing
+
+```cpp
+// In log_types.hpp - Tunable parameters
+namespace slwoggy {
+    // Maximum time to wait for additional messages (Phase 2)
+    inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(100);
+    
+    // Polling interval during bounded collection
+    inline constexpr auto BATCH_POLL_INTERVAL = std::chrono::microseconds(10);
+    
+    // Maximum messages per batch
+    inline constexpr size_t MAX_BATCH_SIZE = 4 * 1024;
+}
+```
+
+Performance characteristics:
+- **Idle**: Zero CPU usage (thread blocks waiting for messages)
+- **Light load**: Small batches (10-100 messages), minimal latency
+- **Heavy load**: Large batches (up to 4096 messages), maximum throughput
+- **Typical performance**: >10M messages/second with adaptive batching
+
 ### Metrics Collection
 
 Enable optional metrics at compile time:
@@ -172,6 +201,12 @@ using namespace slwoggy;
 // Access metrics
 auto pool_stats = buffer_pool::instance().get_stats();
 auto disp_stats = log_line_dispatcher::instance().get_stats();
+
+// Key dispatcher metrics include:
+// - Batch sizes: min/avg/max messages per batch
+// - Dequeue timing: min/avg/max time spent collecting batches
+// - Processing rates: messages/second over 1s/10s/60s windows
+// - In-flight timing: time from log creation to processing
 ```
 
 ## Advanced Features
