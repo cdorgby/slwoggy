@@ -885,10 +885,6 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     }
 
   private:
-    constexpr char *begin() { return data_.data(); }
-    constexpr const char *begin() const { return data_.data(); }
-
-  private:
     std::array<char, LOG_BUFFER_SIZE> data_;
     std::atomic<int> ref_count_{0};
 };

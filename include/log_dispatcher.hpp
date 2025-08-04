@@ -81,10 +81,14 @@ struct log_line_dispatcher
     #endif
         double avg_batch_size;                      ///< Average number of messages per batch
         uint64_t total_batches;                     ///< Total number of batches processed
+        uint64_t min_batch_size;                    ///< Minimum batch size observed
         uint64_t max_batch_size;                    ///< Maximum batch size observed
         uint64_t min_inflight_time_us;              ///< Minimum in-flight time in microseconds
         double avg_inflight_time_us;                ///< Average in-flight time in microseconds
         uint64_t max_inflight_time_us;              ///< Maximum in-flight time in microseconds
+        uint64_t min_dequeue_time_us;               ///< Minimum time spent in dequeue_buffers
+        double avg_dequeue_time_us;                 ///< Average time spent in dequeue_buffers
+        uint64_t max_dequeue_time_us;               ///< Maximum time spent in dequeue_buffers
         std::chrono::steady_clock::duration uptime; ///< Time since dispatcher started
     };
 #endif
@@ -204,6 +208,12 @@ struct log_line_dispatcher
 
     void update_sink_config(std::unique_ptr<sink_config> new_config);
 
+    // Worker thread helper methods
+    size_t dequeue_buffers(moodycamel::ConsumerToken& token, log_buffer** buffers, bool wait);
+    size_t process_buffer_batch(log_buffer** buffers, size_t start_idx, size_t count, sink_config* config);
+    bool process_queue(log_buffer** buffers, size_t dequeued_count, sink_config* config);
+    void drain_queue(moodycamel::ConsumerToken& token);
+
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
     // Helper functions for statistics collection
     void update_batch_stats(size_t dequeued_count);
@@ -296,9 +306,12 @@ struct log_line_dispatcher
     std::atomic<uint64_t> max_queue_size_{0};
     std::atomic<uint64_t> total_flushes_{0};
     std::atomic<uint64_t> max_dispatch_time_us_{0};
+    std::atomic<uint64_t> min_batch_size_{UINT64_MAX};
     std::atomic<uint64_t> max_batch_size_{0};
     std::atomic<uint64_t> min_inflight_time_us_{UINT64_MAX};
     std::atomic<uint64_t> max_inflight_time_us_{0};
+    std::atomic<uint64_t> min_dequeue_time_us_{UINT64_MAX};
+    std::atomic<uint64_t> max_dequeue_time_us_{0};
 
     // Batch tracking (single writer - worker thread)
     uint64_t total_batches_{0};
@@ -307,6 +320,10 @@ struct log_line_dispatcher
     // In-flight time tracking (single writer - worker thread)
     uint64_t total_inflight_time_us_{0};
     uint64_t inflight_count_{0};
+    
+    // Dequeue timing tracking (single writer - worker thread)
+    uint64_t total_dequeue_time_us_{0};
+    uint64_t dequeue_count_{0};
 
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
     // Sliding window rate calculation
