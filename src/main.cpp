@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
     int num_threads = 5;
     int messages_per_thread = 1000000;
     int message_size = 50;
-    std::string sink_type = "json";
+    std::string sink_type = "raw";
     std::string output_file = "/dev/null";
     bool show_detailed_stats = false;
 
@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
                 // Small message - no padding
                 auto l = LOG(info);
                 l.printf("T%d i%d", thread_id, i);
-                l.add("thread_id", thread_id);
+                //l.add("thread_id", thread_id);
                 l.add("iteration", i);
             }
             else {
@@ -290,13 +290,16 @@ int main(int argc, char *argv[])
 #endif
 
 #ifdef LOG_COLLECT_STRUCTURED_METRICS
-    auto key_stats = structured_log_key_registry::instance().get_stats();
-    std::cerr << "========== STRUCTURED LOG KEYS ==========\n";
-    std::cerr << "  Total keys: " << key_stats.key_count << "\n";
-    std::cerr << "  Max keys: " << key_stats.max_keys << "\n";
-    std::cerr << "  Usage percent: " << std::fixed << std::setprecision(1) << key_stats.usage_percent << "%\n";
-    std::cerr << "  Estimated memory: " << key_stats.estimated_memory_kb << " KB\n";
-    std::cerr << "=========================================\n";
+    if (show_detailed_stats)
+    {
+        auto key_stats = structured_log_key_registry::instance().get_stats();
+        std::cerr << "========== STRUCTURED LOG KEYS ==========\n";
+        std::cerr << "  Total keys: " << key_stats.key_count << "\n";
+        std::cerr << "  Max keys: " << key_stats.max_keys << "\n";
+        std::cerr << "  Usage percent: " << std::fixed << std::setprecision(1) << key_stats.usage_percent << "%\n";
+        std::cerr << "  Estimated memory: " << key_stats.estimated_memory_kb << " KB\n";
+        std::cerr << "=========================================\n";
+    }
 #endif
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS

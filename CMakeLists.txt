@@ -115,8 +115,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
 
-# Link with taocpp/json
-target_link_libraries(${PROJECT_NAME} PRIVATE taocppjson)
+# Link with taocpp/json and fmt
+target_link_libraries(${PROJECT_NAME} PRIVATE taocppjson fmt::fmt)
 
 # Set per-file compile definitions
 set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
@@ -124,9 +124,9 @@ set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
+        #LOG_COLLECT_BUFFER_POOL_METRICS
         LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
+        #LOG_COLLECT_STRUCTURED_METRICS
         LOG_COLLECT_DISPATCHER_MSG_RATE
     )
 endif()
@@ -169,6 +169,13 @@ FetchContent_Declare(
     GIT_TAG 1.0.0-beta.14
 )
 
+# Add fmt
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG 11.0.2
+)
+
 # Only fetch and build Catch2 when tests are being built
 FetchContent_GetProperties(Catch2)
 if(NOT catch2_POPULATED)
@@ -186,6 +193,17 @@ endif()
 # Make taocpp/json available as a target
 add_library(taocppjson INTERFACE)
 target_include_directories(taocppjson INTERFACE ${taocppjson_SOURCE_DIR}/include)
+
+# Fetch fmt
+FetchContent_GetProperties(fmt)
+if(NOT fmt_POPULATED)
+    FetchContent_Populate(fmt)
+    # Add fmt with specific options
+    set(FMT_DOC OFF CACHE BOOL "" FORCE)
+    set(FMT_TEST OFF CACHE BOOL "" FORCE)
+    set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${fmt_SOURCE_DIR} ${fmt_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
 
 # Include Catch2's CMake utilities
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

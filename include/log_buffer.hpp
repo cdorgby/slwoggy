@@ -17,8 +17,9 @@
 #include <unordered_map>
 #include <vector>
 #include <stdexcept>
-#include <format>
+#include <fmt/format.h>
 #include <memory>
+#include <charconv>
 
 #include "moodycamel/concurrentqueue.h"
 
@@ -436,7 +437,7 @@ class log_buffer_metadata_adapter
         char *format_start     = data_ + metadata_pos_;
         size_t available_space = METADATA_RESERVE - metadata_pos_;
 
-        auto result = std::format_to_n(format_start, available_space, "{}", std::forward<T>(value));
+        auto result = fmt::format_to_n(format_start, available_space, "{}", std::forward<T>(value));
 
         // Check if formatting was complete (not truncated)
         if (result.size <= available_space)
@@ -464,6 +465,125 @@ class log_buffer_metadata_adapter
 #endif
             return false;
         }
+    }
+
+    // Fast-path specialization for string_view
+    bool add_kv_formatted(uint16_t key_id, std::string_view value)
+    {
+        size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
+        size_t value_size = value.size();
+        
+        // Check exact space needed
+        if (metadata_pos_ + header_size + value_size > METADATA_RESERVE)
+        {
+#ifdef LOG_COLLECT_STRUCTURED_METRICS
+            dropped_count_.fetch_add(1, std::memory_order_relaxed);
+            dropped_bytes_.fetch_add(header_size + value_size, std::memory_order_relaxed);
+#endif
+            return false;
+        }
+        
+        // Write key_id
+        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
+        metadata_pos_ += sizeof(uint16_t);
+        
+        // Write length
+        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
+        metadata_pos_ += sizeof(uint16_t);
+        
+        // Direct memcpy of string data
+        if (value_size > 0)
+        {
+            std::memcpy(data_ + metadata_pos_, value.data(), value_size);
+            metadata_pos_ += value_size;
+        }
+        
+        // Update header
+        auto *header = get_header();
+        header->kv_count++;
+        header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
+        
+        return true;
+    }
+    
+    // Fast-path specialization for const char*
+    bool add_kv_formatted(uint16_t key_id, const char* value)
+    {
+        if (!value) return add_kv_formatted(key_id, std::string_view("null"));
+        return add_kv_formatted(key_id, std::string_view(value));
+    }
+    
+    // Fast-path specialization for std::string
+    bool add_kv_formatted(uint16_t key_id, const std::string& value)
+    {
+        return add_kv_formatted(key_id, std::string_view(value));
+    }
+    
+    // Fast-path specialization for integers using std::to_chars
+    template<typename IntType>
+    typename std::enable_if<std::is_integral_v<IntType> && !std::is_same_v<IntType, bool>, bool>::type
+    add_kv_formatted_int(uint16_t key_id, IntType value)
+    {
+        // Stack buffer for integer conversion (max 20 chars for int64_t)
+        char temp_buffer[32];
+        auto [ptr, ec] = std::to_chars(temp_buffer, temp_buffer + sizeof(temp_buffer), value);
+        
+        if (ec != std::errc())
+        {
+            // Fallback to fmt if to_chars fails
+            return add_kv_formatted(key_id, static_cast<int64_t>(value));
+        }
+        
+        size_t value_size = ptr - temp_buffer;
+        size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
+        
+        // Check exact space needed
+        if (metadata_pos_ + header_size + value_size > METADATA_RESERVE)
+        {
+#ifdef LOG_COLLECT_STRUCTURED_METRICS
+            dropped_count_.fetch_add(1, std::memory_order_relaxed);
+            dropped_bytes_.fetch_add(header_size + value_size, std::memory_order_relaxed);
+#endif
+            return false;
+        }
+        
+        // Write key_id
+        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
+        metadata_pos_ += sizeof(uint16_t);
+        
+        // Write length
+        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
+        metadata_pos_ += sizeof(uint16_t);
+        
+        // Copy converted string
+        std::memcpy(data_ + metadata_pos_, temp_buffer, value_size);
+        metadata_pos_ += value_size;
+        
+        // Update header
+        auto *header = get_header();
+        header->kv_count++;
+        header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
+        
+        return true;
+    }
+    
+    // Integer specializations - use fundamental types to avoid platform-specific duplicates
+    bool add_kv_formatted(uint16_t key_id, int value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, unsigned int value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, long value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, unsigned long value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, long long value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, unsigned long long value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, signed char value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, unsigned char value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, short value) { return add_kv_formatted_int(key_id, value); }
+    bool add_kv_formatted(uint16_t key_id, unsigned short value) { return add_kv_formatted_int(key_id, value); }
+    
+    // Fast-path specialization for bool
+    bool add_kv_formatted(uint16_t key_id, bool value)
+    {
+        const std::string_view str_value = value ? "true" : "false";
+        return add_kv_formatted(key_id, str_value);
     }
 
     /**
