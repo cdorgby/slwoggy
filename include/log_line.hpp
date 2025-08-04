@@ -12,8 +12,9 @@
 #include <cstdint>
 #include <string_view>
 #include <chrono>
-#include <format>
+#include <fmt/format.h>
 #include <utility>
+#include <memory>
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
@@ -125,14 +126,14 @@ struct log_line
         return *this;
     }
 
-    template <typename... Args> log_line &format(std::format_string<Args...> fmt, Args &&...args)
+    template <typename... Args> log_line &format(fmt::format_string<Args...> fmt, Args &&...args)
     {
-        print(std::format(fmt, std::forward<Args>(args)...));
+        print(fmt::format(fmt, std::forward<Args>(args)...));
         return *this;
     }
 
     // Helper method that returns *this for chaining
-    template <typename... Args> log_line &fmtprint(std::format_string<Args...> fmt, Args &&...args)
+    template <typename... Args> log_line &fmtprint(fmt::format_string<Args...> fmt, Args &&...args)
     {
         format(fmt, std::forward<Args>(args)...);
         return *this;
@@ -143,14 +144,14 @@ struct log_line
         requires Loggable<T>
     log_line &operator<<(const T &value)
     {
-        print(std::format("{}", value));
+        print(fmt::format("{}", value));
         return *this;
     }
 
     template <typename T> log_line &operator<<(T *ptr)
     {
         if (ptr == nullptr) { print("nullptr"); }
-        else { print(std::format("{}", static_cast<const void *>(ptr))); }
+        else { print(fmt::format("{}", static_cast<const void *>(ptr))); }
         return *this;
     }
 
@@ -175,19 +176,43 @@ struct log_line
 
     log_line &operator<<(int value)
     {
-        print(std::format("{}", value));
+        print(fmt::format("{}", value));
         return *this;
     }
 
     log_line &operator<<(unsigned int value)
     {
-        print(std::format("{}", value));
+        print(fmt::format("{}", value));
         return *this;
     }
 
     log_line &operator<<(void *ptr)
     {
-        print(std::format("{}", ptr));
+        print(fmt::format("{}", ptr));
+        return *this;
+    }
+
+    // Special handling for shared_ptr
+    template <typename T>
+    log_line &operator<<(const std::shared_ptr<T> &ptr)
+    {
+        if (ptr) {
+            print(fmt::format("{}", static_cast<const void *>(ptr.get())));
+        } else {
+            print("nullptr");
+        }
+        return *this;
+    }
+
+    // Special handling for weak_ptr
+    template <typename T>
+    log_line &operator<<(const std::weak_ptr<T> &ptr)
+    {
+        if (auto sp = ptr.lock()) {
+            print(fmt::format("{}", static_cast<const void *>(sp.get())));
+        } else {
+            print("(expired)");
+        }
         return *this;
     }
 
@@ -199,9 +224,9 @@ struct log_line
      * Adds a key-value pair to the structured metadata section of the log.
      * The key is registered in the global key registry and stored as a
      * numeric ID for efficiency. The value is formatted to a string using
-     * std::format.
+     * fmt::format.
      *
-     * @tparam T Any type formattable by std::format
+     * @tparam T Any type formattable by fmt::format
      * @param key The metadata key (e.g., "user_id", "request_id")
      * @param value The value to associate with the key
      * @return *this for method chaining

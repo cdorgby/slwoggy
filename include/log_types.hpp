@@ -12,6 +12,7 @@
 #include <string>
 #include <algorithm>
 #include <chrono>
+#include <fmt/format.h>
 
 namespace slwoggy {
 
@@ -49,7 +50,7 @@ inline  constexpr size_t LINE_BUFFER_SIZE      = 64;  // Buffer for line number 
  */
 template <typename T>
 concept Loggable = requires(T value, std::string &str) {
-    { std::format("{}", value) } -> std::convertible_to<std::string>;
+    { fmt::format("{}", value) } -> std::convertible_to<std::string>;
 };
 
 /**

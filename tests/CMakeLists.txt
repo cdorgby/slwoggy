@@ -40,7 +40,7 @@ set_target_properties(all_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(all_tests "${TEST_SOURCES}")
 
 # Link with Catch2 and project includes
-target_link_libraries(all_tests PRIVATE Catch2::Catch2WithMain taocppjson)
+target_link_libraries(all_tests PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(all_tests PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
 )
@@ -56,7 +56,7 @@ set(TEST_LOG_SOURCES main.cpp test_log.cpp)
 add_executable(test_log ${TEST_LOG_SOURCES})
 set_target_properties(test_log PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log "${TEST_LOG_SOURCES}")
-target_link_libraries(test_log PRIVATE Catch2::Catch2WithMain taocppjson)
+target_link_libraries(test_log PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(test_log PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
 )
@@ -68,7 +68,7 @@ set(TEST_LOG_STRUCTURED_SOURCES main.cpp test_log_structured.cpp)
 add_executable(test_log_structured ${TEST_LOG_STRUCTURED_SOURCES})
 set_target_properties(test_log_structured PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_structured "${TEST_LOG_STRUCTURED_SOURCES}")
-target_link_libraries(test_log_structured PRIVATE Catch2::Catch2WithMain taocppjson)
+target_link_libraries(test_log_structured PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(test_log_structured PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
 )
@@ -85,7 +85,7 @@ target_compile_definitions(test_log_statistics PRIVATE
     LOG_COLLECT_DISPATCHER_METRICS
     LOG_COLLECT_STRUCTURED_METRICS
 )
-target_link_libraries(test_log_statistics PRIVATE Catch2::Catch2WithMain taocppjson)
+target_link_libraries(test_log_statistics PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(test_log_statistics PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
 )
@@ -97,7 +97,7 @@ set(TEST_LOG_LEVEL_CONTROL_SOURCES main.cpp test_log_level_control.cpp)
 add_executable(test_log_level_control ${TEST_LOG_LEVEL_CONTROL_SOURCES})
 set_target_properties(test_log_level_control PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_level_control "${TEST_LOG_LEVEL_CONTROL_SOURCES}")
-target_link_libraries(test_log_level_control PRIVATE Catch2::Catch2WithMain taocppjson)
+target_link_libraries(test_log_level_control PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(test_log_level_control PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
 )
@@ -109,7 +109,7 @@ set(TEST_LOG_SITE_CONTROL_SOURCES main.cpp test_log_site_control.cpp)
 add_executable(test_log_site_control ${TEST_LOG_SITE_CONTROL_SOURCES})
 set_target_properties(test_log_site_control PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_site_control "${TEST_LOG_SITE_CONTROL_SOURCES}")
-target_link_libraries(test_log_site_control PRIVATE Catch2::Catch2WithMain taocppjson)
+target_link_libraries(test_log_site_control PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(test_log_site_control PRIVATE 
     ${CMAKE_SOURCE_DIR}/include
 )
