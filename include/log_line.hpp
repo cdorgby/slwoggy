@@ -126,7 +126,17 @@ struct log_line
 
     template <typename... Args> log_line &format(fmt::format_string<Args...> fmt, Args &&...args)
     {
-        print(fmt::format(fmt, std::forward<Args>(args)...));
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        // Format directly into buffer with padding support
+        buffer_->format_to_buffer_with_padding(fmt, std::forward<Args>(args)...);
         return *this;
     }
 
@@ -142,14 +152,39 @@ struct log_line
         requires Loggable<T>
     log_line &operator<<(const T &value)
     {
-        print(fmt::format("{}", value));
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        // Format directly into buffer
+        buffer_->format_to_buffer_with_padding("{}", value);
         return *this;
     }
 
     template <typename T> log_line &operator<<(T *ptr)
     {
-        if (ptr == nullptr) { print("nullptr"); }
-        else { print(fmt::format("{}", static_cast<const void *>(ptr))); }
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        if (ptr == nullptr) 
+        { 
+            buffer_->write_with_padding("nullptr"); 
+        }
+        else 
+        { 
+            buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(ptr)); 
+        }
         return *this;
     }
 
@@ -174,35 +209,92 @@ struct log_line
 
     log_line &operator<<(int value)
     {
-        print(fmt::format("{}", value));
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        buffer_->format_to_buffer_with_padding("{}", value);
         return *this;
     }
 
     log_line &operator<<(unsigned int value)
     {
-        print(fmt::format("{}", value));
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        buffer_->format_to_buffer_with_padding("{}", value);
         return *this;
     }
 
     log_line &operator<<(void *ptr)
     {
-        print(fmt::format("{}", ptr));
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        buffer_->format_to_buffer_with_padding("{}", ptr);
         return *this;
     }
 
     // Special handling for shared_ptr
     template <typename T> log_line &operator<<(const std::shared_ptr<T> &ptr)
     {
-        if (ptr) { print(fmt::format("{}", static_cast<const void *>(ptr.get()))); }
-        else { print("nullptr"); }
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        if (ptr) 
+        { 
+            buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(ptr.get())); 
+        }
+        else 
+        { 
+            buffer_->write_with_padding("nullptr"); 
+        }
         return *this;
     }
 
     // Special handling for weak_ptr
     template <typename T> log_line &operator<<(const std::weak_ptr<T> &ptr)
     {
-        if (auto sp = ptr.lock()) { print(fmt::format("{}", static_cast<const void *>(sp.get()))); }
-        else { print("(expired)"); }
+        if (!buffer_) { return *this; }
+
+        // Write header if this is first write after swap
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+
+        if (auto sp = ptr.lock()) 
+        { 
+            buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(sp.get())); 
+        }
+        else 
+        { 
+            buffer_->write_with_padding("(expired)"); 
+        }
         return *this;
     }
 
