@@ -864,6 +864,28 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
         }
     }
 
+    // Format directly into buffer using fmt with newline padding
+    template <typename... Args> void format_to_buffer_with_padding(fmt::format_string<Args...> fmt, Args &&...args)
+    {
+        // Remember where we start writing
+        size_t start_pos = write_pos_;
+
+        // Check if we have enough space for at least some of the output
+        size_t available = size() - write_pos_;
+        if (available == 0) return;
+
+        // Format directly into the buffer at current position
+        char *output_start = data_.data() + write_pos_;
+        auto result = fmt::format_to_n(output_start, available, fmt, std::forward<Args>(args)...);
+
+        // Update write position based on what would have been written (capped by available space)
+        size_t written = std::min(result.size, available);
+        write_pos_ += written;
+
+        // Now handle newline padding in-place
+        handle_newline_padding(start_pos);
+    }
+
     bool is_flush_marker() const { return level_ == log_level::nolog && len() == 0; }
 
     // Get text content (skipping metadata)
