@@ -72,8 +72,8 @@ struct log_line_dispatcher
         float queue_usage_percent;       ///< Queue usage percentage
         uint64_t worker_iterations;      ///< Worker thread loop iterations
         size_t active_sinks;             ///< Number of active sinks
-        double avg_dispatch_time_us;     ///< Average dispatch time in microseconds
-        uint64_t max_dispatch_time_us;   ///< Maximum dispatch time in microseconds
+        double avg_dispatch_time_us;     ///< Average dispatch time PER BUFFER in microseconds (total batch time / buffer count)
+        uint64_t max_dispatch_time_us;   ///< Maximum dispatch time PER BUFFER in microseconds (worst per-buffer average across all batches)
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
         double messages_per_second_1s;  ///< Message rate over last 1 second
         double messages_per_second_10s; ///< Message rate over last 10 seconds
@@ -83,12 +83,12 @@ struct log_line_dispatcher
         uint64_t total_batches;                     ///< Total number of batches processed
         uint64_t min_batch_size;                    ///< Minimum batch size observed
         uint64_t max_batch_size;                    ///< Maximum batch size observed
-        uint64_t min_inflight_time_us;              ///< Minimum in-flight time in microseconds
-        double avg_inflight_time_us;                ///< Average in-flight time in microseconds
-        uint64_t max_inflight_time_us;              ///< Maximum in-flight time in microseconds
-        uint64_t min_dequeue_time_us;               ///< Minimum time spent in dequeue_buffers
-        double avg_dequeue_time_us;                 ///< Average time spent in dequeue_buffers
-        uint64_t max_dequeue_time_us;               ///< Maximum time spent in dequeue_buffers
+        uint64_t min_inflight_time_us;              ///< Minimum in-flight time in microseconds (buffer creation to sink completion)
+        double avg_inflight_time_us;                ///< Average in-flight time in microseconds (buffer creation to sink completion)
+        uint64_t max_inflight_time_us;              ///< Maximum in-flight time in microseconds (buffer creation to sink completion)
+        uint64_t min_dequeue_time_us;               ///< Minimum TOTAL time spent in dequeue_buffers (includes waiting for messages)
+        double avg_dequeue_time_us;                 ///< Average TOTAL time spent in dequeue_buffers (includes waiting for messages)
+        uint64_t max_dequeue_time_us;               ///< Maximum TOTAL time spent in dequeue_buffers (includes waiting for messages)
         std::chrono::steady_clock::duration uptime; ///< Time since dispatcher started
     };
 #endif
@@ -221,9 +221,13 @@ struct log_line_dispatcher
     void update_dispatch_timing_stats(std::chrono::steady_clock::time_point start, size_t message_count);
     void update_message_rate_sample();
 
-    // Atomic min/max update helpers
-    static void update_atomic_min(std::atomic<uint64_t> &atomic_val, uint64_t new_val);
-    static void update_atomic_max(std::atomic<uint64_t> &atomic_val, uint64_t new_val);
+    // Min/max update helpers for non-atomic variables
+    static void update_min(uint64_t &current_val, uint64_t new_val) {
+        if (new_val < current_val) current_val = new_val;
+    }
+    static void update_max(uint64_t &current_val, uint64_t new_val) {
+        if (new_val > current_val) current_val = new_val;
+    }
 
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
     double calculate_rate_for_window(std::chrono::seconds window_duration) const
@@ -302,16 +306,18 @@ struct log_line_dispatcher
     uint64_t total_dispatch_time_us_{0};
     uint64_t dispatch_count_for_avg_{0};
 
-    // These need atomic as they're read/written from multiple threads
-    std::atomic<uint64_t> max_queue_size_{0};
-    std::atomic<uint64_t> total_flushes_{0};
-    std::atomic<uint64_t> max_dispatch_time_us_{0};
-    std::atomic<uint64_t> min_batch_size_{UINT64_MAX};
-    std::atomic<uint64_t> max_batch_size_{0};
-    std::atomic<uint64_t> min_inflight_time_us_{UINT64_MAX};
-    std::atomic<uint64_t> max_inflight_time_us_{0};
-    std::atomic<uint64_t> min_dequeue_time_us_{UINT64_MAX};
-    std::atomic<uint64_t> max_dequeue_time_us_{0};
+    // Worker thread local variables for all metrics
+    // These are only accessed by the worker thread during operation,
+    // and by get_stats()/reset_stats() when called from other threads
+    uint64_t worker_max_queue_size_{0};
+    uint64_t worker_total_flushes_{0};
+    uint64_t worker_max_dispatch_time_us_{0};
+    uint64_t worker_min_batch_size_{UINT64_MAX};
+    uint64_t worker_max_batch_size_{0};
+    uint64_t worker_min_inflight_time_us_{UINT64_MAX};
+    uint64_t worker_max_inflight_time_us_{0};
+    uint64_t worker_min_dequeue_time_us_{UINT64_MAX};
+    uint64_t worker_max_dequeue_time_us_{0};
 
     // Batch tracking (single writer - worker thread)
     uint64_t total_batches_{0};
