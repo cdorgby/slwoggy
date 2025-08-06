@@ -226,6 +226,7 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
 {
     size_t buf_idx = 0;
     bool should_shutdown = false;
+    int flush_requested = 0;
 
     while (buf_idx < dequeued_count)
     {
@@ -261,11 +262,7 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
             worker_total_flushes_++;
 #endif
-            {
-                std::lock_guard lk(flush_mutex_);
-                flush_done_.fetch_add(1, std::memory_order_release);
-                flush_cv_.notify_all();
-            }
+            flush_requested++;
             buf_idx++;
             continue;
         }
@@ -310,6 +307,14 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
             }
 #endif
         }
+    }
+
+    if (flush_requested > 0)
+    {
+        // Notify flush waiters
+        flush_done_.fetch_add(flush_requested, std::memory_order_release);
+        std::lock_guard lk(flush_mutex_);
+        flush_cv_.notify_all();
     }
 
     return should_shutdown;
