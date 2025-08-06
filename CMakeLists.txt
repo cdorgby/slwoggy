@@ -152,66 +152,37 @@ endif()
 # Enable testing support
 enable_testing()
 
-# Include FetchContent module
-include(FetchContent)
-
-# Add Catch2
-FetchContent_Declare(
-    Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG v3.5.0
-)
-
-# Add taocpp/json
-FetchContent_Declare(
-    taocppjson
-    GIT_REPOSITORY https://github.com/taocpp/json.git
-    GIT_TAG 1.0.0-beta.14
-)
-
-# Add fmt
-FetchContent_Declare(
-    fmt
-    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-    GIT_TAG 11.0.2
-)
-
-# Only fetch and build Catch2 when tests are being built
-FetchContent_GetProperties(Catch2)
-if(NOT catch2_POPULATED)
-    FetchContent_Populate(Catch2)
-    # Add Catch2 with EXCLUDE_FROM_ALL so it's not built by default
-    add_subdirectory(${catch2_SOURCE_DIR} ${catch2_BINARY_DIR} EXCLUDE_FROM_ALL)
+# Check if git submodules are initialized
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/fmt/CMakeLists.txt")
+    message(FATAL_ERROR "Git submodules not initialized. Please run: git submodule update --init --recursive")
 endif()
 
-# Fetch taocpp/json (header-only library)
-FetchContent_GetProperties(taocppjson)
-if(NOT taocppjson_POPULATED)
-    FetchContent_Populate(taocppjson)
-endif()
+# Configure third-party dependencies
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)  # Don't build tests for dependencies
 
-# Make taocpp/json available as a target
+# fmt configuration
+set(FMT_DOC OFF CACHE BOOL "" FORCE)
+set(FMT_TEST OFF CACHE BOOL "" FORCE)
+set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+
+# Add fmt - only built when something links to it
+add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
+
+# Add taocpp/json as interface library (header-only)
 add_library(taocppjson INTERFACE)
-target_include_directories(taocppjson INTERFACE ${taocppjson_SOURCE_DIR}/include)
+target_include_directories(taocppjson INTERFACE ${CMAKE_SOURCE_DIR}/third_party/taocpp-json/include)
 
-# Fetch fmt
-FetchContent_GetProperties(fmt)
-if(NOT fmt_POPULATED)
-    FetchContent_Populate(fmt)
-    # Add fmt with specific options
-    set(FMT_DOC OFF CACHE BOOL "" FORCE)
-    set(FMT_TEST OFF CACHE BOOL "" FORCE)
-    set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${fmt_SOURCE_DIR} ${fmt_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif()
+# Add Catch2 - only built when tests are built
+add_subdirectory(third_party/Catch2 EXCLUDE_FROM_ALL)
 
-# Include Catch2's CMake utilities
-list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+# Include Catch2's CMake utilities for tests
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/third_party/Catch2/extras)
 include(CTest)
 include(Catch)
 
-# Add tests subdirectory
-add_subdirectory(tests)
+# Add tests subdirectory with EXCLUDE_FROM_ALL
+# Tests will only be built when explicitly requested (e.g., make tests)
+add_subdirectory(tests EXCLUDE_FROM_ALL)
 
 # Simple installation rule - just install the executable
 install(TARGETS ${PROJECT_NAME}
