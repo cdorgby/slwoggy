@@ -58,6 +58,7 @@ struct structured_log_key_registry
         return registry;
     }
 
+
     // Overload for string_view to avoid unnecessary string allocation
     uint16_t get_or_register_key(std::string_view key)
     {
@@ -104,7 +105,6 @@ struct structured_log_key_registry
             return id;
         }
     }
-
     /**
      * @brief Look up a key string by its numeric ID
      * @param id The numeric ID to look up
@@ -112,8 +112,21 @@ struct structured_log_key_registry
      */
     std::string_view get_key(uint16_t id) const
     {
+        if (id >= next_key_id_) return "unknown";
+
+        // Fast path: check thread-local cache
+        if (auto it = tl_cache_.id_to_key.find(id); it != tl_cache_.id_to_key.end())
+        {
+            return it->second;
+        }
+        
+        // Slow path: look up in global registry with shared lock
         std::shared_lock lock(mutex_);
-        if (auto it = id_to_key_.find(id); it != id_to_key_.end()) return it->second;
+        if (auto it = id_to_key_.find(id); it != id_to_key_.end()) {
+            // Found in global registry, add to thread-local cache
+            tl_cache_.id_to_key[id] = it->second;
+            return it->second;
+        }
         return "unknown";
     }
 
@@ -207,12 +220,15 @@ struct structured_log_key_registry
     {
         // Maps string_view (pointing to keys_ storage) to ID
         robin_hood::unordered_map<std::string_view, uint16_t> key_to_id;
+        // Maps ID to string_view (pointing to keys_ storage)
+        mutable robin_hood::unordered_map<uint16_t, std::string_view> id_to_key;
 
         // Constructor reserves capacity to avoid rehashing
         thread_cache()
         {
             // Reserve space for all possible keys to avoid any rehashing
             key_to_id.reserve(MAX_STRUCTURED_KEYS);
+            id_to_key.reserve(MAX_STRUCTURED_KEYS);
         }
     };
     inline static thread_local thread_cache tl_cache_;
