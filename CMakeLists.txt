@@ -124,9 +124,9 @@ set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-        #LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_BUFFER_POOL_METRICS
         LOG_COLLECT_DISPATCHER_METRICS
-        #LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
         LOG_COLLECT_DISPATCHER_MSG_RATE
     )
 endif()

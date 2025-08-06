@@ -30,9 +30,8 @@ struct sink_concept
     virtual ~sink_concept() = default;
     
     // Core sink operation
-    virtual size_t process_batch(log_buffer** buffers, size_t count, 
-                                char* write_buffer, size_t write_buffer_size) const = 0;
-    
+    virtual size_t process_batch(log_buffer **buffers, size_t count, char *write_buffer, size_t write_buffer_size) const = 0;
+
     // Type erasure support operations
     virtual sink_concept* clone_in_place(void* buffer) const = 0;
     virtual sink_concept* move_in_place(void* buffer) noexcept = 0;

@@ -16,11 +16,19 @@
 namespace slwoggy
 {
 
+// Cache line size detection
+#if defined(__cpp_lib_hardware_interference_size)
+#include <new>
+inline constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
+#else
+inline constexpr size_t CACHE_LINE_SIZE = 64; // Common cache line size
+#endif
+
 // Buffer pool constants
 inline constexpr size_t BUFFER_POOL_SIZE        = 32 * 1024; // Number of pre-allocated buffers
 inline constexpr size_t LOG_SINK_BUFFER_SIZE    = 64 * 1024; // Intermediate buffer for batching buffers for writes
 inline constexpr size_t MAX_BATCH_SIZE          = 4 * 1024;  // Number of buffer pulled from the queue during dispatch
-inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 32 * 1024; // Max size of buffers waiting to be processed by the
+inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 16 * 1024; // Max size of buffers waiting to be processed by the
                                                              // dispatcher
 
 // Batching configuration constants

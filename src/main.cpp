@@ -149,10 +149,10 @@ int main(int argc, char *argv[])
             if (target_size <= base_size) {
                 // Small message - no padding
                 auto l = LOG(info);
-                // l.printf("T%d i%d", thread_id, i);
+                //l.printf("Thread %d iteration %d", thread_id, i);
                 l.format("Thread {} iteration {}", thread_id, i);
-                //l.add("thread_id", thread_id);
-                //l.add("iteration", i);
+                l.add("thread_id", thread_id);
+                l.add("iteration", i);
             }
             else {
                 // Add padding to reach target size using printf precision
@@ -165,8 +165,8 @@ int main(int argc, char *argv[])
                 //l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
                 l.format("Thread {} iteration {} {}", thread_id, i, std::string_view(padding_buffer, pad_size));
 
-                //l.add("iteration", i);
-                //l.add("thread_id", thread_id);
+                l.add("iteration", i);
+                l.add("thread_id", thread_id);
             }
         }
     };
@@ -194,14 +194,14 @@ int main(int argc, char *argv[])
 
     // Print out metrics from dispatcher and buffer pool
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
-    // Let logs finish processing
-    auto dispatcher_stats = log_line_dispatcher::instance().get_stats();
-
-    if (sink_type == "stdout")
+    // For file sinks, we need an extra flush to ensure everything is written
+    if (sink_type != "stdout")
     {
-        // For file sinks, we need to flush the dispatcher
         log_line_dispatcher::instance().flush();
     }
+    
+    // Now get stats after all flushes are complete
+    auto dispatcher_stats = log_line_dispatcher::instance().get_stats();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // let the console catch up
     if (show_detailed_stats) {

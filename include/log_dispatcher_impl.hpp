@@ -82,16 +82,7 @@ inline void log_line_dispatcher::dispatch(struct log_line &line)
 #endif
             buffer_to_dispatch->release();
         }
-        else
-        {
-#ifdef LOG_COLLECT_DISPATCHER_METRICS
-            total_dispatched_++;
-
-            // Track max queue size
-            auto queue_size = queue_.size_approx();
-            update_atomic_max(max_queue_size_, queue_size);
-#endif
-        }
+        // Successfully enqueued - will be counted by worker thread when processed
     }
 }
 
@@ -174,9 +165,9 @@ inline size_t log_line_dispatcher::dequeue_buffers(moodycamel::ConsumerToken& to
     total_dequeue_time_us_ += dequeue_us;
     dequeue_count_++;
     
-    // Update min/max
-    update_atomic_min(min_dequeue_time_us_, static_cast<uint64_t>(dequeue_us));
-    update_atomic_max(max_dequeue_time_us_, static_cast<uint64_t>(dequeue_us));
+    // Update min/max (using non-atomic worker thread locals)
+    update_min(worker_min_dequeue_time_us_, static_cast<uint64_t>(dequeue_us));
+    update_max(worker_max_dequeue_time_us_, static_cast<uint64_t>(dequeue_us));
 #endif
     
     return total_dequeued;
@@ -248,6 +239,9 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
             {
                 size_t remaining_count = dequeued_count - buf_idx - 1;
                 size_t processed = process_buffer_batch(buffers, buf_idx + 1, remaining_count, config);
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+                total_dispatched_ += processed;
+#endif
             }
             
             // Release all buffers (processed and unprocessed) - matching original behavior
@@ -264,6 +258,9 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
         if (buffer->is_flush_marker())
         {
             buffer->release();
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+            worker_total_flushes_++;
+#endif
             {
                 std::lock_guard lk(flush_mutex_);
                 flush_done_.fetch_add(1, std::memory_order_release);
@@ -287,10 +284,14 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
             }
 
             buf_idx += processed;
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+            total_dispatched_ += processed;
+#endif
         }
         else
         {
             // No sinks - check each buffer individually for markers
+            size_t start_idx = buf_idx;
             while (buf_idx < dequeued_count)
             {
                 log_buffer *buf = buffers[buf_idx];
@@ -302,6 +303,12 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
                 buf->release();
                 buf_idx++;
             }
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+            // Count messages processed even with no sinks
+            if (buf_idx > start_idx) {
+                total_dispatched_ += (buf_idx - start_idx);
+            }
+#endif
         }
     }
 
@@ -346,10 +353,14 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
                 }
 
                 buf_idx += processed;
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+                total_dispatched_ += processed;
+#endif
             }
             else
             {
                 // No sinks - check each buffer individually for markers
+                size_t start_idx = buf_idx;
                 while (buf_idx < dequeued_count)
                 {
                     log_buffer *buf = buffers[buf_idx];
@@ -361,6 +372,12 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
                     buf->release();
                     buf_idx++;
                 }
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+                // Count messages processed even with no sinks
+                if (buf_idx > start_idx) {
+                    total_dispatched_ += (buf_idx - start_idx);
+                }
+#endif
             }
         }
     }
@@ -393,6 +410,13 @@ inline void log_line_dispatcher::worker_thread_func()
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
         // Track batch statistics
         update_batch_stats(dequeued_count);
+        
+        // Track max queue size from worker thread
+        auto queue_size = queue_.size_approx();
+        if (queue_size > worker_max_queue_size_)
+        {
+            worker_max_queue_size_ = queue_size;
+        }
 
         // Track batch dispatch timing
         auto dispatch_start = log_fast_timestamp();
@@ -436,10 +460,6 @@ inline void log_line_dispatcher::update_sink_config(std::unique_ptr<sink_config>
 // Flush implementation
 inline void log_line_dispatcher::flush()
 {
-#ifdef LOG_COLLECT_DISPATCHER_METRICS
-    total_flushes_.fetch_add(1, std::memory_order_relaxed);
-#endif
-
     auto *marker = buffer_pool::instance().acquire();
     if (!marker) return;
 
@@ -461,8 +481,8 @@ inline log_line_dispatcher::stats log_line_dispatcher::get_stats() const
     s.total_dispatched       = total_dispatched_;
     s.queue_enqueue_failures = queue_enqueue_failures_;
     s.current_queue_size     = queue_.size_approx();
-    s.max_queue_size         = max_queue_size_.load(std::memory_order_relaxed);
-    s.total_flushes          = total_flushes_.load(std::memory_order_relaxed);
+    s.max_queue_size         = worker_max_queue_size_;
+    s.total_flushes          = worker_total_flushes_;
     s.messages_dropped       = messages_dropped_;
     s.queue_usage_percent    = (s.current_queue_size * 100.0f) / MAX_DISPATCH_QUEUE_SIZE;
     s.worker_iterations      = worker_iterations_;
@@ -478,8 +498,8 @@ inline log_line_dispatcher::stats log_line_dispatcher::get_stats() const
     }
     else { s.avg_dispatch_time_us = 0.0; }
 
-    // Get max dispatch time
-    s.max_dispatch_time_us = max_dispatch_time_us_.load(std::memory_order_relaxed);
+    // Get max dispatch time from worker thread local
+    s.max_dispatch_time_us = worker_max_dispatch_time_us_;
 
     // Calculate uptime
     s.uptime = log_fast_timestamp() - start_time_;
@@ -491,19 +511,19 @@ inline log_line_dispatcher::stats log_line_dispatcher::get_stats() const
     s.messages_per_second_60s = calculate_rate_for_window(std::chrono::seconds(60));
     #endif
 
-    // Calculate batch statistics
+    // Calculate batch statistics from worker thread locals
     s.total_batches  = total_batches_;
-    s.min_batch_size = min_batch_size_.load(std::memory_order_relaxed);
-    s.max_batch_size = max_batch_size_.load(std::memory_order_relaxed);
+    s.min_batch_size = worker_min_batch_size_;
+    s.max_batch_size = worker_max_batch_size_;
     if (total_batches_ > 0) { s.avg_batch_size = static_cast<double>(total_batch_messages_) / total_batches_; }
     else { s.avg_batch_size = 0.0; }
     
     // Handle case where no batches have been processed
     if (s.min_batch_size == UINT64_MAX) { s.min_batch_size = 0; }
 
-    // Calculate in-flight time statistics
-    s.min_inflight_time_us = min_inflight_time_us_.load(std::memory_order_relaxed);
-    s.max_inflight_time_us = max_inflight_time_us_.load(std::memory_order_relaxed);
+    // Calculate in-flight time statistics from worker thread locals
+    s.min_inflight_time_us = worker_min_inflight_time_us_;
+    s.max_inflight_time_us = worker_max_inflight_time_us_;
 
     // Handle case where no messages have been processed
     if (s.min_inflight_time_us == UINT64_MAX) { s.min_inflight_time_us = 0; }
@@ -514,9 +534,9 @@ inline log_line_dispatcher::stats log_line_dispatcher::get_stats() const
     }
     else { s.avg_inflight_time_us = 0.0; }
 
-    // Calculate dequeue timing statistics
-    s.min_dequeue_time_us = min_dequeue_time_us_.load(std::memory_order_relaxed);
-    s.max_dequeue_time_us = max_dequeue_time_us_.load(std::memory_order_relaxed);
+    // Calculate dequeue timing statistics from worker thread locals
+    s.min_dequeue_time_us = worker_min_dequeue_time_us_;
+    s.max_dequeue_time_us = worker_max_dequeue_time_us_;
     
     // Handle case where no dequeues have occurred
     if (s.min_dequeue_time_us == UINT64_MAX) { s.min_dequeue_time_us = 0; }
@@ -526,7 +546,7 @@ inline log_line_dispatcher::stats log_line_dispatcher::get_stats() const
         s.avg_dequeue_time_us = static_cast<double>(total_dequeue_time_us_) / dequeue_count_;
     }
     else { s.avg_dequeue_time_us = 0.0; }
-
+    
     return s;
 }
 
@@ -545,15 +565,15 @@ inline void log_line_dispatcher::reset_stats()
     inflight_count_         = 0;
     total_dequeue_time_us_  = 0;
     dequeue_count_          = 0;
-    max_queue_size_.store(0, std::memory_order_relaxed);
-    total_flushes_.store(0, std::memory_order_relaxed);
-    max_dispatch_time_us_.store(0, std::memory_order_relaxed);
-    min_batch_size_.store(UINT64_MAX, std::memory_order_relaxed);
-    max_batch_size_.store(0, std::memory_order_relaxed);
-    min_inflight_time_us_.store(UINT64_MAX, std::memory_order_relaxed);
-    max_inflight_time_us_.store(0, std::memory_order_relaxed);
-    min_dequeue_time_us_.store(UINT64_MAX, std::memory_order_relaxed);
-    max_dequeue_time_us_.store(0, std::memory_order_relaxed);
+    worker_max_queue_size_ = 0;
+    worker_total_flushes_ = 0;
+    worker_max_dispatch_time_us_ = 0;
+    worker_min_batch_size_ = UINT64_MAX;
+    worker_max_batch_size_ = 0;
+    worker_min_inflight_time_us_ = UINT64_MAX;
+    worker_max_inflight_time_us_ = 0;
+    worker_min_dequeue_time_us_ = UINT64_MAX;
+    worker_max_dequeue_time_us_ = 0;
 
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
     rate_write_idx_        = 0;
@@ -566,38 +586,14 @@ inline void log_line_dispatcher::reset_stats()
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
 // Helper function implementations
 
-inline void log_line_dispatcher::update_atomic_min(std::atomic<uint64_t> &atomic_val, uint64_t new_val)
-{
-    uint64_t current = atomic_val.load(std::memory_order_relaxed);
-    while (new_val < current)
-    {
-        if (atomic_val.compare_exchange_weak(current, new_val, std::memory_order_relaxed, std::memory_order_relaxed))
-        {
-            break;
-        }
-    }
-}
-
-inline void log_line_dispatcher::update_atomic_max(std::atomic<uint64_t> &atomic_val, uint64_t new_val)
-{
-    uint64_t current = atomic_val.load(std::memory_order_relaxed);
-    while (new_val > current)
-    {
-        if (atomic_val.compare_exchange_weak(current, new_val, std::memory_order_relaxed, std::memory_order_relaxed))
-        {
-            break;
-        }
-    }
-}
-
 inline void log_line_dispatcher::update_batch_stats(size_t dequeued_count)
 {
     total_batches_++;
     total_batch_messages_ += dequeued_count;
 
-    // Update min/max batch size
-    update_atomic_min(min_batch_size_, static_cast<uint64_t>(dequeued_count));
-    update_atomic_max(max_batch_size_, static_cast<uint64_t>(dequeued_count));
+    // Update min/max batch size (using non-atomic worker thread locals)
+    update_min(worker_min_batch_size_, static_cast<uint64_t>(dequeued_count));
+    update_max(worker_max_batch_size_, static_cast<uint64_t>(dequeued_count));
 }
 
 inline void log_line_dispatcher::track_inflight_times(log_buffer **buffers, size_t start_idx, size_t count)
@@ -613,9 +609,9 @@ inline void log_line_dispatcher::track_inflight_times(log_buffer **buffers, size
             total_inflight_time_us_ += inflight_us;
             inflight_count_++;
 
-            // Update min/max
-            update_atomic_min(min_inflight_time_us_, static_cast<uint64_t>(inflight_us));
-            update_atomic_max(max_inflight_time_us_, static_cast<uint64_t>(inflight_us));
+            // Update min/max (using non-atomic worker thread locals)
+            update_min(worker_min_inflight_time_us_, static_cast<uint64_t>(inflight_us));
+            update_max(worker_max_inflight_time_us_, static_cast<uint64_t>(inflight_us));
         }
     }
 }
@@ -628,8 +624,10 @@ inline void log_line_dispatcher::update_dispatch_timing_stats(std::chrono::stead
     dispatch_count_for_avg_ += message_count;
 
     // Update max dispatch time (per buffer average for batch)
+    // This represents the time to process each buffer, not the total batch time
+    // Example: 120µs to process 10 buffers = 12µs per buffer
     auto per_buffer_us = dispatch_us / message_count;
-    update_atomic_max(max_dispatch_time_us_, static_cast<uint64_t>(per_buffer_us));
+    update_max(worker_max_dispatch_time_us_, static_cast<uint64_t>(per_buffer_us));
 }
 
     #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE

@@ -208,17 +208,20 @@
  *    - queue_usage_percent: Queue utilization
  *    - worker_iterations: Worker loop iterations
  *    - active_sinks: Currently configured sinks
- *    - avg_dispatch_time_us: Average sink dispatch time
- *    - max_dispatch_time_us: Maximum sink dispatch time
+ *    - avg_dispatch_time_us: Average sink dispatch time PER BUFFER (batch time / buffer count)
+ *    - max_dispatch_time_us: Maximum sink dispatch time PER BUFFER (worst per-buffer average)
  *    - messages_per_second_1s: Message rate over last 1 second (requires LOG_COLLECT_DISPATCHER_MSG_RATE)
  *    - messages_per_second_10s: Message rate over last 10 seconds (requires LOG_COLLECT_DISPATCHER_MSG_RATE)
  *    - messages_per_second_60s: Message rate over last 60 seconds (requires LOG_COLLECT_DISPATCHER_MSG_RATE)
  *    - avg_batch_size: Average messages per batch
  *    - total_batches: Total batches processed
  *    - max_batch_size: Maximum batch size observed
- *    - min_inflight_time_us: Minimum in-flight time (creation to sink completion)
- *    - avg_inflight_time_us: Average in-flight time
- *    - max_inflight_time_us: Maximum in-flight time
+ *    - min_inflight_time_us: Minimum in-flight time (buffer creation to sink completion)
+ *    - avg_inflight_time_us: Average in-flight time (buffer creation to sink completion)
+ *    - max_inflight_time_us: Maximum in-flight time (buffer creation to sink completion)
+ *    - min_dequeue_time_us: Minimum TOTAL time in dequeue_buffers (includes waiting)
+ *    - avg_dequeue_time_us: Average TOTAL time in dequeue_buffers (includes waiting)
+ *    - max_dequeue_time_us: Maximum TOTAL time in dequeue_buffers (includes waiting)
  *    - uptime: Time since dispatcher started
  *
  * 3. Structured Logging Statistics:
