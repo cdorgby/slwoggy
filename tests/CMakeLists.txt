@@ -6,6 +6,8 @@ set(TEST_SOURCES
     test_log_statistics.cpp
     test_log_level_control.cpp
     test_log_site_control.cpp
+    test_generic_buffer_pool.cpp
+    test_static_buffer.cpp
 )
 
 # Function to set per-file compile definitions for tests
@@ -116,8 +118,32 @@ target_include_directories(test_log_site_control PRIVATE
 add_metrics_definitions(test_log_site_control)
 catch_discover_tests(test_log_site_control)
 
+# Generic buffer pool tests
+set(TEST_GENERIC_BUFFER_POOL_SOURCES main.cpp test_generic_buffer_pool.cpp)
+add_executable(test_generic_buffer_pool ${TEST_GENERIC_BUFFER_POOL_SOURCES})
+set_target_properties(test_generic_buffer_pool PROPERTIES EXCLUDE_FROM_ALL TRUE)
+set_test_source_file_compile_definitions(test_generic_buffer_pool "${TEST_GENERIC_BUFFER_POOL_SOURCES}")
+target_link_libraries(test_generic_buffer_pool PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
+target_include_directories(test_generic_buffer_pool PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_metrics_definitions(test_generic_buffer_pool)
+catch_discover_tests(test_generic_buffer_pool)
+
+# Static buffer tests
+set(TEST_STATIC_BUFFER_SOURCES main.cpp test_static_buffer.cpp)
+add_executable(test_static_buffer ${TEST_STATIC_BUFFER_SOURCES})
+set_target_properties(test_static_buffer PROPERTIES EXCLUDE_FROM_ALL TRUE)
+set_test_source_file_compile_definitions(test_static_buffer "${TEST_STATIC_BUFFER_SOURCES}")
+target_link_libraries(test_static_buffer PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
+target_include_directories(test_static_buffer PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_metrics_definitions(test_static_buffer)
+catch_discover_tests(test_static_buffer)
+
 # Custom target to build all tests
 add_custom_target(tests
-    DEPENDS all_tests test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control
+    DEPENDS all_tests test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control test_generic_buffer_pool test_static_buffer
     COMMENT "Building all test executables"
 )
