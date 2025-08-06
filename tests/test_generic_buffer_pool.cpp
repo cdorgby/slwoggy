@@ -165,8 +165,8 @@ TEST_CASE("generic_buffer_pool basic operations", "[generic_buffer_pool]")
         // Check that buffers are properly spaced
         for (size_t i = 1; i < buffers.size(); ++i)
         {
-            ptrdiff_t diff = std::abs(buffers[i] - buffers[i-1]);
-            REQUIRE(diff == 2048);
+            ptrdiff_t diff = buffers[i] - buffers[i-1];
+            REQUIRE(std::abs(diff) == 2048);
         }
     }
 }
@@ -386,7 +386,8 @@ TEST_CASE("generic_buffer_pool memory safety", "[generic_buffer_pool]")
         char* buffer2 = pool.acquire_storage();
         
         REQUIRE(buffer1 != buffer2);
-        REQUIRE(std::abs(buffer2 - buffer1) >= 256);
+        ptrdiff_t diff = buffer2 - buffer1;
+        REQUIRE(std::abs(diff) >= 256);
         
         // Write to buffers
         std::memset(buffer1, 'A', 256);

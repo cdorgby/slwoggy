@@ -18,6 +18,10 @@ using namespace slwoggy;
 // Test buffer using C++20 static_buffer
 using test_buffer = static_buffer<64, 0, 32>;  // 64 byte header, dynamic data, 32 byte footer
 
+// Helper constant for tests - accounts for aligned buffer header
+// The actual header size is implementation-dependent due to alignment
+constexpr size_t BUFFER_HEADER_SIZE = 8;  // alignas(std::max_align_t) typically 8 bytes
+
 TEST_CASE("static_buffer compile-time layout", "[static_buffer]")
 {
     SECTION("compile-time layout properties")
@@ -58,7 +62,7 @@ TEST_CASE("static_buffer compile-time layout", "[static_buffer]")
         REQUIRE(data.start == 64);
         // The actual capacity depends on internal header alignment
         // Just verify it got the remaining space after header and footer
-        size_t expected_remaining = 512 - 64 - 32 - 8;  // 8 bytes for aligned header
+        size_t expected_remaining = 512 - 64 - 32 - BUFFER_HEADER_SIZE;
         REQUIRE(data.capacity == expected_remaining);
         
         // Check footer region (32 bytes)
@@ -137,8 +141,8 @@ TEST_CASE("static_buffer various layouts", "[static_buffer]")
         
         REQUIRE(buffer.region_count() == 1);
         auto& region = buffer.get_region<0>();
-        // Account for aligned header (8 bytes on most platforms)
-        REQUIRE(region.capacity == 1024 - 8);
+        // Account for aligned header
+        REQUIRE(region.capacity == 1024 - BUFFER_HEADER_SIZE);
         
         buffer.release();
     }
@@ -175,8 +179,8 @@ TEST_CASE("static_buffer various layouts", "[static_buffer]")
         REQUIRE(buffer.get_region<3>().capacity == 100);
         
         // The two dynamic regions should split the remaining space
-        // Account for 8-byte aligned header
-        size_t remaining = 1024 - 8 - 200;
+        // Account for aligned header
+        size_t remaining = 1024 - BUFFER_HEADER_SIZE - 200;
         size_t each = remaining / 2;
         
         REQUIRE(buffer.get_region<1>().capacity == each);
@@ -216,8 +220,8 @@ TEST_CASE("static_buffer type aliases", "[static_buffer]")
         meta_buffer buffer(storage, 2048, &pool);
         
         REQUIRE(buffer.get_region<0>().capacity == 512);  // metadata
-        // Account for 8-byte aligned header
-        REQUIRE(buffer.get_region<1>().capacity == 2048 - 8 - 512);  // data
+        // Account for aligned header
+        REQUIRE(buffer.get_region<1>().capacity == 2048 - BUFFER_HEADER_SIZE - 512);  // data
         
         buffer.release();
     }

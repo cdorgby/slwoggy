@@ -184,7 +184,7 @@ public:
     
 private:
     // Intrusive buffer header for cleaner memory layout
-    struct alignas(alignof(std::max_align_t)) buffer_header {
+    struct alignas(std::max_align_t) buffer_header {
         std::atomic<int> ref_count;
         // Padding ensures data starts at max_align_t boundary
     };
@@ -494,11 +494,8 @@ public:
     }
 };
 
-// C++20 deduction guide for easier usage
-template<size_t... SIZES>
-static_buffer(char*, size_t, generic_buffer_pool*) -> static_buffer<SIZES...>;
-
 // Convenience type aliases with descriptive names
+// Note: Deduction guides don't work here since SIZES... cannot be deduced from constructor args
 template<size_t HEADER_SIZE, size_t FOOTER_SIZE>
 using header_body_footer_buffer = static_buffer<HEADER_SIZE, 0, FOOTER_SIZE>;
 
