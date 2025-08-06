@@ -60,15 +60,20 @@ inline size_t log_line::write_header()
     // Format header: "TTTTTTTT.mmm [LEVEL]    file:line "
     // Note: header doesn't need padding since it's the first line
     size_t text_len_before = buffer_->len();
-    buffer_->printf_with_padding("%08lld.%03lld [%-5s] %-10s %*.*s:%d ",
-                                 static_cast<long long>(ms),
-                                 static_cast<long long>(us),
-                                 log_level_names[static_cast<int>(level_)],
-                                 module_.detail->name,
-                                 log_site_registry::longest_file(),
-                                 std::min(log_site_registry::longest_file(), static_cast<int>(file_.size())),
-                                 file_.data(),
-                                 line_);
+    
+    // Use fmt::format_to_buffer_with_padding for better performance
+    int file_width = log_site_registry::longest_file();
+    int actual_file_len = std::min(file_width, static_cast<int>(file_.size()));
+    
+    buffer_->format_to_buffer_with_padding("{:08}.{:03} [{:<5}] {:<10} {:>{}.{}}:{} ",
+                                           ms,
+                                           us,
+                                           log_level_names[static_cast<int>(level_)],
+                                           module_.detail->name,
+                                           file_.substr(0, actual_file_len),
+                                           file_width,
+                                           actual_file_len,
+                                           line_);
 
     buffer_->header_width_ = buffer_->len() - text_len_before;
     return buffer_->header_width_;

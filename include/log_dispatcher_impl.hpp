@@ -144,7 +144,7 @@ inline size_t log_line_dispatcher::dequeue_buffers(moodycamel::ConsumerToken& to
     // Phase 3: Continue polling while data is still flowing
     while (total_dequeued < MAX_BATCH_SIZE)
     {
-        // Short poll - always use minimum time (1ms which is the API minimum)
+        // Short poll - 1ms gives OS time to context switch producers
         size_t additional = queue_.wait_dequeue_bulk_timed(token, 
                                                           buffers + total_dequeued, 
                                                           MAX_BATCH_SIZE - total_dequeued,

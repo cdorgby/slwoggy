@@ -74,8 +74,35 @@ struct structured_log_key_registry
             }
         }
 
-        // Need to register - now we must allocate a string
-        return get_or_register_key(std::string(key));
+        // Slow path: Need to register new key
+        // Double-check under exclusive lock before allocating
+        {
+            std::unique_lock lock(mutex_);
+            
+            // Check again in case another thread registered while we waited for exclusive lock
+            if (auto it = key_to_id_.find(key); it != key_to_id_.end())
+            {
+                tl_cache_.key_to_id[it->first] = it->second;
+                return it->second;
+            }
+            
+            // Now we know for sure it doesn't exist, allocate and register
+            if (next_key_id_ >= MAX_STRUCTURED_KEYS) 
+            {
+                throw std::runtime_error("Too many structured log keys");
+            }
+            
+            keys_.push_back(std::string(key)); // Only allocate when truly needed
+            uint16_t id = next_key_id_++;
+            auto key_view = std::string_view(keys_.back());
+            key_to_id_[key_view] = id;
+            id_to_key_[id] = key_view;
+            
+            // Add to thread-local cache using the stable string_view
+            tl_cache_.key_to_id[key_view] = id;
+            
+            return id;
+        }
     }
 
     /**
@@ -173,66 +200,6 @@ struct structured_log_key_registry
 
   private:
     structured_log_key_registry() { keys_.reserve(MAX_STRUCTURED_KEYS); }
-
-    /**
-     * @brief Get or register a key, returning its numeric ID
-     * @param key The string key to register
-     * @return Numeric ID for the key (stable across calls)
-     * @throws std::runtime_error if MAX_STRUCTURED_KEYS limit is exceeded
-     *
-     * @note This method uses a thread-local cache to avoid lock contention.
-     *       The fast path (cache hit) requires no locking at all.
-     *
-     * @warning Memory usage: Each thread that logs structured data will allocate
-     *          approximately (MAX_STRUCTURED_KEYS * average_key_length) bytes
-     *          for its thread-local cache. With the default MAX_STRUCTURED_KEYS=256,
-     *          this is typically 2-4KB per thread.
-     */
-    uint16_t get_or_register_key(const std::string &key)
-    {
-        // Fast path: check thread-local cache (no lock needed)
-        if (auto it = tl_cache_.key_to_id.find(key); it != tl_cache_.key_to_id.end()) { return it->second; }
-
-        // Medium path: check global registry with shared lock
-        {
-            std::shared_lock lock(mutex_);
-            if (auto it = key_to_id_.find(key); it != key_to_id_.end())
-            {
-                // Found in global registry, add to thread-local cache
-                // Note: it->first is a string_view pointing to stable storage in keys_
-                tl_cache_.key_to_id[it->first] = it->second;
-                return it->second;
-            }
-        }
-
-        uint16_t id;
-        std::string_view key_view;
-
-        {
-            // Slow path: register new key with exclusive lock
-            std::unique_lock lock(mutex_);
-
-            // Double-check in case another thread registered while we waited for lock
-            if (auto it = key_to_id_.find(key); it != key_to_id_.end())
-            {
-                tl_cache_.key_to_id[it->first] = it->second;
-                return it->second;
-            }
-
-            if (next_key_id_ >= MAX_STRUCTURED_KEYS) throw std::runtime_error("Too many structured log keys");
-
-            keys_.push_back(key); // Push first (might throw, so no increments before success)
-            id                   = next_key_id_++;
-            key_view             = keys_.back();
-            key_to_id_[key_view] = id;
-            id_to_key_[id]       = key_view;
-        }
-
-        // Add to thread-local cache using the stable string_view
-        tl_cache_.key_to_id[key_view] = id;
-
-        return id;
-    }
 
   private:
     // Thread-local cache for fast key lookups
