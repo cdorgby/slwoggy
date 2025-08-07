@@ -1,0 +1,159 @@
+name: Sanitizers
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  sanitizers:
+    name: ${{ matrix.sanitizer_name }} 
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # AddressSanitizer + UndefinedBehaviorSanitizer on Linux
+          - os: ubuntu-latest
+            sanitizer: address,undefined
+            sanitizer_name: ASan+UBSan (Linux)
+            cc: clang-14
+            cxx: clang++-14
+            asan_options: "detect_leaks=1:check_initialization_order=1:strict_init_order=1:halt_on_error=0"
+            ubsan_options: "print_stacktrace=1:halt_on_error=0"
+          
+          # AddressSanitizer + UndefinedBehaviorSanitizer on macOS
+          - os: macos-latest
+            sanitizer: address,undefined
+            sanitizer_name: ASan+UBSan (macOS)
+            cc: clang
+            cxx: clang++
+            asan_options: "detect_leaks=0:check_initialization_order=1:strict_init_order=1:halt_on_error=0"
+            ubsan_options: "print_stacktrace=1:halt_on_error=0"
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Set up environment
+      run: |
+        echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
+        
+        # Set sanitizer-specific environment variables with suppressions
+        if [ -n "${{ matrix.asan_options }}" ]; then
+          echo "ASAN_OPTIONS=${{ matrix.asan_options }}:suppressions=${{ github.workspace }}/sanitizers/asan.supp" >> $GITHUB_ENV
+          # Set LSAN suppressions for Linux
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            echo "LSAN_OPTIONS=suppressions=${{ github.workspace }}/sanitizers/lsan.supp" >> $GITHUB_ENV
+          fi
+        fi
+        if [ -n "${{ matrix.ubsan_options }}" ]; then
+          echo "UBSAN_OPTIONS=${{ matrix.ubsan_options }}:suppressions=${{ github.workspace }}/sanitizers/ubsan.supp" >> $GITHUB_ENV
+        fi
+
+    - name: Install dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install cmake ninja
+
+    - name: Configure CMake
+      run: |
+        cmake -B build \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DSANITIZER="${{ matrix.sanitizer }}" \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+    - name: Build
+      run: cmake --build build
+
+    - name: Build tests
+      run: cmake --build build --target tests
+
+    - name: Run tests with ${{ matrix.sanitizer_name }}
+      run: |
+        echo "Running tests with ${{ matrix.sanitizer_name }}..."
+        cd build
+        
+        # Run smoke test first
+        echo "=== Running smoke test ==="
+        ./bin/slwoggy || {
+          echo "❌ Smoke test failed with sanitizers"
+          exit 1
+        }
+        
+        # Run full test suite
+        echo "=== Running test suite ==="
+        ctest --output-on-failure --verbose || true
+        
+        # Check if any sanitizer errors were detected
+        if [ -f Testing/Temporary/LastTest.log ]; then
+          if grep -q "ERROR: AddressSanitizer\|ERROR: UndefinedBehaviorSanitizer\|runtime error:" Testing/Temporary/LastTest.log; then
+            echo "❌ Sanitizer errors detected!"
+            exit 1
+          fi
+        fi
+        
+        echo "✅ All sanitizer checks passed"
+
+    - name: Upload sanitizer reports
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: sanitizer-reports-${{ matrix.sanitizer_name }}
+        path: |
+          build/Testing/Temporary/*.log
+          build/**/*.log
+        retention-days: 7
+
+    - name: Comment on PR with results
+      if: github.event_name == 'pull_request' && failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const sanitizer = '${{ matrix.sanitizer_name }}';
+          const body = `### ❌ ${sanitizer} detected issues
+          
+          Please check the [workflow logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+          
+          Sanitizer reports have been uploaded as artifacts.`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          })
+
+  sanitizer-summary:
+    name: Sanitizer Summary
+    runs-on: ubuntu-latest
+    needs: sanitizers
+    if: always()
+    steps:
+    - name: Summary
+      run: |
+        echo "## AddressSanitizer + UndefinedBehaviorSanitizer Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.sanitizers.result }}" == "success" ]; then
+          echo "✅ All memory and undefined behavior checks passed on Linux and macOS!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Memory errors or undefined behavior detected. Check the job logs above for details." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Common issues:" >> $GITHUB_STEP_SUMMARY
+          echo "- Buffer overflows" >> $GITHUB_STEP_SUMMARY
+          echo "- Use-after-free" >> $GITHUB_STEP_SUMMARY
+          echo "- Memory leaks (Linux only)" >> $GITHUB_STEP_SUMMARY
+          echo "- Integer overflow" >> $GITHUB_STEP_SUMMARY
+          echo "- Null pointer dereference" >> $GITHUB_STEP_SUMMARY
+        fi

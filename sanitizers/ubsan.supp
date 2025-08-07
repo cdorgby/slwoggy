@@ -1,0 +1,32 @@
+# UndefinedBehaviorSanitizer suppressions for slwoggy
+# Ignore all issues in third-party libraries
+
+# Ignore all UBSan issues in third-party paths
+# Note: UBSan uses different suppression format
+# Format: issue_type:file_pattern
+
+# Ignore in fmt library
+vptr:*/third_party/fmt/*
+alignment:*/third_party/fmt/*
+null:*/third_party/fmt/*
+
+# Ignore in Catch2
+vptr:*/third_party/Catch2/*
+alignment:*/third_party/Catch2/*
+null:*/third_party/Catch2/*
+
+# Ignore in taocpp-json
+vptr:*/third_party/taocpp-json/*
+alignment:*/third_party/taocpp-json/*
+null:*/third_party/taocpp-json/*
+
+# System libraries
+vptr:/usr/*
+alignment:/usr/*
+null:/usr/*
+vptr:/lib/*
+alignment:/lib/*
+null:/lib/*
+vptr:/System/*
+alignment:/System/*
+null:/System/*

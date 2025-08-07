@@ -23,6 +23,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MemCheck" "Profile")
 endif()
 
+# Sanitizer options
+set(SANITIZER "" CACHE STRING "Sanitizer type: address, thread, undefined, memory, leak")
+set_property(CACHE SANITIZER PROPERTY STRINGS "" "address" "thread" "undefined" "memory" "leak" "address,undefined")
+
 # Custom MemCheck build type
 set(CMAKE_CXX_FLAGS_MEMCHECK "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address,undefined -fno-omit-frame-pointer -fno-optimize-sibling-calls" CACHE STRING 
     "Flags used by the C++ compiler during MemCheck builds." FORCE)
@@ -56,6 +60,51 @@ mark_as_advanced(
 
 # Display current build type
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
+# Apply sanitizer flags if specified
+if(SANITIZER)
+    message(STATUS "Sanitizer enabled: ${SANITIZER}")
+    
+    # Basic sanitizer flags
+    set(SANITIZER_FLAGS -fsanitize=${SANITIZER} -fno-omit-frame-pointer)
+    
+    # Additional flags based on sanitizer type
+    if(SANITIZER MATCHES "address")
+        list(APPEND SANITIZER_FLAGS -fno-optimize-sibling-calls)
+        add_compile_definitions(_GLIBCXX_DEBUG _GLIBCXX_DEBUG_PEDANTIC)
+    elseif(SANITIZER MATCHES "thread")
+        list(APPEND SANITIZER_FLAGS -fPIE)
+    elseif(SANITIZER MATCHES "memory")
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message(FATAL_ERROR "MemorySanitizer is only supported by Clang")
+        endif()
+        list(APPEND SANITIZER_FLAGS -fPIE -fno-optimize-sibling-calls)
+    endif()
+    
+    # Apply flags
+    add_compile_options(${SANITIZER_FLAGS})
+    add_link_options(${SANITIZER_FLAGS})
+    
+    # Set runtime options hint with suppressions
+    set(SANITIZER_SUPP_DIR "${CMAKE_SOURCE_DIR}/sanitizers")
+    if(SANITIZER MATCHES "address")
+        set(ASAN_SUPP_FILE "${SANITIZER_SUPP_DIR}/asan.supp")
+        message(STATUS "Runtime: ASAN_OPTIONS=detect_leaks=1:check_initialization_order=1:strict_init_order=1:halt_on_error=0:suppressions=${ASAN_SUPP_FILE}")
+        set(ENV{ASAN_OPTIONS} "suppressions=${ASAN_SUPP_FILE}")
+    elseif(SANITIZER MATCHES "thread")
+        set(TSAN_SUPP_FILE "${SANITIZER_SUPP_DIR}/tsan.supp")
+        message(STATUS "Runtime: TSAN_OPTIONS=halt_on_error=0:history_size=7:suppressions=${TSAN_SUPP_FILE}")
+        set(ENV{TSAN_OPTIONS} "suppressions=${TSAN_SUPP_FILE}")
+    elseif(SANITIZER MATCHES "undefined")
+        set(UBSAN_SUPP_FILE "${SANITIZER_SUPP_DIR}/ubsan.supp")
+        message(STATUS "Runtime: UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0:suppressions=${UBSAN_SUPP_FILE}")
+        set(ENV{UBSAN_OPTIONS} "suppressions=${UBSAN_SUPP_FILE}")
+    elseif(SANITIZER MATCHES "memory")
+        set(MSAN_SUPP_FILE "${SANITIZER_SUPP_DIR}/msan.supp")
+        message(STATUS "Runtime: MSAN_OPTIONS=halt_on_error=0:suppressions=${MSAN_SUPP_FILE}")
+        set(ENV{MSAN_OPTIONS} "suppressions=${MSAN_SUPP_FILE}")
+    endif()
+endif()
 
 # Enable additional debug features for MemCheck builds
 if(CMAKE_BUILD_TYPE STREQUAL "MemCheck")
@@ -124,7 +173,7 @@ set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
+        #LOG_COLLECT_BUFFER_POOL_METRICS
         LOG_COLLECT_DISPATCHER_METRICS
         LOG_COLLECT_STRUCTURED_METRICS
         LOG_COLLECT_DISPATCHER_MSG_RATE

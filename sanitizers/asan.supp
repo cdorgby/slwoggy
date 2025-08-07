@@ -1,0 +1,25 @@
+# AddressSanitizer suppressions for slwoggy
+# Ignore all issues in third-party libraries
+
+# Ignore any issues in fmt library
+interceptor_via_fun:*third_party/fmt*
+interceptor_via_lib:*libfmt*
+
+# Ignore any issues in Catch2
+interceptor_via_fun:*third_party/Catch2*
+interceptor_via_lib:*Catch2*
+
+# Ignore any issues in taocpp-json
+interceptor_via_fun:*third_party/taocpp-json*
+
+# System libraries
+interceptor_via_lib:libsystem_*
+interceptor_via_lib:libdyld.dylib
+interceptor_via_lib:libc++*
+interceptor_via_lib:libstdc++*
+interceptor_via_fun:*Foundation*
+interceptor_via_fun:*CoreFoundation*
+interceptor_via_lib:libobjc.A.dylib
+
+# ODR violations in third-party code
+odr_violation:*third_party*

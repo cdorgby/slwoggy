@@ -338,10 +338,13 @@ class log_buffer_metadata_adapter
         }
 
         // Write: [key_id:2][length:2][value:length]
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
+        // Use memcpy to avoid alignment issues
+        uint16_t key_id_val = key_id;
+        std::memcpy(data_ + metadata_pos_, &key_id_val, sizeof(uint16_t));
         metadata_pos_ += sizeof(uint16_t);
 
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value.size());
+        uint16_t length_val = static_cast<uint16_t>(value.size());
+        std::memcpy(data_ + metadata_pos_, &length_val, sizeof(uint16_t));
         metadata_pos_ += sizeof(uint16_t);
 
         std::memcpy(data_ + metadata_pos_, value.data(), value.size());
@@ -387,9 +390,10 @@ class log_buffer_metadata_adapter
             return false;
         }
 
-        // Write key_id
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
-        size_t key_pos                                       = metadata_pos_;
+        // Write key_id (use memcpy to avoid alignment issues)
+        uint16_t key_id_val = key_id;
+        std::memcpy(data_ + metadata_pos_, &key_id_val, sizeof(uint16_t));
+        size_t key_pos = metadata_pos_;
         metadata_pos_ += sizeof(uint16_t);
 
         // Reserve space for length (will update after formatting)
@@ -407,7 +411,8 @@ class log_buffer_metadata_adapter
         {
             // Success - use the actual formatted size
             size_t formatted_size                             = result.size;
-            *reinterpret_cast<uint16_t *>(data_ + length_pos) = static_cast<uint16_t>(formatted_size);
+            uint16_t formatted_size_val = static_cast<uint16_t>(formatted_size);
+            std::memcpy(data_ + length_pos, &formatted_size_val, sizeof(uint16_t));
             metadata_pos_ += formatted_size;
 
             // Update header
@@ -446,12 +451,14 @@ class log_buffer_metadata_adapter
             return false;
         }
 
-        // Write key_id
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
+        // Write key_id (use memcpy to avoid alignment issues)
+        uint16_t key_id_val = key_id;
+        std::memcpy(data_ + metadata_pos_, &key_id_val, sizeof(uint16_t));
         metadata_pos_ += sizeof(uint16_t);
 
         // Write length
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
+        uint16_t value_size_val = static_cast<uint16_t>(value_size);
+        std::memcpy(data_ + metadata_pos_, &value_size_val, sizeof(uint16_t));
         metadata_pos_ += sizeof(uint16_t);
 
         // Direct memcpy of string data
@@ -510,12 +517,14 @@ class log_buffer_metadata_adapter
             return false;
         }
 
-        // Write key_id
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
+        // Write key_id (use memcpy to avoid alignment issues)
+        uint16_t key_id_val = key_id;
+        std::memcpy(data_ + metadata_pos_, &key_id_val, sizeof(uint16_t));
         metadata_pos_ += sizeof(uint16_t);
 
         // Write length
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
+        uint16_t value_size_val = static_cast<uint16_t>(value_size);
+        std::memcpy(data_ + metadata_pos_, &value_size_val, sizeof(uint16_t));
         metadata_pos_ += sizeof(uint16_t);
 
         // Copy converted string
@@ -569,10 +578,12 @@ class log_buffer_metadata_adapter
         kv_pair next()
         {
             kv_pair result;
-            result.key_id = *reinterpret_cast<const uint16_t *>(current_);
+            // Use memcpy to avoid alignment issues when reading
+            std::memcpy(&result.key_id, current_, sizeof(uint16_t));
             current_ += sizeof(uint16_t);
 
-            uint16_t value_len = *reinterpret_cast<const uint16_t *>(current_);
+            uint16_t value_len;
+            std::memcpy(&value_len, current_, sizeof(uint16_t));
             current_ += sizeof(uint16_t);
 
             result.value = std::string_view(current_, value_len);

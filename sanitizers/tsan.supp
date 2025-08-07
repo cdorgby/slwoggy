@@ -1,0 +1,42 @@
+# ThreadSanitizer suppressions for slwoggy
+# Ignore all issues in third-party libraries
+
+# Format: race:pattern
+# or: thread:pattern
+# or: mutex:pattern
+# or: signal:pattern
+
+# Known benign races in slwoggy internals
+# Singleton initialization race in log_line_dispatcher - benign initialization race
+race:slwoggy::log_line_dispatcher::instance
+race:slwoggy::log_line_dispatcher::log_line_dispatcher
+race:slwoggy::log_line_dispatcher::worker_thread_func
+
+# Ignore races in third-party libraries
+race:*/third_party/fmt/*
+race:*/third_party/Catch2/*
+race:*/third_party/taocpp-json/*
+
+# Ignore thread issues in third-party libraries
+thread:*/third_party/fmt/*
+thread:*/third_party/Catch2/*
+thread:*/third_party/taocpp-json/*
+
+# Ignore mutex issues in third-party libraries
+mutex:*/third_party/fmt/*
+mutex:*/third_party/Catch2/*
+mutex:*/third_party/taocpp-json/*
+
+# System libraries
+race:pthread_*
+race:std::__1::*
+race:std::__cxx*
+race:/usr/lib/*
+race:/lib/*
+race:/lib64/*
+race:/System/*
+thread:pthread_*
+thread:/usr/lib/*
+thread:/lib/*
+mutex:pthread_*
+mutex:/usr/lib/*

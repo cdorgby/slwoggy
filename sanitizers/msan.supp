@@ -1,0 +1,19 @@
+# MemorySanitizer suppressions for slwoggy
+# Ignore all issues in third-party libraries
+
+# Ignore uninitialized memory in third-party libraries
+fun:*/third_party/fmt/*
+fun:*/third_party/Catch2/*
+fun:*/third_party/taocpp-json/*
+
+# System libraries
+fun:pthread_*
+fun:dl*
+fun:__libc_*
+fun:/usr/lib/*
+fun:/lib/*
+fun:/lib64/*
+
+# C++ standard library
+fun:std::*
+fun:__cxx*

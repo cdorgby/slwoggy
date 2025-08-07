@@ -1,0 +1,16 @@
+# LeakSanitizer suppressions for slwoggy (Linux only)
+# Used when ASan is run with leak detection enabled
+
+# Ignore leaks in third-party code
+leak:*third_party/fmt*
+leak:*third_party/Catch2*
+leak:*third_party/taocpp-json*
+
+# System libraries
+leak:libsystem_*
+leak:libdyld.dylib
+leak:libc++*
+leak:libstdc++*
+leak:/usr/lib/*
+leak:/lib/*
+leak:/lib64/*
