@@ -30,7 +30,7 @@ struct sink_concept
     virtual ~sink_concept() = default;
     
     // Core sink operation
-    virtual size_t process_batch(log_buffer **buffers, size_t count, char *write_buffer, size_t write_buffer_size) const = 0;
+    virtual size_t process_batch(log_buffer_base **buffers, size_t count, char *write_buffer, size_t write_buffer_size) const = 0;
 
     // Type erasure support operations
     virtual sink_concept* clone_in_place(void* buffer) const = 0;
@@ -57,11 +57,11 @@ struct sink_model final : sink_concept
     
     // Helper to detect if writer has bulk_write method
     template <typename T>
-    static constexpr bool has_bulk_write_v = requires(T& t, log_buffer** bufs, size_t count, const Formatter& fmt) {
+    static constexpr bool has_bulk_write_v = requires(T& t, log_buffer_base** bufs, size_t count, const Formatter& fmt) {
         { t.bulk_write(bufs, count, fmt) } -> std::same_as<size_t>;
     };
     
-    size_t process_batch(log_buffer** buffers, size_t count, char* write_buffer, size_t write_buffer_size) const override
+    size_t process_batch(log_buffer_base** buffers, size_t count, char* write_buffer, size_t write_buffer_size) const override
     {
         // Process buffers until we hit a marker (null or flush marker)
         size_t processed = 0;
@@ -110,13 +110,13 @@ struct sink_model final : sink_concept
     
 private:
     // Fast path for writers that support bulk operations
-    size_t process_batch_bulk(log_buffer** buffers, size_t count) const
+    size_t process_batch_bulk(log_buffer_base** buffers, size_t count) const
     {
         return writer_.bulk_write(buffers, count, formatter_);
     }
     
     // Standard path with formatting to intermediate buffer
-    size_t process_batch_individual(log_buffer** buffers, size_t count, char* write_buffer, size_t write_buffer_size) const
+    size_t process_batch_individual(log_buffer_base** buffers, size_t count, char* write_buffer, size_t write_buffer_size) const
     {
         // Format all buffers into the provided write buffer, flushing as needed
         size_t offset = 0;
@@ -169,7 +169,7 @@ private:
  * log_sink sink{json_formatter{}, file_writer{STDOUT_FILENO}};
  *
  * // Process a batch of log buffers
- * log_buffer* buffers[10];
+ * log_buffer_base* buffers[10];
  * size_t processed = sink.process_batch(buffers, 10);
  * @endcode
  */
@@ -199,7 +199,7 @@ public:
     }
 
     // Process a batch of log buffers
-    size_t process_batch(log_buffer** buffers, size_t count) const
+    size_t process_batch(log_buffer_base** buffers, size_t count) const
     {
         if (impl_)
         {

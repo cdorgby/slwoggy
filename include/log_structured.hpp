@@ -266,7 +266,7 @@ struct structured_log_key_registry
  *       statistics are incremented (see get_drop_stats()).
  */
 // Forward declaration
-struct log_buffer;
+class log_buffer_base;
 
 class log_buffer_metadata_adapter
 {
@@ -286,10 +286,10 @@ class log_buffer_metadata_adapter
     };
 
   private:
-    log_buffer* buffer_;
+    log_buffer_base* buffer_;
 
   public:
-    log_buffer_metadata_adapter(log_buffer* buffer) : buffer_(buffer) {}
+    log_buffer_metadata_adapter(log_buffer_base* buffer) : buffer_(buffer) {}
 
     void reset();
     bool add_kv(uint16_t key_id, std::string_view value);
@@ -318,9 +318,10 @@ class log_buffer_metadata_adapter
     {
         const char *current_;
         const char *end_;
+        uint8_t remaining_count_;
         
     public:
-        iterator(const char *start, const char *end);
+        iterator(const char *start, const char *end, uint8_t count);
         bool has_next() const;
         kv_pair next();
     };

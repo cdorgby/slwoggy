@@ -30,7 +30,7 @@ namespace slwoggy
  */
 struct log_line
 {
-    log_buffer *buffer_;
+    log_buffer_base *buffer_;
     bool needs_header_{false}; // True after swap, header written on first write
 
     // Store these for endl support and header writing
@@ -352,7 +352,7 @@ struct log_line
     }
 
     // Swap buffer with a new one from pool, return old buffer
-    log_buffer *swap_buffer()
+    log_buffer_base *swap_buffer()
     {
         auto *old_buffer = buffer_;
         
