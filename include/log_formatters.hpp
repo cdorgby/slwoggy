@@ -34,9 +34,9 @@ class nop_formatter
   public:
     bool do_copy = false;
 
-    size_t calculate_size(const log_buffer *buffer) const { return buffer ? buffer->len() : 0; }
+    size_t calculate_size(const log_buffer_base *buffer) const { return buffer ? buffer->len() : 0; }
 
-    size_t format(const log_buffer *buffer, char *output, size_t max_size) const
+    size_t format(const log_buffer_base *buffer, char *output, size_t max_size) const
     {
         if (!buffer || max_size == 0) return 0;
 
@@ -59,7 +59,7 @@ class raw_formatter
     bool use_color   = true;
     bool add_newline = false;
 
-    size_t calculate_size(const log_buffer *buffer) const
+    size_t calculate_size(const log_buffer_base *buffer) const
     {
         if (!buffer) return 0;
 
@@ -106,7 +106,7 @@ class raw_formatter
         return size;
     }
 
-    size_t format(const log_buffer *buffer, char *output, size_t max_size) const
+    size_t format(const log_buffer_base *buffer, char *output, size_t max_size) const
     {
         if (!buffer) return 0;
 
@@ -249,7 +249,7 @@ class taocpp_json_formatter
      * This method follows taocpp/json's producer pattern, making it reusable
      * with different consumers (size calculation, formatting, etc.)
      */
-    template <typename Consumer> void produce_log_json(Consumer &c, const log_buffer *buffer) const
+    template <typename Consumer> void produce_log_json(Consumer &c, const log_buffer_base *buffer) const
     {
         c.begin_object();
 
@@ -300,7 +300,7 @@ class taocpp_json_formatter
         c.end_object();
     }
 
-    size_t calculate_size(const log_buffer *buffer) const
+    size_t calculate_size(const log_buffer_base *buffer) const
     {
         if (!buffer) return 0;
 
@@ -347,7 +347,7 @@ class taocpp_json_formatter
         return size;
     }
 
-    size_t format(const log_buffer *buffer, char *output, size_t max_size) const
+    size_t format(const log_buffer_base *buffer, char *output, size_t max_size) const
     {
         if (!buffer || max_size == 0) return 0;
 

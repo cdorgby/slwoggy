@@ -88,7 +88,7 @@ inline void log_line_dispatcher::dispatch(struct log_line &line)
 
 // Worker thread helper methods implementation
 
-inline size_t log_line_dispatcher::dequeue_buffers(moodycamel::ConsumerToken& token, log_buffer** buffers, bool wait)
+inline size_t log_line_dispatcher::dequeue_buffers(moodycamel::ConsumerToken& token, log_buffer_base** buffers, bool wait)
 {
     if (!wait)
     {
@@ -173,7 +173,7 @@ inline size_t log_line_dispatcher::dequeue_buffers(moodycamel::ConsumerToken& to
     return total_dequeued;
 }
 
-inline size_t log_line_dispatcher::process_buffer_batch(log_buffer** buffers, size_t start_idx, size_t count, sink_config* config)
+inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffers, size_t start_idx, size_t count, sink_config* config)
 {
     if (count == 0)
     {
@@ -222,7 +222,7 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer** buffers, si
     return processed;
 }
 
-inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequeued_count, sink_config* config)
+inline bool log_line_dispatcher::process_queue(log_buffer_base** buffers, size_t dequeued_count, sink_config* config)
 {
     size_t buf_idx = 0;
     bool should_shutdown = false;
@@ -230,7 +230,7 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
 
     while (buf_idx < dequeued_count)
     {
-        log_buffer* buffer = buffers[buf_idx];
+        log_buffer_base* buffer = buffers[buf_idx];
 
         // Check for shutdown marker
         if (!buffer)
@@ -291,7 +291,7 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
             size_t start_idx = buf_idx;
             while (buf_idx < dequeued_count)
             {
-                log_buffer *buf = buffers[buf_idx];
+                log_buffer_base *buf = buffers[buf_idx];
 
                 // Stop at markers to process them properly
                 if (!buf || buf->is_flush_marker()) { break; }
@@ -322,7 +322,7 @@ inline bool log_line_dispatcher::process_queue(log_buffer** buffers, size_t dequ
 
 inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
 {
-    log_buffer* buffers[MAX_BATCH_SIZE];
+    log_buffer_base* buffers[MAX_BATCH_SIZE];
     size_t dequeued_count;
 
     // Drain remaining buffers on shutdown using batch dequeue
@@ -334,7 +334,7 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
         size_t buf_idx = 0;
         while (buf_idx < dequeued_count)
         {
-            log_buffer* buffer = buffers[buf_idx];
+            log_buffer_base* buffer = buffers[buf_idx];
 
             // Skip null buffers and flush markers during shutdown
             if (!buffer || buffer->is_flush_marker())
@@ -368,7 +368,7 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
                 size_t start_idx = buf_idx;
                 while (buf_idx < dequeued_count)
                 {
-                    log_buffer *buf = buffers[buf_idx];
+                    log_buffer_base *buf = buffers[buf_idx];
 
                     // Stop at markers to process them properly
                     if (!buf || buf->is_flush_marker()) { break; }
@@ -392,7 +392,7 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
 inline void log_line_dispatcher::worker_thread_func()
 {
     moodycamel::ConsumerToken consumer_token(queue_);
-    log_buffer *buffers[MAX_BATCH_SIZE];
+    log_buffer_base *buffers[MAX_BATCH_SIZE];
     size_t dequeued_count;
     bool should_shutdown = false;
 
@@ -601,13 +601,13 @@ inline void log_line_dispatcher::update_batch_stats(size_t dequeued_count)
     update_max(worker_max_batch_size_, static_cast<uint64_t>(dequeued_count));
 }
 
-inline void log_line_dispatcher::track_inflight_times(log_buffer **buffers, size_t start_idx, size_t count)
+inline void log_line_dispatcher::track_inflight_times(log_buffer_base **buffers, size_t start_idx, size_t count)
 {
     auto now = log_fast_timestamp();
 
     for (size_t j = 0; j < count; ++j)
     {
-        log_buffer *proc_buffer = buffers[start_idx + j];
+        log_buffer_base *proc_buffer = buffers[start_idx + j];
         if (proc_buffer && !proc_buffer->is_flush_marker())
         {
             auto inflight_us = std::chrono::duration_cast<std::chrono::microseconds>(now - proc_buffer->timestamp_).count();

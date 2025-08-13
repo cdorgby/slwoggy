@@ -60,7 +60,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         REQUIRE(initial_stats.high_water_mark >= initial_stats.in_use_buffers);
         
         // Acquire 5 buffers
-        std::vector<log_buffer*> buffers;
+        std::vector<log_buffer_base*> buffers;
         const size_t acquire_count = 5;
         
         for (size_t i = 0; i < acquire_count; ++i) {
@@ -93,7 +93,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         uint64_t initial_high_water = initial_stats.high_water_mark;
         
         // Acquire 50% of pool
-        std::vector<log_buffer*> buffers;
+        std::vector<log_buffer_base*> buffers;
         const size_t target_count = BUFFER_POOL_SIZE / 2;
         
         for (size_t i = 0; i < target_count; ++i) {
@@ -120,7 +120,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
     }
     
     SECTION("Pool exhaustion") {
-        std::vector<log_buffer*> buffers;
+        std::vector<log_buffer_base*> buffers;
         auto initial_stats = buffer_pool::instance().get_stats();
         
         // Try to acquire more than pool size
@@ -308,7 +308,7 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         
         // Try to add a value that would collide with text area
         // Fill buffer to leave minimal space
-        std::string text(LOG_BUFFER_SIZE - 100, 'x');
+        std::string text(buffer_pool::BUFFER_SIZE - 100, 'x');
         buffer->write_raw(text);
         
         std::string large_value(150, 'y');
@@ -342,7 +342,7 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         metadata.reset();
         
         // Fill most of the buffer with text to ensure metadata won't fit
-        std::string filler(LOG_BUFFER_SIZE - 100, 'x');
+        std::string filler(buffer_pool::BUFFER_SIZE - 100, 'x');
         buffer->write_raw(filler);
         
         // Now try to add oversized entries - they should fail due to collision
@@ -372,7 +372,7 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         REQUIRE(buffer != nullptr);
         
         // Fill buffer to force drops
-        std::string filler(LOG_BUFFER_SIZE - 50, 'x');
+        std::string filler(buffer_pool::BUFFER_SIZE - 50, 'x');
         buffer->write_raw(filler);
         
         auto metadata = buffer->get_metadata_adapter();
