@@ -306,8 +306,12 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         auto metadata = buffer->get_metadata_adapter();
         metadata.reset();
         
-        // Try to add a value that exceeds METADATA_RESERVE (256 bytes)
-        std::string large_value(300, 'x');
+        // Try to add a value that would collide with text area
+        // Fill buffer to leave minimal space
+        std::string text(LOG_BUFFER_SIZE - 100, 'x');
+        buffer->write_raw(text);
+        
+        std::string large_value(150, 'y');
         uint16_t key_id = structured_log_key_registry::instance().get_or_register_key(std::string_view("large_key"));
         bool added = metadata.add_kv(key_id, large_value);
         REQUIRE(added == false);
@@ -337,8 +341,12 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         auto metadata = buffer->get_metadata_adapter();
         metadata.reset();
         
-        // Try to add several oversized entries
-        std::string large_value(300, 'y');
+        // Fill most of the buffer with text to ensure metadata won't fit
+        std::string filler(LOG_BUFFER_SIZE - 100, 'x');
+        buffer->write_raw(filler);
+        
+        // Now try to add oversized entries - they should fail due to collision
+        std::string large_value(200, 'y');
         uint16_t key1 = structured_log_key_registry::instance().get_or_register_key(std::string_view("key1"));
         uint16_t key2 = structured_log_key_registry::instance().get_or_register_key(std::string_view("key2"));
         uint16_t key3 = structured_log_key_registry::instance().get_or_register_key(std::string_view("key3"));
@@ -363,8 +371,12 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         auto* buffer = buffer_pool::instance().acquire();
         REQUIRE(buffer != nullptr);
         
+        // Fill buffer to force drops
+        std::string filler(LOG_BUFFER_SIZE - 50, 'x');
+        buffer->write_raw(filler);
+        
         auto metadata = buffer->get_metadata_adapter();
-        std::string large_value(300, 'z');
+        std::string large_value(100, 'z');
         uint16_t key = structured_log_key_registry::instance().get_or_register_key(std::string_view("drop_key"));
         metadata.add_kv(key, large_value);
         

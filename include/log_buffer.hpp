@@ -18,77 +18,100 @@
 #include "moodycamel/concurrentqueue.h"
 
 #include "log_types.hpp"
-#include "log_structured.hpp"
+
+// Forward declarations (must be in slwoggy namespace)
+namespace slwoggy
+{
+class log_buffer_metadata_adapter;
+}
 
 namespace slwoggy
 {
 
-
 // Cache-aligned buffer structure
 struct alignas(CACHE_LINE_SIZE) log_buffer
 {
+    // Buffer header (first bytes of data_)
+    struct buffer_header
+    {
+        uint16_t rec_size;     // Total allocated size (LOG_BUFFER_SIZE)
+        uint16_t text_len;     // Length of text data
+        uint16_t metadata_off; // Offset where metadata starts
+    };
+
+    static constexpr size_t HEADER_SIZE = sizeof(buffer_header);
+
     log_level level_{log_level::nolog}; // Default to no logging level
     std::string_view file_;
     uint32_t line_;
     std::chrono::steady_clock::time_point timestamp_;
 
-    size_t write_pos_{log_buffer_metadata_adapter::TEXT_START}; // Start writing text after metadata area
-    size_t header_width_{0};                                    // Width of header for extracting just the message
+    size_t text_pos_{HEADER_SIZE};         // Current text write position
+    size_t metadata_pos_{LOG_BUFFER_SIZE}; // Current metadata write position (grows backward)
+    size_t header_width_{0};               // Width of header for extracting just the message
 
     constexpr size_t size() const { return data_.size(); }
-    constexpr size_t len() const { return write_pos_ - log_buffer_metadata_adapter::TEXT_START; }
-    constexpr size_t available() const { return size() - write_pos_; }
+    constexpr size_t len() const { return text_pos_ - HEADER_SIZE; }
+    constexpr size_t available() const { return metadata_pos_ - text_pos_; }
 
-    // Get metadata length from header
+    // Get buffer header
+    buffer_header *get_header() { return reinterpret_cast<buffer_header *>(data_.data()); }
+    const buffer_header *get_header() const { return reinterpret_cast<const buffer_header *>(data_.data()); }
+
+    // Get metadata length
     size_t len_meta() const
     {
-        const auto metadata = get_metadata_adapter();
-        return metadata.get_header()->metadata_size;
+        const auto *header = get_header();
+        return LOG_BUFFER_SIZE - header->metadata_off;
     }
 
     // Get count of key-value pairs in metadata
     size_t get_kv_count() const
     {
-        const auto metadata = get_metadata_adapter();
-        return metadata.get_header()->kv_count;
+        if (metadata_pos_ >= LOG_BUFFER_SIZE) return 0; // No metadata
+        // First byte of metadata is the count
+        return static_cast<size_t>(data_[metadata_pos_]);
     }
 
     void add_ref() { ref_count_.fetch_add(1, std::memory_order_relaxed); }
     void release();
 
-    // Get metadata adapter
-    log_buffer_metadata_adapter get_metadata_adapter() { return log_buffer_metadata_adapter(data_.data()); }
+    // Friend class for metadata adapter
+    friend class log_buffer_metadata_adapter;
 
-    // Get const metadata adapter for reading
-    const log_buffer_metadata_adapter get_metadata_adapter() const
-    {
-        return log_buffer_metadata_adapter(const_cast<char *>(data_.data()));
-    }
+    // Get metadata adapter - implemented in log_structured.hpp
+    inline log_buffer_metadata_adapter get_metadata_adapter();
+    inline log_buffer_metadata_adapter get_metadata_adapter() const;
 
     // Reset buffer for reuse
     void reset()
     {
-        write_pos_    = log_buffer_metadata_adapter::TEXT_START; // Reset to start of text area
+        text_pos_     = HEADER_SIZE;
+        metadata_pos_ = LOG_BUFFER_SIZE;
         level_        = log_level::nolog;
         header_width_ = 0;
 
-        // Reset metadata via adapter
-        auto metadata = get_metadata_adapter();
-        metadata.reset();
+        // Initialize header
+        auto *header         = get_header();
+        header->rec_size     = LOG_BUFFER_SIZE;
+        header->text_len     = 0;
+        header->metadata_off = LOG_BUFFER_SIZE;
     }
 
-    // Write raw data to buffer
+    // Write raw data to buffer (text grows forward)
     size_t write_raw(std::string_view str)
     {
         if (str.empty()) return 0;
 
-        size_t available = size() - write_pos_;
-        size_t to_write  = std::min(str.size(), available);
+        size_t available_space = metadata_pos_ - text_pos_;
+        size_t to_write        = std::min(str.size(), available_space);
 
         if (to_write > 0)
         {
-            std::memcpy(data_.data() + write_pos_, str.data(), to_write);
-            write_pos_ += to_write;
+            std::memcpy(data_.data() + text_pos_, str.data(), to_write);
+            text_pos_ += to_write;
+            // Update header
+            get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
         }
 
         return to_write;
@@ -97,15 +120,16 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     // Append a character if there's room, otherwise replace the last character
     void append_or_replace_last(char c)
     {
-        if (write_pos_ < size())
+        if (text_pos_ < metadata_pos_)
         {
             // Room to append
-            data_[write_pos_++] = c;
+            data_[text_pos_++]     = c;
+            get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
         }
-        else if (write_pos_ > log_buffer_metadata_adapter::TEXT_START)
+        else if (text_pos_ > HEADER_SIZE)
         {
             // Buffer full - replace last character
-            data_[write_pos_ - 1] = c;
+            data_[text_pos_ - 1] = c;
         }
         // else: no text to replace, do nothing
     }
@@ -135,24 +159,24 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     // Handle newline padding for text already written to buffer
     void handle_newline_padding(size_t start_pos)
     {
-        if (write_pos_ <= start_pos) return;
+        if (text_pos_ <= start_pos) return;
 
         // Scan for newlines in the text we just wrote
         size_t pos = start_pos;
 
-        while (pos < write_pos_)
+        while (pos < text_pos_)
         {
             // Find next newline
             size_t newline_pos = pos;
-            while (newline_pos < write_pos_ && data_[newline_pos] != '\n') { newline_pos++; }
+            while (newline_pos < text_pos_ && data_[newline_pos] != '\n') { newline_pos++; }
 
-            if (newline_pos < write_pos_ && newline_pos + 1 < write_pos_)
+            if (newline_pos < text_pos_ && newline_pos + 1 < text_pos_)
             {
                 // Found a newline with text after it - need to insert padding
-                size_t remaining = write_pos_ - (newline_pos + 1);
+                size_t remaining = text_pos_ - (newline_pos + 1);
 
                 // Check if we have room for padding
-                size_t available = size() - write_pos_;
+                size_t available = metadata_pos_ - text_pos_;
                 if (available >= header_width_)
                 {
                     // Shift remaining text to make room for padding
@@ -162,7 +186,8 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
                     std::memset(data_.data() + newline_pos + 1, ' ', header_width_);
 
                     // Update our write position
-                    write_pos_ += header_width_;
+                    text_pos_ += header_width_;
+                    get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
                     newline_pos += header_width_;
                 }
             }
@@ -175,14 +200,14 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     template <typename... Args> void printf_with_padding(const char *format, Args &&...args)
     {
         // Remember where we start writing
-        size_t start_pos = write_pos_;
+        size_t start_pos = text_pos_;
 
         // Check if we have enough space for at least some of the output
-        size_t available = size() - write_pos_;
+        size_t available = metadata_pos_ - text_pos_;
         if (available == 0) return;
 
         // Format directly into the buffer at current position
-        int written = snprintf(data_.data() + write_pos_,
+        int written = snprintf(data_.data() + text_pos_,
                                available, // snprintf needs full available size including null terminator
                                format,
                                std::forward<Args>(args)...);
@@ -193,13 +218,15 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
             {
                 // Advance write position by what was actually written (not including null terminator)
                 // When written < available, the entire string fit
-                write_pos_ += written;
+                text_pos_ += written;
             }
             else
             {
                 // String was truncated, advance by available-1 (snprintf wrote available-1 chars + null)
-                write_pos_ += available - 1;
+                text_pos_ += available - 1;
             }
+
+            get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
 
             // Now handle newline padding in-place
             handle_newline_padding(start_pos);
@@ -210,19 +237,20 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     template <typename... Args> void format_to_buffer_with_padding(fmt::format_string<Args...> fmt, Args &&...args)
     {
         // Remember where we start writing
-        size_t start_pos = write_pos_;
+        size_t start_pos = text_pos_;
 
         // Check if we have enough space for at least some of the output
-        size_t available = size() - write_pos_;
+        size_t available = metadata_pos_ - text_pos_;
         if (available == 0) return;
 
         // Format directly into the buffer at current position
-        char *output_start = data_.data() + write_pos_;
-        auto result = fmt::format_to_n(output_start, available, fmt, std::forward<Args>(args)...);
+        char *output_start = data_.data() + text_pos_;
+        auto result        = fmt::format_to_n(output_start, available, fmt, std::forward<Args>(args)...);
 
         // Update write position based on what would have been written (capped by available space)
         size_t written = std::min(result.size, available);
-        write_pos_ += written;
+        text_pos_ += written;
+        get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
 
         // Now handle newline padding in-place
         handle_newline_padding(start_pos);
@@ -230,26 +258,35 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
 
     bool is_flush_marker() const { return level_ == log_level::nolog && len() == 0; }
 
-    // Get text content (skipping metadata)
+    // Get text content (skipping buffer header)
     std::string_view get_text() const
     {
-        return std::string_view(data_.data() + log_buffer_metadata_adapter::TEXT_START,
-                                write_pos_ - log_buffer_metadata_adapter::TEXT_START);
+        const auto *header = get_header();
+        return std::string_view(data_.data() + HEADER_SIZE, header->text_len);
     }
 
-    // Get just the message text (skipping metadata and header)
+    // Get just the message text (skipping buffer header and log header)
     std::string_view get_message() const
     {
-        size_t message_start = log_buffer_metadata_adapter::TEXT_START + header_width_;
-        if (message_start >= write_pos_)
+        size_t message_start = HEADER_SIZE + header_width_;
+        const auto *header   = get_header();
+        if (message_start >= HEADER_SIZE + header->text_len)
         {
             return std::string_view(); // No message, just header
         }
-        return std::string_view(data_.data() + message_start, write_pos_ - message_start);
+        return std::string_view(data_.data() + message_start, HEADER_SIZE + header->text_len - message_start);
     }
 
-  private:
+    // Finalize buffer (update metadata offset in header)
+    void finalize()
+    {
+        auto *header         = get_header();
+        header->metadata_off = static_cast<uint16_t>(metadata_pos_);
+    }
+
     std::array<char, LOG_BUFFER_SIZE> data_;
+
+  private:
     std::atomic<int> ref_count_{0};
 };
 
@@ -319,7 +356,11 @@ class buffer_pool
     buffer_pool()
     {
         buffer_storage_ = std::make_unique<log_buffer[]>(BUFFER_POOL_SIZE);
-        for (size_t i = 0; i < BUFFER_POOL_SIZE; ++i) { available_buffers_.enqueue(&buffer_storage_[i]); }
+        for (size_t i = 0; i < BUFFER_POOL_SIZE; ++i)
+        {
+            buffer_storage_[i].reset(); // Initialize each buffer
+            available_buffers_.enqueue(&buffer_storage_[i]);
+        }
     }
 
   public:

@@ -15,6 +15,8 @@
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
+#include "log_structured.hpp"
+#include "log_structured_impl.hpp"
 #include "log_module.hpp"
 
 namespace slwoggy
@@ -353,6 +355,12 @@ struct log_line
     log_buffer *swap_buffer()
     {
         auto *old_buffer = buffer_;
+        
+        // Finalize the old buffer before swapping
+        if (old_buffer) {
+            old_buffer->finalize();
+        }
+        
         buffer_          = buffer_pool::instance().acquire();
 
         // Reset positions

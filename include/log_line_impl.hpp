@@ -19,6 +19,7 @@ inline log_line &log_line::operator=(log_line &&other) noexcept
     {
         if (buffer_)
         {
+            buffer_->finalize();
             log_line_dispatcher::instance().dispatch(*this);
             buffer_->release();
         }
@@ -37,6 +38,9 @@ inline log_line &log_line::operator=(log_line &&other) noexcept
 inline log_line::~log_line()
 {
     if (!buffer_) return;
+
+    // Finalize buffer before dispatching
+    buffer_->finalize();
 
     log_line_dispatcher::instance().dispatch(*this);
 
@@ -60,11 +64,11 @@ inline size_t log_line::write_header()
     // Format header: "TTTTTTTT.mmm [LEVEL]    file:line "
     // Note: header doesn't need padding since it's the first line
     size_t text_len_before = buffer_->len();
-    
+
     // Use fmt::format_to_buffer_with_padding for better performance
-    int file_width = log_site_registry::longest_file();
+    int file_width      = log_site_registry::longest_file();
     int actual_file_len = std::min(file_width, static_cast<int>(file_.size()));
-    
+
     buffer_->format_to_buffer_with_padding("{:08}.{:03} [{:<5}] {:<10} {:>{}.{}}:{} ",
                                            ms,
                                            us,
@@ -87,6 +91,7 @@ namespace
 // our own endl for log_line
 inline slwoggy::log_line &endl(slwoggy::log_line &line)
 {
+    if (line.buffer_) { line.buffer_->finalize(); }
     slwoggy::log_line_dispatcher::instance().dispatch(line);
     return line;
 }

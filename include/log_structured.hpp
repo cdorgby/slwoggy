@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <shared_mutex>
 #include <vector>
-#include <charconv>
 
 #include "robin_hood.h"
 #include "log_types.hpp"
@@ -246,15 +245,15 @@ struct structured_log_key_registry
  *
  * This class provides an interface for storing key-value pairs in the metadata
  * section of log buffers. The metadata is stored in a compact binary format
- * at the beginning of each log buffer, before the actual log message text.
+ * at the end of each log buffer, growing backward from the buffer end.
  *
- * Storage Format:
- * - Header (4 bytes): kv_count (2) + metadata_size (2)
- * - Each KV pair: key_id (2) + value_length (2) + value_data (N)
+ * Storage Format (growing backward from end):
+ * - Each KV pair: [value_data (N)][value_length (1)][key_id (2)]
+ * - Count byte (1) at the start of metadata section
  *
  * Memory Layout:
- * |<--- METADATA_RESERVE --->|<--- Text Area --->|
- * | Header | KV1 | KV2 | ... | Free | Log message text |
+ * |<-- Header -->|<-- Text -->|<-- Gap -->|<-- Metadata -->|
+ * | 6 bytes      | forward → → |           | ← ← backward   |
  *
  * Platform Assumptions:
  * - Native endianness (no byte swapping performed)
@@ -262,22 +261,16 @@ struct structured_log_key_registry
  * - Binary format is NOT portable across different architectures
  * - For cross-platform logs, use text-based sinks or external serialization
  *
- * @note The metadata section has a fixed size of METADATA_RESERVE bytes.
- *       If adding a KV pair would exceed this limit, it is silently dropped
- *       and drop statistics are incremented (see get_drop_stats()).
+ * @note The metadata grows backward from the buffer end. If adding a KV pair
+ *       would collide with the text area, it is silently dropped and drop
+ *       statistics are incremented (see get_drop_stats()).
  */
+// Forward declaration
+struct log_buffer;
+
 class log_buffer_metadata_adapter
 {
   public:
-    // Structured data header
-    struct metadata_header
-    {
-        uint16_t kv_count{0};      // Number of key-value pairs
-        uint16_t metadata_size{0}; // Total size of metadata section
-    };
-
-    static constexpr size_t HEADER_SIZE = sizeof(metadata_header);
-    static constexpr size_t TEXT_START  = METADATA_RESERVE + HEADER_SIZE;
 
 #ifdef LOG_COLLECT_STRUCTURED_METRICS
     // Statistics for monitoring dropped metadata
@@ -293,304 +286,52 @@ class log_buffer_metadata_adapter
     };
 
   private:
-    char *data_;
-    size_t metadata_pos_;
+    log_buffer* buffer_;
 
   public:
-    log_buffer_metadata_adapter(char *buffer_data) : data_(buffer_data)
-    {
-        // Read current metadata position from header
-        auto *header  = get_header();
-        metadata_pos_ = HEADER_SIZE + header->metadata_size;
-    }
+    log_buffer_metadata_adapter(log_buffer* buffer) : buffer_(buffer) {}
 
-    void reset()
-    {
-        metadata_pos_         = HEADER_SIZE;
-        auto *header          = get_header();
-        header->kv_count      = 0;
-        header->metadata_size = 0;
-    }
+    void reset();
+    bool add_kv(uint16_t key_id, std::string_view value);
+    template <typename T> bool add_kv_formatted(uint16_t key_id, T &&value);
 
-    /**
-     * @brief Add a key-value pair to the metadata section
-     * @param key_id Numeric ID of the key (from structured_log_key_registry)
-     * @param value String value to store
-     * @return true if successfully added, false if insufficient space
-     */
-    bool add_kv(uint16_t key_id, std::string_view value)
-    {
-        size_t needed = sizeof(uint16_t) + sizeof(uint16_t) + value.size();
-        if (metadata_pos_ + needed > METADATA_RESERVE)
-        {
-#ifdef LOG_COLLECT_STRUCTURED_METRICS
-            dropped_count_.fetch_add(1, std::memory_order_relaxed);
-            dropped_bytes_.fetch_add(needed, std::memory_order_relaxed);
-#endif
-#ifdef DEBUG
-            static std::atomic<bool> warned{false};
-            if (!warned.exchange(true))
-            {
-                fprintf(stderr, "[LOG] Warning: Structured metadata dropped due to buffer overflow\n");
-            }
-#endif
-            return false;
-        }
+    // Fast-path specializations
+    bool add_kv_formatted(uint16_t key_id, std::string_view value);
+    bool add_kv_formatted(uint16_t key_id, const char *value);
+    bool add_kv_formatted(uint16_t key_id, const std::string &value);
+    bool add_kv_formatted(uint16_t key_id, bool value);
+    
+    // Integer specializations
+    bool add_kv_formatted(uint16_t key_id, int value);
+    bool add_kv_formatted(uint16_t key_id, unsigned int value);
+    bool add_kv_formatted(uint16_t key_id, long value);
+    bool add_kv_formatted(uint16_t key_id, unsigned long value);
+    bool add_kv_formatted(uint16_t key_id, long long value);
+    bool add_kv_formatted(uint16_t key_id, unsigned long long value);
+    bool add_kv_formatted(uint16_t key_id, signed char value);
+    bool add_kv_formatted(uint16_t key_id, unsigned char value);
+    bool add_kv_formatted(uint16_t key_id, short value);
+    bool add_kv_formatted(uint16_t key_id, unsigned short value);
 
-        // Write: [key_id:2][length:2][value:length]
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
-        metadata_pos_ += sizeof(uint16_t);
-
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value.size());
-        metadata_pos_ += sizeof(uint16_t);
-
-        std::memcpy(data_ + metadata_pos_, value.data(), value.size());
-        metadata_pos_ += value.size();
-
-        // Update header
-        auto *header = get_header();
-        header->kv_count++;
-        header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
-
-        return true;
-    }
-
-    /**
-     * @brief Add a formatted key-value pair directly to metadata buffer
-     * @param key_id Numeric ID of the key (from structured_log_key_registry)
-     * @param value Value to format directly into buffer
-     * @return true if successfully added, false if insufficient space
-     *
-     * This method formats the value directly into the metadata buffer,
-     * avoiding temporary string allocations for better performance.
-     */
-    template <typename T> bool add_kv_formatted(uint16_t key_id, T &&value)
-    {
-        // Conservative estimate: assume formatted value won't exceed 128 bytes
-        // This covers most integers, floats, and reasonable strings
-        size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
-
-        // Check if we have enough space for headers + max formatted size
-        if (metadata_pos_ + header_size + MAX_FORMATTED_SIZE > METADATA_RESERVE)
-        {
-#ifdef LOG_COLLECT_STRUCTURED_METRICS
-            dropped_count_.fetch_add(1, std::memory_order_relaxed);
-            dropped_bytes_.fetch_add(header_size + 32, std::memory_order_relaxed); // Estimate
-#endif
-#ifdef DEBUG
-            static std::atomic<bool> warned{false};
-            if (!warned.exchange(true))
-            {
-                fprintf(stderr, "[LOG] Warning: Structured metadata dropped due to buffer overflow\n");
-            }
-#endif
-            return false;
-        }
-
-        // Write key_id
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
-        size_t key_pos                                       = metadata_pos_;
-        metadata_pos_ += sizeof(uint16_t);
-
-        // Reserve space for length (will update after formatting)
-        size_t length_pos = metadata_pos_;
-        metadata_pos_ += sizeof(uint16_t);
-
-        // Format directly into buffer
-        char *format_start     = data_ + metadata_pos_;
-        size_t available_space = METADATA_RESERVE - metadata_pos_;
-
-        auto result = fmt::format_to_n(format_start, available_space, "{}", std::forward<T>(value));
-
-        // Check if formatting was complete (not truncated)
-        if (result.size <= available_space)
-        {
-            // Success - use the actual formatted size
-            size_t formatted_size                             = result.size;
-            *reinterpret_cast<uint16_t *>(data_ + length_pos) = static_cast<uint16_t>(formatted_size);
-            metadata_pos_ += formatted_size;
-
-            // Update header
-            auto *header = get_header();
-            header->kv_count++;
-            header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
-
-            return true;
-        }
-        else
-        {
-            // Formatting would be truncated - rollback
-            metadata_pos_ = key_pos;
-
-#ifdef LOG_COLLECT_STRUCTURED_METRICS
-            dropped_count_.fetch_add(1, std::memory_order_relaxed);
-            dropped_bytes_.fetch_add(header_size + result.size, std::memory_order_relaxed);
-#endif
-            return false;
-        }
-    }
-
-    // Fast-path specialization for string_view
-    bool add_kv_formatted(uint16_t key_id, std::string_view value)
-    {
-        size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
-        size_t value_size  = value.size();
-
-        // Check exact space needed
-        if (metadata_pos_ + header_size + value_size > METADATA_RESERVE)
-        {
-#ifdef LOG_COLLECT_STRUCTURED_METRICS
-            dropped_count_.fetch_add(1, std::memory_order_relaxed);
-            dropped_bytes_.fetch_add(header_size + value_size, std::memory_order_relaxed);
-#endif
-            return false;
-        }
-
-        // Write key_id
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
-        metadata_pos_ += sizeof(uint16_t);
-
-        // Write length
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
-        metadata_pos_ += sizeof(uint16_t);
-
-        // Direct memcpy of string data
-        if (value_size > 0)
-        {
-            std::memcpy(data_ + metadata_pos_, value.data(), value_size);
-            metadata_pos_ += value_size;
-        }
-
-        // Update header
-        auto *header = get_header();
-        header->kv_count++;
-        header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
-
-        return true;
-    }
-
-    // Fast-path specialization for const char*
-    bool add_kv_formatted(uint16_t key_id, const char *value)
-    {
-        if (!value) return add_kv_formatted(key_id, std::string_view("null"));
-        return add_kv_formatted(key_id, std::string_view(value));
-    }
-
-    // Fast-path specialization for std::string
-    bool add_kv_formatted(uint16_t key_id, const std::string &value)
-    {
-        return add_kv_formatted(key_id, std::string_view(value));
-    }
-
-    // Fast-path specialization for integers using std::to_chars
-    template <typename IntType>
-    typename std::enable_if<std::is_integral_v<IntType> && !std::is_same_v<IntType, bool>, bool>::type
-    add_kv_formatted_int(uint16_t key_id, IntType value)
-    {
-        // Stack buffer for integer conversion (max 20 chars for int64_t)
-        char temp_buffer[32];
-        auto [ptr, ec] = std::to_chars(temp_buffer, temp_buffer + sizeof(temp_buffer), value);
-
-        if (ec != std::errc())
-        {
-            // Fallback to fmt if to_chars fails
-            return add_kv_formatted(key_id, static_cast<int64_t>(value));
-        }
-
-        size_t value_size  = ptr - temp_buffer;
-        size_t header_size = sizeof(uint16_t) + sizeof(uint16_t);
-
-        // Check exact space needed
-        if (metadata_pos_ + header_size + value_size > METADATA_RESERVE)
-        {
-#ifdef LOG_COLLECT_STRUCTURED_METRICS
-            dropped_count_.fetch_add(1, std::memory_order_relaxed);
-            dropped_bytes_.fetch_add(header_size + value_size, std::memory_order_relaxed);
-#endif
-            return false;
-        }
-
-        // Write key_id
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = key_id;
-        metadata_pos_ += sizeof(uint16_t);
-
-        // Write length
-        *reinterpret_cast<uint16_t *>(data_ + metadata_pos_) = static_cast<uint16_t>(value_size);
-        metadata_pos_ += sizeof(uint16_t);
-
-        // Copy converted string
-        std::memcpy(data_ + metadata_pos_, temp_buffer, value_size);
-        metadata_pos_ += value_size;
-
-        // Update header
-        auto *header = get_header();
-        header->kv_count++;
-        header->metadata_size = static_cast<uint16_t>(metadata_pos_ - HEADER_SIZE);
-
-        return true;
-    }
-
-    // Integer specializations - use fundamental types to avoid platform-specific duplicates
-    bool add_kv_formatted(uint16_t key_id, int value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, unsigned int value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, long value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, unsigned long value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, long long value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, unsigned long long value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, signed char value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, unsigned char value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, short value) { return add_kv_formatted_int(key_id, value); }
-    bool add_kv_formatted(uint16_t key_id, unsigned short value) { return add_kv_formatted_int(key_id, value); }
-
-    // Fast-path specialization for bool
-    bool add_kv_formatted(uint16_t key_id, bool value)
-    {
-        const std::string_view str_value = value ? "true" : "false";
-        return add_kv_formatted(key_id, str_value);
-    }
-
-    /**
-     * @brief Iterator for reading key-value pairs from metadata
-     *
-     * Provides forward-only iteration through all stored key-value pairs
-     * in the metadata section. Used primarily by log sinks to extract
-     * structured data for formatting or forwarding to external systems.
-     */
+    // Iterator for reading metadata
     class iterator
     {
         const char *current_;
         const char *end_;
-
-      public:
-        iterator(const char *start, const char *end) : current_(start), end_(end) {}
-
-        bool has_next() const { return current_ + 2 * sizeof(uint16_t) <= end_; }
-
-        kv_pair next()
-        {
-            kv_pair result;
-            result.key_id = *reinterpret_cast<const uint16_t *>(current_);
-            current_ += sizeof(uint16_t);
-
-            uint16_t value_len = *reinterpret_cast<const uint16_t *>(current_);
-            current_ += sizeof(uint16_t);
-
-            result.value = std::string_view(current_, value_len);
-            current_ += value_len;
-
-            return result;
-        }
+        
+    public:
+        iterator(const char *start, const char *end);
+        bool has_next() const;
+        kv_pair next();
     };
-
-    iterator get_iterator() const
-    {
-        const auto *header = get_header();
-        const char *start  = data_ + HEADER_SIZE;
-        const char *end    = start + header->metadata_size;
-        return iterator(start, end);
-    }
-
-    const metadata_header *get_header() const { return reinterpret_cast<const metadata_header *>(data_); }
+    
+    iterator get_iterator() const;
+    
+    /**
+     * @brief Calculate total size needed for k/v data
+     * @return Pair of (total_chars_needed, kv_count)
+     */
+    std::pair<size_t, size_t> calculate_kv_size() const;
 
 #ifdef LOG_COLLECT_STRUCTURED_METRICS
     /**
@@ -612,39 +353,11 @@ class log_buffer_metadata_adapter
     }
 #endif
 
-    /**
-     * @brief Calculate total size needed for k/v data
-     * @return Pair of (total_chars_needed, kv_count)
-     *
-     * This returns the raw character count needed for all keys and values,
-     * without any separators, quotes, or formatting. Callers can use this
-     * to calculate their specific formatting needs.
-     */
-    std::pair<size_t, size_t> calculate_kv_size() const
-    {
-        size_t total_size = 0;
-        size_t count      = 0;
-
-        auto iter = get_iterator();
-        while (iter.has_next())
-        {
-            auto kv       = iter.next();
-            auto key_name = structured_log_key_registry::instance().get_key(kv.key_id);
-            total_size += key_name.size() + kv.value.size();
-            count++;
-        }
-
-        return {total_size, count};
-    }
-
   private:
-    metadata_header *get_header() { return reinterpret_cast<metadata_header *>(data_); }
-};
+    template <typename IntType>
+    typename std::enable_if<std::is_integral_v<IntType> && !std::is_same_v<IntType, bool>, bool>::type
+    add_kv_formatted_int(uint16_t key_id, IntType value);
 
-#ifdef LOG_COLLECT_STRUCTURED_METRICS
-// Define static members for metadata drop tracking (inline to avoid ODR violations)
-inline std::atomic<uint64_t> log_buffer_metadata_adapter::dropped_count_{0};
-inline std::atomic<uint64_t> log_buffer_metadata_adapter::dropped_bytes_{0};
-#endif
+};
 
 } // namespace slwoggy
