@@ -209,15 +209,15 @@ struct log_line_dispatcher
     void update_sink_config(std::unique_ptr<sink_config> new_config);
 
     // Worker thread helper methods
-    size_t dequeue_buffers(moodycamel::ConsumerToken& token, log_buffer** buffers, bool wait);
-    size_t process_buffer_batch(log_buffer** buffers, size_t start_idx, size_t count, sink_config* config);
-    bool process_queue(log_buffer** buffers, size_t dequeued_count, sink_config* config);
+    size_t dequeue_buffers(moodycamel::ConsumerToken& token, log_buffer_base** buffers, bool wait);
+    size_t process_buffer_batch(log_buffer_base** buffers, size_t start_idx, size_t count, sink_config* config);
+    bool process_queue(log_buffer_base** buffers, size_t dequeued_count, sink_config* config);
     void drain_queue(moodycamel::ConsumerToken& token);
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
     // Helper functions for statistics collection
     void update_batch_stats(size_t dequeued_count);
-    void track_inflight_times(log_buffer **buffers, size_t start_idx, size_t count);
+    void track_inflight_times(log_buffer_base **buffers, size_t start_idx, size_t count);
     void update_dispatch_timing_stats(std::chrono::steady_clock::time_point start, size_t message_count);
     void update_message_rate_sample();
 
@@ -284,7 +284,7 @@ struct log_line_dispatcher
     bool has_default_sink_{true}; // Flag to track if we still have the default stdout sink // Only for modifications
 
     // Async processing members
-    moodycamel::BlockingConcurrentQueue<log_buffer *> queue_;
+    moodycamel::BlockingConcurrentQueue<log_buffer_base *> queue_;
     std::thread worker_thread_;
     std::atomic<bool> shutdown_{false};
 

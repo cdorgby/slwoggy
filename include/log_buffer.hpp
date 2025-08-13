@@ -14,6 +14,7 @@
 #include <atomic>
 #include <fmt/format.h>
 #include <memory>
+#include <cassert>
 
 #include "moodycamel/concurrentqueue.h"
 
@@ -28,52 +29,84 @@ class log_buffer_metadata_adapter;
 namespace slwoggy
 {
 
-// Cache-aligned buffer structure
-struct alignas(CACHE_LINE_SIZE) log_buffer
+// Base buffer class with all logic
+class log_buffer_base
 {
+public:
     // Buffer header (first bytes of data_)
     struct buffer_header
     {
-        uint16_t rec_size;     // Total allocated size (LOG_BUFFER_SIZE)
+        uint16_t rec_size;     // Total allocated size
         uint16_t text_len;     // Length of text data
         uint16_t metadata_off; // Offset where metadata starts
     };
 
     static constexpr size_t HEADER_SIZE = sizeof(buffer_header);
 
-    log_level level_{log_level::nolog}; // Default to no logging level
+    // Hot metadata - frequently accessed, keep together in first cache line
+    log_level level_{log_level::nolog};
+    uint32_t line_{0};
+    size_t header_width_{0};
+    
+protected:
+    size_t text_pos_{HEADER_SIZE};
+    size_t metadata_pos_;
+    std::atomic<int> ref_count_{0};
+    
+    // Data pointers - accessed together
+    char* data_;
+    size_t capacity_;
+    
+public:
+    // Cold metadata - less frequently accessed
     std::string_view file_;
-    uint32_t line_;
     std::chrono::steady_clock::time_point timestamp_;
 
-    size_t text_pos_{HEADER_SIZE};         // Current text write position
-    size_t metadata_pos_{LOG_BUFFER_SIZE}; // Current metadata write position (grows backward)
-    size_t header_width_{0};               // Width of header for extracting just the message
+protected:
+    // Protected constructor - prevents default construction
+    log_buffer_base(char* data, size_t capacity) noexcept
+        : metadata_pos_(capacity), data_(data), capacity_(capacity) {
+        // In debug builds, validate inputs
+        assert(data != nullptr);
+        assert(capacity > HEADER_SIZE);
+    }
+    
+    // Delete default constructor - force proper initialization
+    log_buffer_base() = delete;
+    
+public:
+    // Delete copy operations - prevent aliasing issues with raw pointer
+    log_buffer_base(const log_buffer_base&) = delete;
+    log_buffer_base& operator=(const log_buffer_base&) = delete;
+    
+    // Delete move operations - pooled objects shouldn't move
+    log_buffer_base(log_buffer_base&&) = delete;
+    log_buffer_base& operator=(log_buffer_base&&) = delete;
 
-    constexpr size_t size() const { return data_.size(); }
-    constexpr size_t len() const { return text_pos_ - HEADER_SIZE; }
-    constexpr size_t available() const { return metadata_pos_ - text_pos_; }
+    constexpr size_t size() const noexcept { return capacity_; }
+    constexpr size_t len() const noexcept { return text_pos_ - HEADER_SIZE; }
+    constexpr size_t available() const noexcept { return metadata_pos_ - text_pos_; }
 
     // Get buffer header
-    buffer_header *get_header() { return reinterpret_cast<buffer_header *>(data_.data()); }
-    const buffer_header *get_header() const { return reinterpret_cast<const buffer_header *>(data_.data()); }
+    buffer_header *get_header() noexcept { return reinterpret_cast<buffer_header *>(data_); }
+    const buffer_header *get_header() const noexcept { return reinterpret_cast<const buffer_header *>(data_); }
 
     // Get metadata length
     size_t len_meta() const
     {
         const auto *header = get_header();
-        return LOG_BUFFER_SIZE - header->metadata_off;
+        return capacity_ - header->metadata_off;
     }
 
     // Get count of key-value pairs in metadata
     size_t get_kv_count() const
     {
-        if (metadata_pos_ >= LOG_BUFFER_SIZE) return 0; // No metadata
+        if (metadata_pos_ >= capacity_) return 0; // No metadata
         // First byte of metadata is the count
         return static_cast<size_t>(data_[metadata_pos_]);
     }
 
-    void add_ref() { ref_count_.fetch_add(1, std::memory_order_relaxed); }
+    void add_ref() noexcept { ref_count_.fetch_add(1, std::memory_order_relaxed); }
     void release();
 
     // Friend class for metadata adapter
@@ -84,18 +117,18 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     inline log_buffer_metadata_adapter get_metadata_adapter() const;
 
     // Reset buffer for reuse
-    void reset()
+    void reset() noexcept
     {
         text_pos_     = HEADER_SIZE;
-        metadata_pos_ = LOG_BUFFER_SIZE;
+        metadata_pos_ = capacity_;
         level_        = log_level::nolog;
         header_width_ = 0;
 
         // Initialize header
         auto *header         = get_header();
-        header->rec_size     = LOG_BUFFER_SIZE;
+        header->rec_size     = static_cast<uint16_t>(capacity_);
         header->text_len     = 0;
-        header->metadata_off = LOG_BUFFER_SIZE;
+        header->metadata_off = static_cast<uint16_t>(capacity_);
     }
 
     // Write raw data to buffer (text grows forward)
@@ -108,7 +141,7 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
 
         if (to_write > 0)
         {
-            std::memcpy(data_.data() + text_pos_, str.data(), to_write);
+            std::memcpy(data_ + text_pos_, str.data(), to_write);
             text_pos_ += to_write;
             // Update header
             get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
@@ -180,10 +213,10 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
                 if (available >= header_width_)
                 {
                     // Shift remaining text to make room for padding
-                    std::memmove(data_.data() + newline_pos + 1 + header_width_, data_.data() + newline_pos + 1, remaining);
+                    std::memmove(data_ + newline_pos + 1 + header_width_, data_ + newline_pos + 1, remaining);
 
                     // Insert padding spaces
-                    std::memset(data_.data() + newline_pos + 1, ' ', header_width_);
+                    std::memset(data_ + newline_pos + 1, ' ', header_width_);
 
                     // Update our write position
                     text_pos_ += header_width_;
@@ -207,7 +240,7 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
         if (available == 0) return;
 
         // Format directly into the buffer at current position
-        int written = snprintf(data_.data() + text_pos_,
+        int written = snprintf(data_ + text_pos_,
                                available, // snprintf needs full available size including null terminator
                                format,
                                std::forward<Args>(args)...);
@@ -244,7 +277,7 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
         if (available == 0) return;
 
         // Format directly into the buffer at current position
-        char *output_start = data_.data() + text_pos_;
+        char *output_start = data_ + text_pos_;
         auto result        = fmt::format_to_n(output_start, available, fmt, std::forward<Args>(args)...);
 
         // Update write position based on what would have been written (capped by available space)
@@ -262,7 +295,7 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
     std::string_view get_text() const
     {
         const auto *header = get_header();
-        return std::string_view(data_.data() + HEADER_SIZE, header->text_len);
+        return std::string_view(data_ + HEADER_SIZE, header->text_len);
     }
 
     // Get just the message text (skipping buffer header and log header)
@@ -274,7 +307,7 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
         {
             return std::string_view(); // No message, just header
         }
-        return std::string_view(data_.data() + message_start, HEADER_SIZE + header->text_len - message_start);
+        return std::string_view(data_ + message_start, HEADER_SIZE + header->text_len - message_start);
     }
 
     // Finalize buffer (update metadata offset in header)
@@ -284,16 +317,43 @@ struct alignas(CACHE_LINE_SIZE) log_buffer
         header->metadata_off = static_cast<uint16_t>(metadata_pos_);
     }
 
-    std::array<char, LOG_BUFFER_SIZE> data_;
+    // Non-virtual destructor - we never delete through base pointer
+    // This keeps the type trivially destructible
+    ~log_buffer_base() = default;
+};
 
-  private:
-    std::atomic<int> ref_count_{0};
+// Helper base to hold storage before log_buffer_base
+template<size_t BufferSize>
+struct log_buffer_storage {
+    // Align the actual data array to cache line for better performance  
+    alignas(CACHE_LINE_SIZE) std::array<char, BufferSize> data_storage_{};
+};
+
+// Templated buffer with actual storage
+template<size_t BufferSize>
+struct alignas(CACHE_LINE_SIZE) log_buffer final 
+    : private log_buffer_storage<BufferSize>  // Storage comes first
+    , public log_buffer_base                  // Then base class
+{
+    // Static assertions for compile-time safety
+    static_assert(BufferSize > sizeof(buffer_header) + 256, 
+                  "Buffer too small for header and reasonable content");
+    static_assert(BufferSize <= 65535, 
+                  "Buffer size must fit in uint16_t for rec_size field");
+    
+    log_buffer() noexcept 
+        : log_buffer_storage<BufferSize>{}
+        , log_buffer_base(this->data_storage_.data(), BufferSize) {
+        reset();
+    }
 };
 
 // Buffer pool singleton class
 class buffer_pool
 {
   public:
+    // Public constant for buffer size so tests can reference it
+    static constexpr size_t BUFFER_SIZE = 2048;
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
     /**
      * @brief Buffer pool statistics for monitoring and diagnostics
@@ -326,8 +386,10 @@ class buffer_pool
 #endif
 
   private:
-    std::unique_ptr<log_buffer[]> buffer_storage_;
-    moodycamel::ConcurrentQueue<log_buffer *> available_buffers_;
+    using buffer_type = log_buffer<BUFFER_SIZE>;
+    
+    std::unique_ptr<buffer_type[]> buffer_storage_;
+    moodycamel::ConcurrentQueue<log_buffer_base *> available_buffers_;
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
     // Statistics tracking
@@ -355,7 +417,7 @@ class buffer_pool
 
     buffer_pool()
     {
-        buffer_storage_ = std::make_unique<log_buffer[]>(BUFFER_POOL_SIZE);
+        buffer_storage_ = std::make_unique<buffer_type[]>(BUFFER_POOL_SIZE);
         for (size_t i = 0; i < BUFFER_POOL_SIZE; ++i)
         {
             buffer_storage_[i].reset(); // Initialize each buffer
@@ -370,13 +432,13 @@ class buffer_pool
         return instance;
     }
 
-    log_buffer *acquire()
+    log_buffer_base *acquire()
     {
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
         total_acquires_.fetch_add(1, std::memory_order_relaxed);
 #endif
 
-        log_buffer *buffer = nullptr;
+        log_buffer_base *buffer = nullptr;
         if (available_buffers_.try_dequeue(buffer) && buffer)
         {
             buffer->add_ref();
@@ -405,7 +467,7 @@ class buffer_pool
         return buffer;
     }
 
-    void release(log_buffer *buffer)
+    void release(log_buffer_base *buffer)
     {
         if (buffer)
         {
@@ -424,7 +486,7 @@ class buffer_pool
      * @brief Track buffer usage statistics
      * @param buffer Buffer being released back to pool
      */
-    void track_buffer_usage(const log_buffer *buffer)
+    void track_buffer_usage(const log_buffer_base *buffer)
     {
         if (!buffer) return;
 
@@ -497,7 +559,7 @@ class buffer_pool
         s.acquire_failures  = acquire_failures_.load(std::memory_order_relaxed);
         s.total_releases    = total_releases_.load(std::memory_order_relaxed);
         s.usage_percent     = (s.in_use_buffers * 100.0f) / s.total_buffers;
-        s.pool_memory_kb    = (s.total_buffers * LOG_BUFFER_SIZE) / 1024;
+        s.pool_memory_kb    = (s.total_buffers * BUFFER_SIZE) / 1024;
         s.high_water_mark   = high_water_mark_.load(std::memory_order_relaxed);
 
         // Populate area usage stats
@@ -561,7 +623,7 @@ class buffer_pool
 #endif
 };
 
-inline void log_buffer::release()
+inline void log_buffer_base::release()
 {
     if (ref_count_.fetch_sub(1, std::memory_order_acq_rel) == 1)
     {

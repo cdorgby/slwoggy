@@ -14,11 +14,11 @@ namespace slwoggy
 {
 
 // Implementation of get_metadata_adapter methods
-inline log_buffer_metadata_adapter log_buffer::get_metadata_adapter() { return log_buffer_metadata_adapter(this); }
+inline log_buffer_metadata_adapter log_buffer_base::get_metadata_adapter() { return log_buffer_metadata_adapter(this); }
 
-inline log_buffer_metadata_adapter log_buffer::get_metadata_adapter() const
+inline log_buffer_metadata_adapter log_buffer_base::get_metadata_adapter() const
 {
-    return log_buffer_metadata_adapter(const_cast<log_buffer *>(this));
+    return log_buffer_metadata_adapter(const_cast<log_buffer_base *>(this));
 }
 
 // Implementation of log_buffer_metadata_adapter methods
@@ -46,7 +46,7 @@ inline bool log_buffer_metadata_adapter::add_kv(uint16_t key_id, std::string_vie
     }
 
     // Get current count (or 0 if no metadata yet)
-    uint8_t count = (buffer_->metadata_pos_ < LOG_BUFFER_SIZE) ? buffer_->data_[buffer_->metadata_pos_] : 0;
+    uint8_t count = (buffer_->metadata_pos_ < buffer_->capacity_) ? buffer_->data_[buffer_->metadata_pos_] : 0;
 
     // Move position back to make room for new KV pair
     size_t new_pos = buffer_->metadata_pos_ - kv_size - 1;
@@ -55,8 +55,8 @@ inline bool log_buffer_metadata_adapter::add_kv(uint16_t key_id, std::string_vie
     if (count > 0)
     {
         // Existing data starts at metadata_pos_ + 1 (after count byte)
-        // and goes to LOG_BUFFER_SIZE
-        size_t existing_data_size = LOG_BUFFER_SIZE - (buffer_->metadata_pos_ + 1);
+        // and goes to capacity_
+        size_t existing_data_size = buffer_->capacity_ - (buffer_->metadata_pos_ + 1);
         if (existing_data_size > 0)
         {
             std::memmove(&buffer_->data_[new_pos + 1 + kv_size], &buffer_->data_[buffer_->metadata_pos_ + 1], existing_data_size);
@@ -172,14 +172,16 @@ inline bool log_buffer_metadata_adapter::add_kv_formatted(uint16_t key_id, unsig
 }
 
 // Iterator implementation
-inline log_buffer_metadata_adapter::iterator::iterator(const char *start, const char *end) : current_(start), end_(end)
+inline log_buffer_metadata_adapter::iterator::iterator(const char *start, const char *end, uint8_t count) 
+    : current_(start), end_(end), remaining_count_(count)
 {
 }
 
 inline bool log_buffer_metadata_adapter::iterator::has_next() const
 {
+    // Check both count and available space
     // Need at least 2 (key_id) + 1 (len) = 3 bytes for a KV pair
-    return current_ + 3 <= end_;
+    return remaining_count_ > 0 && current_ + 3 <= end_;
 }
 
 inline log_buffer_metadata_adapter::kv_pair log_buffer_metadata_adapter::iterator::next()
@@ -197,22 +199,28 @@ inline log_buffer_metadata_adapter::kv_pair log_buffer_metadata_adapter::iterato
     // Read value
     result.value = std::string_view(current_, value_len);
     current_ += value_len;
+    
+    // Decrement remaining count
+    remaining_count_--;
 
     return result;
 }
 
 inline log_buffer_metadata_adapter::iterator log_buffer_metadata_adapter::get_iterator() const
 {
-    if (buffer_->metadata_pos_ >= LOG_BUFFER_SIZE)
+    if (buffer_->metadata_pos_ >= buffer_->capacity_)
     {
         // No metadata
-        return iterator(nullptr, nullptr);
+        return iterator(nullptr, nullptr, 0);
     }
 
-    // Skip count byte
+    // Read count byte
+    uint8_t count = buffer_->data_[buffer_->metadata_pos_];
+    
+    // Skip count byte for data start
     const char *start = &buffer_->data_[buffer_->metadata_pos_ + 1];
-    const char *end   = &buffer_->data_[LOG_BUFFER_SIZE];
-    return iterator(start, end);
+    const char *end   = &buffer_->data_[buffer_->capacity_];
+    return iterator(start, end, count);
 }
 
 inline std::pair<size_t, size_t> log_buffer_metadata_adapter::calculate_kv_size() const

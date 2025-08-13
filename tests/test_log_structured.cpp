@@ -28,17 +28,17 @@ public:
     public:
         capturing_formatter(test_structured_sink* parent) : parent_(parent) {}
         
-        size_t calculate_size(const log_buffer* buffer) const {
+        size_t calculate_size(const log_buffer_base* buffer) const {
             // We don't actually format, just capture
             return 0;
         }
         
-        size_t format(const log_buffer* buffer, char* output, size_t size) const {
+        size_t format(const log_buffer_base* buffer, char* output, size_t size) const {
             if (!buffer) return 0;
 
             fprintf(stderr, "Captured log: %s\n", buffer->get_text().data());
 
-            const_cast<log_buffer*>(buffer)->add_ref();
+            const_cast<log_buffer_base*>(buffer)->add_ref();
 
             captured_log entry;
             entry.level = buffer->level_;
@@ -65,7 +65,7 @@ public:
             }
             parent_->cv.notify_all();
 
-            const_cast<log_buffer*>(buffer)->release();
+            const_cast<log_buffer_base*>(buffer)->release();
             return 0;
         }
     };
@@ -232,7 +232,7 @@ TEST_CASE("Metadata adapter", "[structured]") {
     SECTION("Metadata size limits") {
         // Try to add data that would collide with text area
         // Fill text area to leave minimal space
-        std::string text(LOG_BUFFER_SIZE - 100, 'x');
+        std::string text(buffer_pool::BUFFER_SIZE - 100, 'x');
         buffer->write_raw(text);
         
         // Now try to add metadata that won't fit

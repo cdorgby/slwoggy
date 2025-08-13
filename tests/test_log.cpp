@@ -36,12 +36,12 @@ private:
     public:
         explicit capturing_formatter(log_sink_test* parent) : parent_(parent) {}
         
-        size_t calculate_size(const log_buffer* buffer) const {
+        size_t calculate_size(const log_buffer_base* buffer) const {
             raw_formatter fmt{false};
             return fmt.calculate_size(buffer);
         }
         
-        size_t format(const log_buffer* buffer, char* output, size_t max_size) const {
+        size_t format(const log_buffer_base* buffer, char* output, size_t max_size) const {
             raw_formatter fmt{false};
             size_t written = fmt.format(buffer, output, max_size);
             
@@ -183,7 +183,7 @@ TEST_CASE("Buffer pool basic functionality", "[buffer_pool]") {
     SECTION("Acquire and release buffer") {
         auto* buffer = pool.acquire();
         REQUIRE(buffer != nullptr);
-        REQUIRE(buffer->size() == LOG_BUFFER_SIZE);
+        REQUIRE(buffer->size() == buffer_pool::BUFFER_SIZE);
         
         pool.release(buffer);
     }
@@ -376,7 +376,7 @@ TEST_CASE("Multi-line log tests", "[log][multiline]") {
         log_sink_test test_sink;
         LogSinkGuard guard(&test_sink);
         
-        std::string large_msg(LOG_BUFFER_SIZE + 100, 'X');
+        std::string large_msg(buffer_pool::BUFFER_SIZE + 100, 'X');
         LOG(warn) << large_msg;
         
         log_line_dispatcher::instance().flush();
@@ -384,7 +384,7 @@ TEST_CASE("Multi-line log tests", "[log][multiline]") {
         auto entries = test_sink.get_entries();
         REQUIRE(entries.size() == 1);
         // Message should be truncated to buffer size
-        REQUIRE(entries[0].message.size() <= LOG_BUFFER_SIZE);
+        REQUIRE(entries[0].message.size() <= buffer_pool::BUFFER_SIZE);
         
         // Test with newlines in large message
         test_sink.clear();
@@ -397,7 +397,7 @@ TEST_CASE("Multi-line log tests", "[log][multiline]") {
         log_line_dispatcher::instance().flush();
         entries = test_sink.get_entries();
         REQUIRE(entries.size() == 1);
-        REQUIRE(entries[0].message.size() <= LOG_BUFFER_SIZE);
+        REQUIRE(entries[0].message.size() <= buffer_pool::BUFFER_SIZE);
     }
     
     SECTION("Newlines at buffer boundaries") {
@@ -406,7 +406,7 @@ TEST_CASE("Multi-line log tests", "[log][multiline]") {
         
         // Create a message that puts newline within buffer capacity
         const size_t header_estimate = 70;
-        const size_t text_capacity = 1024; // Original LOG_BUFFER_SIZE before metadata was added
+        const size_t text_capacity = 1024; // Original buffer_pool::BUFFER_SIZE before metadata was added
         std::string boundary_msg(text_capacity - header_estimate - 10, 'A');
         boundary_msg += '\n';
         boundary_msg += "After newline";
@@ -426,7 +426,7 @@ TEST_CASE("Multi-line log tests", "[log][multiline]") {
         auto entries = test_sink.get_entries();
         REQUIRE(entries.size() == 2);
         
-        // First message size depends on header width, not exactly LOG_BUFFER_SIZE
+        // First message size depends on header width, not exactly buffer_pool::BUFFER_SIZE
         INFO("Message size: " << entries[0].message.size());
         INFO("Last char: '" << entries[0].message.back() << "' (" << (int)entries[0].message.back() << ")");
         // Message might be truncated, so look for newline in the message
@@ -826,7 +826,7 @@ TEST_CASE("Edge cases and coverage", "[log][edge]") {
         
         // Account for header size (approx 70 chars with module name)
         const size_t header_estimate = 70;
-        const size_t text_capacity = 1024; // Original LOG_BUFFER_SIZE before metadata was added
+        const size_t text_capacity = 1024; // Original buffer_pool::BUFFER_SIZE before metadata was added
         std::string max_msg(text_capacity - header_estimate - 1, 'M');
         LOG(info) << max_msg;
         
@@ -873,7 +873,7 @@ TEST_CASE("Edge cases and coverage", "[log][edge]") {
         
         // Account for header size
         const size_t header_estimate = 70;
-        const size_t text_capacity = 1024; // Original LOG_BUFFER_SIZE before metadata was added
+        const size_t text_capacity = 1024; // Original buffer_pool::BUFFER_SIZE before metadata was added
         std::string padding(text_capacity - header_estimate - 20, 'P');
         LOG(info) << padding;
         LOG(info).printf("%s%d%s", "Start", 12345, "End");

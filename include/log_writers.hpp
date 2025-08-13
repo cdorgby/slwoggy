@@ -102,7 +102,7 @@ class writev_file_writer : public file_writer
 
     // Bulk write implementation using writev
     template <typename Formatter>
-    size_t bulk_write(log_buffer **buffers, size_t count, const Formatter &formatter) const
+    size_t bulk_write(log_buffer_base **buffers, size_t count, const Formatter &formatter) const
     {
         if (fd_ < 0 || count == 0) return 0;
 
@@ -118,7 +118,7 @@ class writev_file_writer : public file_writer
         size_t i;
         for (i = 0; i < count && iov_count < MAX_IOV; ++i)
         {
-            log_buffer *buf = buffers[i];
+            log_buffer_base *buf = buffers[i];
 
             // Skip empty buffers
             if (buf->len() == 0) continue;

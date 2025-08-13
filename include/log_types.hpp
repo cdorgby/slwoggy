@@ -34,8 +34,7 @@ inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 16 * 1024; // Max # buffers wa
 inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(100); // Max time to collect a batch
 inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(10);  // Polling interval when collecting
 
-// Log buffer constants
-inline constexpr size_t LOG_BUFFER_SIZE       = 2048;
+// Structured logging constants
 inline constexpr uint32_t MAX_STRUCTURED_KEYS = 256; // Maximum structured keys
 inline constexpr size_t MAX_FORMATTED_SIZE    = 128; // max size of values when allowed in the metadata
 
