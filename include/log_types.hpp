@@ -36,7 +36,6 @@ inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(10);  //
 
 // Log buffer constants
 inline constexpr size_t LOG_BUFFER_SIZE       = 2048;
-inline constexpr size_t METADATA_RESERVE      = 256; // Reserve bytes for structured metadata
 inline constexpr uint32_t MAX_STRUCTURED_KEYS = 256; // Maximum structured keys
 inline constexpr size_t MAX_FORMATTED_SIZE    = 128; // max size of values when allowed in the metadata
 

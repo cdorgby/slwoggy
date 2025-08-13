@@ -14,6 +14,8 @@
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
+#include "log_structured.hpp"
+#include "log_structured_impl.hpp"    // IWYU pragma: keep
 
 namespace slwoggy
 {
