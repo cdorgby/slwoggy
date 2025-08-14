@@ -27,6 +27,8 @@ namespace slwoggy
  * - Supports up to MAX_STRUCTURED_KEYS unique keys
  * - Keys are never removed (stable IDs within process lifetime)
  * - O(1) ID to string lookup, O(1) amortized string to ID lookup
+ * - Pre-registered internal keys with guaranteed IDs 0-4
+ * - Ultra-fast path for internal keys bypassing all caching layers
  *
  * @warning Key IDs are only stable within a single process run. The same key
  *          may receive different IDs across application restarts. If you need
@@ -47,6 +49,14 @@ namespace slwoggy
  */
 struct structured_log_key_registry
 {
+    // Internal metadata keys - always registered with fixed IDs
+    static constexpr uint16_t INTERNAL_KEY_TS     = 0; // _ts - timestamp
+    static constexpr uint16_t INTERNAL_KEY_LEVEL  = 1; // _level - log level
+    static constexpr uint16_t INTERNAL_KEY_MODULE = 2; // _module - module name
+    static constexpr uint16_t INTERNAL_KEY_FILE   = 3; // _file - source file
+    static constexpr uint16_t INTERNAL_KEY_LINE   = 4; // _line - source line
+    static constexpr uint16_t FIRST_USER_KEY_ID   = 5; // User keys start here
+
     /**
      * @brief Get the singleton instance of the key registry
      * @return Reference to the global key registry
@@ -57,10 +67,32 @@ struct structured_log_key_registry
         return registry;
     }
 
-
-    // Overload for string_view to avoid unnecessary string allocation
+    /**
+     * @brief Get or register a key and return its numeric ID
+     *
+     * This method uses a multi-tier lookup strategy for optimal performance:
+     * 1. Ultra-fast path: Direct comparison for internal keys (_ts, _level, etc.)
+     * 2. Fast path: Thread-local cache lookup (no locks)
+     * 3. Medium path: Global registry with shared lock
+     * 4. Slow path: Register new key with exclusive lock
+     *
+     * @param key The string key to look up or register
+     * @return Numeric ID for the key (0-4 for internal keys, 5+ for user keys)
+     */
     uint16_t get_or_register_key(std::string_view key)
     {
+        // Ultra-fast path for internal keys - no cache or hash lookup needed
+        if (!key.empty() && key[0] == '_')
+        {
+            // Check internal keys with simple string comparison
+            if (key == "_ts") return INTERNAL_KEY_TS;
+            if (key == "_level") return INTERNAL_KEY_LEVEL;
+            if (key == "_module") return INTERNAL_KEY_MODULE;
+            if (key == "_file") return INTERNAL_KEY_FILE;
+            if (key == "_line") return INTERNAL_KEY_LINE;
+            // Fall through for other underscore-prefixed keys
+        }
+
         // Fast path: check thread-local cache (no lock needed)
         if (auto it = tl_cache_.key_to_id.find(key); it != tl_cache_.key_to_id.end()) { return it->second; }
 
@@ -78,50 +110,62 @@ struct structured_log_key_registry
         // Double-check under exclusive lock before allocating
         {
             std::unique_lock lock(mutex_);
-            
+
             // Check again in case another thread registered while we waited for exclusive lock
             if (auto it = key_to_id_.find(key); it != key_to_id_.end())
             {
                 tl_cache_.key_to_id[it->first] = it->second;
                 return it->second;
             }
-            
+
             // Now we know for sure it doesn't exist, allocate and register
-            if (next_key_id_ >= MAX_STRUCTURED_KEYS) 
-            {
-                throw std::runtime_error("Too many structured log keys");
-            }
-            
+            if (next_key_id_ >= MAX_STRUCTURED_KEYS) { throw std::runtime_error("Too many structured log keys"); }
+
             keys_.push_back(std::string(key)); // Only allocate when truly needed
-            uint16_t id = next_key_id_++;
-            auto key_view = std::string_view(keys_.back());
+            uint16_t id          = next_key_id_++;
+            auto key_view        = std::string_view(keys_.back());
             key_to_id_[key_view] = id;
-            id_to_key_[id] = key_view;
-            
+            id_to_key_[id]       = key_view;
+
             // Add to thread-local cache using the stable string_view
             tl_cache_.key_to_id[key_view] = id;
-            
+
             return id;
         }
     }
     /**
      * @brief Look up a key string by its numeric ID
+     *
+     * Uses a switch-based fast path for internal key IDs (0-4) before
+     * checking caches or the global registry.
+     *
      * @param id The numeric ID to look up
      * @return The key string, or "unknown" if ID is invalid
      */
     std::string_view get_key(uint16_t id) const
     {
+        // Ultra-fast path for internal keys - no cache lookup needed
+        switch (id)
+        {
+        case INTERNAL_KEY_TS: return "_ts";
+        case INTERNAL_KEY_LEVEL: return "_level";
+        case INTERNAL_KEY_MODULE: return "_module";
+        case INTERNAL_KEY_FILE: return "_file";
+        case INTERNAL_KEY_LINE: return "_line";
+        default:
+            // Fall through for user keys
+            break;
+        }
+
         if (id >= next_key_id_) return "unknown";
 
         // Fast path: check thread-local cache
-        if (auto it = tl_cache_.id_to_key.find(id); it != tl_cache_.id_to_key.end())
-        {
-            return it->second;
-        }
-        
+        if (auto it = tl_cache_.id_to_key.find(id); it != tl_cache_.id_to_key.end()) { return it->second; }
+
         // Slow path: look up in global registry with shared lock
         std::shared_lock lock(mutex_);
-        if (auto it = id_to_key_.find(id); it != id_to_key_.end()) {
+        if (auto it = id_to_key_.find(id); it != id_to_key_.end())
+        {
             // Found in global registry, add to thread-local cache
             tl_cache_.id_to_key[id] = it->second;
             return it->second;
@@ -211,7 +255,29 @@ struct structured_log_key_registry
     }
 
   private:
-    structured_log_key_registry() { keys_.reserve(MAX_STRUCTURED_KEYS); }
+    structured_log_key_registry()
+    {
+        keys_.reserve(MAX_STRUCTURED_KEYS);
+
+        // Pre-register internal metadata keys with guaranteed IDs
+        // These are reserved for system use and always available
+        register_internal_key("_ts", INTERNAL_KEY_TS);
+        register_internal_key("_level", INTERNAL_KEY_LEVEL);
+        register_internal_key("_module", INTERNAL_KEY_MODULE);
+        register_internal_key("_file", INTERNAL_KEY_FILE);
+        register_internal_key("_line", INTERNAL_KEY_LINE);
+
+        // User keys start after internal ones
+        next_key_id_ = FIRST_USER_KEY_ID;
+    }
+
+    void register_internal_key(const char *key, uint16_t id)
+    {
+        keys_.push_back(key);
+        auto key_view        = std::string_view(keys_.back());
+        key_to_id_[key_view] = id;
+        id_to_key_[id]       = key_view;
+    }
 
   private:
     // Thread-local cache for fast key lookups
@@ -271,7 +337,6 @@ class log_buffer_base;
 class log_buffer_metadata_adapter
 {
   public:
-
 #ifdef LOG_COLLECT_STRUCTURED_METRICS
     // Statistics for monitoring dropped metadata
     static std::atomic<uint64_t> dropped_count_;
@@ -286,10 +351,10 @@ class log_buffer_metadata_adapter
     };
 
   private:
-    log_buffer_base* buffer_;
+    log_buffer_base *buffer_;
 
   public:
-    log_buffer_metadata_adapter(log_buffer_base* buffer) : buffer_(buffer) {}
+    log_buffer_metadata_adapter(log_buffer_base *buffer) : buffer_(buffer) {}
 
     void reset();
     bool add_kv(uint16_t key_id, std::string_view value);
@@ -300,7 +365,7 @@ class log_buffer_metadata_adapter
     bool add_kv_formatted(uint16_t key_id, const char *value);
     bool add_kv_formatted(uint16_t key_id, const std::string &value);
     bool add_kv_formatted(uint16_t key_id, bool value);
-    
+
     // Integer specializations
     bool add_kv_formatted(uint16_t key_id, int value);
     bool add_kv_formatted(uint16_t key_id, unsigned int value);
@@ -319,15 +384,15 @@ class log_buffer_metadata_adapter
         const char *current_;
         const char *end_;
         uint8_t remaining_count_;
-        
-    public:
+
+      public:
         iterator(const char *start, const char *end, uint8_t count);
         bool has_next() const;
         kv_pair next();
     };
-    
+
     iterator get_iterator() const;
-    
+
     /**
      * @brief Calculate total size needed for k/v data
      * @return Pair of (total_chars_needed, kv_count)
@@ -358,7 +423,6 @@ class log_buffer_metadata_adapter
     template <typename IntType>
     typename std::enable_if<std::is_integral_v<IntType> && !std::is_same_v<IntType, bool>, bool>::type
     add_kv_formatted_int(uint16_t key_id, IntType value);
-
 };
 
 } // namespace slwoggy
