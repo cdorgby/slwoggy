@@ -172,6 +172,35 @@ TEST_CASE("Structured log key registry", "[structured]") {
         REQUIRE(registry.get_key(9999) == "unknown");
     }
 
+    SECTION("Internal keys pre-registration") {
+        auto& registry = structured_log_key_registry::instance();
+        
+        // Verify internal keys are pre-registered with correct IDs
+        REQUIRE(registry.get_or_register_key("_ts") == structured_log_key_registry::INTERNAL_KEY_TS);
+        REQUIRE(registry.get_or_register_key("_level") == structured_log_key_registry::INTERNAL_KEY_LEVEL);
+        REQUIRE(registry.get_or_register_key("_module") == structured_log_key_registry::INTERNAL_KEY_MODULE);
+        REQUIRE(registry.get_or_register_key("_file") == structured_log_key_registry::INTERNAL_KEY_FILE);
+        REQUIRE(registry.get_or_register_key("_line") == structured_log_key_registry::INTERNAL_KEY_LINE);
+        
+        // Verify the IDs are as expected
+        REQUIRE(structured_log_key_registry::INTERNAL_KEY_TS == 0);
+        REQUIRE(structured_log_key_registry::INTERNAL_KEY_LEVEL == 1);
+        REQUIRE(structured_log_key_registry::INTERNAL_KEY_MODULE == 2);
+        REQUIRE(structured_log_key_registry::INTERNAL_KEY_FILE == 3);
+        REQUIRE(structured_log_key_registry::INTERNAL_KEY_LINE == 4);
+        
+        // Verify reverse lookup works
+        REQUIRE(registry.get_key(0) == "_ts");
+        REQUIRE(registry.get_key(1) == "_level");
+        REQUIRE(registry.get_key(2) == "_module");
+        REQUIRE(registry.get_key(3) == "_file");
+        REQUIRE(registry.get_key(4) == "_line");
+        
+        // Verify user keys start at ID 5 or higher
+        uint16_t user_key_id = registry.get_or_register_key("test_user_key");
+        REQUIRE(user_key_id >= structured_log_key_registry::FIRST_USER_KEY_ID);
+    }
+
     SECTION("Thread safety") {
         auto& registry = structured_log_key_registry::instance();
         std::vector<std::thread> threads;
