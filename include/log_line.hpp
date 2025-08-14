@@ -86,11 +86,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         buffer_->write_with_padding(str);
         return *this;
@@ -101,11 +97,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         // Forward to buffer's printf implementation
         buffer_->printf_with_padding(format, std::forward<Args>(args)...);
@@ -131,11 +123,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         // Format directly into buffer with padding support
         buffer_->format_to_buffer_with_padding(fmt, std::forward<Args>(args)...);
@@ -157,11 +145,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         // Format directly into buffer
         buffer_->format_to_buffer_with_padding("{}", value);
@@ -173,20 +157,10 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
-        if (ptr == nullptr) 
-        { 
-            buffer_->write_with_padding("nullptr"); 
-        }
-        else 
-        { 
-            buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(ptr)); 
-        }
+        if (ptr == nullptr) { buffer_->write_with_padding("nullptr"); }
+        else { buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(ptr)); }
         return *this;
     }
 
@@ -214,11 +188,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         buffer_->format_to_buffer_with_padding("{}", value);
         return *this;
@@ -229,11 +199,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         buffer_->format_to_buffer_with_padding("{}", value);
         return *this;
@@ -244,11 +210,7 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
         buffer_->format_to_buffer_with_padding("{}", ptr);
         return *this;
@@ -260,20 +222,10 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
-        if (ptr) 
-        { 
-            buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(ptr.get())); 
-        }
-        else 
-        { 
-            buffer_->write_with_padding("nullptr"); 
-        }
+        if (ptr) { buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(ptr.get())); }
+        else { buffer_->write_with_padding("nullptr"); }
         return *this;
     }
 
@@ -283,20 +235,10 @@ struct log_line
         if (!buffer_) { return *this; }
 
         // Write header if this is first write after swap
-        if (needs_header_)
-        {
-            write_header();
-            needs_header_ = false;
-        }
+        ensure_header_written();
 
-        if (auto sp = ptr.lock()) 
-        { 
-            buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(sp.get())); 
-        }
-        else 
-        { 
-            buffer_->write_with_padding("(expired)"); 
-        }
+        if (auto sp = ptr.lock()) { buffer_->format_to_buffer_with_padding("{}", static_cast<const void *>(sp.get())); }
+        else { buffer_->write_with_padding("(expired)"); }
         return *this;
     }
 
@@ -355,13 +297,11 @@ struct log_line
     log_buffer_base *swap_buffer()
     {
         auto *old_buffer = buffer_;
-        
+
         // Finalize the old buffer before swapping
-        if (old_buffer) {
-            old_buffer->finalize();
-        }
-        
-        buffer_          = buffer_pool::instance().acquire();
+        if (old_buffer) { old_buffer->finalize(); }
+
+        buffer_ = buffer_pool::instance().acquire();
 
         // Reset positions
         needs_header_ = true;
@@ -379,7 +319,26 @@ struct log_line
     }
 
   private:
-    // Write header to buffer and return width
+    /**
+     * @brief Ensure header is written if needed (first write after buffer swap)
+     *
+     * This helper method eliminates code duplication by centralizing the header
+     * writing logic. It checks if a header needs to be written (after a buffer
+     * swap) and writes it exactly once before the first content write.
+     */
+    void ensure_header_written()
+    {
+        if (needs_header_)
+        {
+            write_header();
+            needs_header_ = false;
+        }
+    }
+
+    /**
+     * @brief Write header to buffer and return width
+     * @return The number of characters written for the header
+     */
     size_t write_header();
 };
 

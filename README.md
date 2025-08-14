@@ -110,6 +110,17 @@ LOG(info).add("user_id", user.id)
     << "Request completed successfully" << endl;
 ```
 
+### Internal Metadata Keys
+
+The system pre-registers five internal metadata keys with guaranteed IDs for optimal performance:
+- `_ts` (ID 0) - Timestamp
+- `_level` (ID 1) - Log level  
+- `_module` (ID 2) - Module name
+- `_file` (ID 3) - Source file
+- `_line` (ID 4) - Source line number
+
+These internal keys use ultra-fast lookup paths that bypass all caching layers, making them essentially free to use in JSON formatters or other metadata processors.
+
 ## Custom Sinks
 
 Create custom output handlers:
@@ -152,9 +163,7 @@ namespace slwoggy {
 ```cpp
 // In log_types.hpp
 namespace slwoggy {
-    inline constexpr size_t BUFFER_POOL_SIZE = 128 * 1024;  // Number of buffers
-    inline constexpr size_t LOG_BUFFER_SIZE = 2048;         // Bytes per buffer
-    inline constexpr size_t METADATA_RESERVE = 256;         // Reserved for structured data
+    inline constexpr size_t BUFFER_POOL_SIZE = 32 * 1024;   // Number of buffers
 }
 ```
 
@@ -208,6 +217,15 @@ auto disp_stats = log_line_dispatcher::instance().get_stats();
 // - Processing rates: messages/second over 1s/10s/60s windows
 // - In-flight timing: time from log creation to processing
 ```
+
+### Structured Logging Performance
+
+The structured logging system includes several optimizations:
+
+- **Ultra-fast internal keys**: Built-in keys (_ts, _level, etc.) use direct string comparison, bypassing hash lookups
+- **Thread-local caching**: User-defined keys are cached per-thread to avoid lock contention
+- **Pre-registration**: Register frequently used keys at startup to minimize runtime overhead
+- **Compact storage**: 16-bit IDs instead of full strings in log buffers
 
 ## Advanced Features
 
