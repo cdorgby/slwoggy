@@ -15,8 +15,7 @@
             "--completion-style=detailed",
             "--function-arg-placeholders",
             "--fallback-style=llvm",
-            "--compile-commands-dir=${workspaceFolder}/build/linux",
-            "--query-driver=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++"
+            "--compile-commands-dir=${workspaceFolder}/build",
         ],
         "clangd.onConfigChanged": "restart",
         "editor.semanticHighlighting.enabled": true,

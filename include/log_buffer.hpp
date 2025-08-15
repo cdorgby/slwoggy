@@ -154,8 +154,9 @@ public:
     // Only adds the character if it's not already the last character in the buffer
     void append_or_replace_last(char c)
     {
-        // Check if the character is already the last character
-        if (text_pos_ > HEADER_SIZE && data_[text_pos_ - 1] == c)
+        // Check if we have text content and the character is already the last character
+        size_t text_len = text_pos_ - HEADER_SIZE;
+        if (text_len > 0 && data_[text_pos_ - 1] == c)
         {
             // Character is already at the end, nothing to do
             return;
@@ -167,9 +168,9 @@ public:
             data_[text_pos_++]     = c;
             get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
         }
-        else if (text_pos_ > HEADER_SIZE)
+        else if (text_len > 0)
         {
-            // Buffer full - replace last character
+            // Buffer full but has text - replace last character
             data_[text_pos_ - 1] = c;
         }
         // else: no text to replace, do nothing
