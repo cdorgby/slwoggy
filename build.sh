@@ -124,8 +124,8 @@ main() {
     detect_compiler "$platform"
     echo "==================================="
     
-    # Create platform-specific build directory
-    local build_dir="build/$platform"
+    # Create build directory
+    local build_dir="build"
     mkdir -p "$build_dir"
     cd "$build_dir" || exit 1
     
@@ -133,7 +133,7 @@ main() {
     echo "Configuring with CMake..."
     if [[ "$platform" == "windows" ]] && command -v cl &> /dev/null; then
         # MSVC on Windows
-        cmake ../.. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -G "NMake Makefiles"
+        cmake .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -G "NMake Makefiles"
         if [[ $? -ne 0 ]]; then
             echo "CMake configuration failed"
             exit 1
@@ -143,7 +143,7 @@ main() {
         nmake
     else
         # Unix-like systems (Linux, macOS, MinGW on Windows)
-        cmake ../.. -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+        cmake .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE
         if [[ $? -ne 0 ]]; then
             echo "CMake configuration failed"
             exit 1

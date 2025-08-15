@@ -35,8 +35,13 @@ inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(100); //
 inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(10);  // Polling interval when collecting
 
 // Structured logging constants
-inline constexpr uint32_t MAX_STRUCTURED_KEYS = 256; // Maximum structured keys
-inline constexpr size_t MAX_FORMATTED_SIZE    = 128; // max size of values when allowed in the metadata
+// Maximum structured keys per buffer is limited to 255 because we store the count
+// in a single uint8_t byte in the metadata format. While uint8_t can represent 
+// 0-255 (256 values), the count represents "number of KV pairs", so the maximum
+// is 255 pairs. If you increase this beyond 255, you'll need to change the metadata
+// format to use uint16_t for the count, which affects binary compatibility.
+inline constexpr uint32_t MAX_STRUCTURED_KEYS = 255; // Maximum structured keys per buffer
+inline constexpr size_t MAX_FORMATTED_SIZE    = 512; // max size of values when allowed in the metadata
 
 // JSON formatting constants
 inline constexpr size_t UNICODE_ESCAPE_SIZE   = 7;   // \uXXXX + null terminator
@@ -47,9 +52,9 @@ inline constexpr size_t LINE_BUFFER_SIZE      = 64;  // Buffer for line number f
 // Metrics collection configuration
 // Define these before including log.hpp to enable metrics collection:
 // #define LOG_COLLECT_BUFFER_POOL_METRICS 1 // Enable buffer pool statistics
-#define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
-#define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
-#define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
+// #define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
+// #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
+// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
 // LOG_COLLECT_DISPATCHER_METRICS)
 
 /**

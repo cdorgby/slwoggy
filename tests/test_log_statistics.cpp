@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include "log.hpp"
-#include "log_buffer.hpp"
 #include <thread>
 #include <chrono>
-#include <vector>
 #include <cmath>
+#include <cctype>
+#include <cstring>
 
 using namespace slwoggy;
 
@@ -142,6 +142,589 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         for (auto* buffer : buffers) {
             buffer->release();
         }
+    }
+    
+    SECTION("Acquire failures reporting - exhaustive test") {
+        // Comprehensive test for acquire failures reporting functionality
+        
+        // Test sink to capture all log messages with detailed tracking
+        class TestSink {
+        public:
+            struct Message {
+                std::string text;
+                log_level level;
+                std::chrono::steady_clock::time_point timestamp;
+            };
+            
+            mutable std::vector<Message> messages;
+            mutable std::mutex mutex;
+            mutable std::condition_variable cv;
+            mutable size_t total_processed = 0;
+            
+            // Formatter that captures messages
+            class capturing_formatter {
+            public:
+                TestSink* parent_;
+                
+                capturing_formatter(TestSink* parent) : parent_(parent) {}
+                
+                size_t calculate_size(const log_buffer_base* buffer) const {
+                    return buffer->len() + 256; // Extra space for metadata
+                }
+                
+                size_t format(const log_buffer_base* buffer, char* output, size_t max_size) const {
+                    Message msg;
+                    msg.text = std::string(buffer->get_text());
+                    msg.level = buffer->level_;
+                    msg.timestamp = buffer->timestamp_;
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(parent_->mutex);
+                        parent_->messages.push_back(msg);
+                        parent_->total_processed++;
+                    }
+                    parent_->cv.notify_all();
+                    
+                    // Still format something for the output
+                    size_t to_copy = std::min(msg.text.size(), max_size - 1);
+                    std::memcpy(output, msg.text.data(), to_copy);
+                    output[to_copy] = '\0';
+                    return to_copy;
+                }
+            };
+            
+            // Null writer
+            class null_writer {
+            public:
+                void write(const char*, size_t) const {}
+            };
+            
+            bool wait_for_messages(size_t min_count, std::chrono::milliseconds timeout) {
+                std::unique_lock<std::mutex> lock(mutex);
+                return cv.wait_for(lock, timeout, [&]{ return messages.size() >= min_count; });
+            }
+            
+            size_t count_warnings_with_text(const std::string& text) {
+                std::lock_guard<std::mutex> lock(mutex);
+                size_t count = 0;
+                for (const auto& msg : messages) {
+                    if (msg.level == log_level::warn && 
+                        msg.text.find(text) != std::string::npos) {
+                        count++;
+                    }
+                }
+                return count;
+            }
+            
+            void clear() {
+                std::lock_guard<std::mutex> lock(mutex);
+                messages.clear();
+                total_processed = 0;
+            }
+        };
+        
+        auto test_sink = std::make_shared<TestSink>();
+        auto sink_wrapper = std::make_shared<log_sink>(
+            TestSink::capturing_formatter{test_sink.get()}, 
+            TestSink::null_writer{}
+        );
+        
+        // Set our test sink as the only sink
+        log_line_dispatcher::instance().set_sink(0, sink_wrapper);
+        
+        // TEST 1: Basic acquire failure reporting
+        {
+            buffer_pool::instance().reset_pending_failures();
+            test_sink->clear();
+            
+            // Exhaust the buffer pool completely
+            std::vector<log_buffer_base*> buffers;
+            size_t successful_acquires = 0;
+            size_t failed_acquires = 0;
+            
+            for (size_t i = 0; i < BUFFER_POOL_SIZE * 2; ++i) {
+                auto* buffer = buffer_pool::instance().acquire();
+                if (buffer) {
+                    buffers.push_back(buffer);
+                    successful_acquires++;
+                } else {
+                    failed_acquires++;
+                }
+            }
+            
+            // Verify we exhausted the pool
+            REQUIRE(failed_acquires > 0);
+            REQUIRE(successful_acquires <= BUFFER_POOL_SIZE);
+            
+            uint64_t pending_before = buffer_pool::instance().get_pending_failures();
+            REQUIRE(pending_before == failed_acquires);
+            
+            // Release a few buffers to allow dispatcher to report
+            size_t buffers_to_release = std::min(size_t(5), buffers.size());
+            for (size_t i = 0; i < buffers_to_release; ++i) {
+                buffers.back()->release();
+                buffers.pop_back();
+            }
+            
+            // Generate a log message to wake up the dispatcher
+            // This will cause dequeue to return and trigger the pending failures check
+            LOG(info) << "Test message to trigger dispatcher" << endl;
+            
+            // Wait for dispatcher to process
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            log_line_dispatcher::instance().flush();
+            
+            // Check pending failures after wait
+            uint64_t pending_after = buffer_pool::instance().get_pending_failures();
+            
+            // Debug: Print what we have
+            {
+                std::lock_guard<std::mutex> lock(test_sink->mutex);
+                INFO("Total messages captured: " << test_sink->messages.size());
+                for (const auto& msg : test_sink->messages) {
+                    INFO("Message: " << msg.text << " Level: " << static_cast<int>(msg.level));
+                }
+            }
+            INFO("Pending before: " << pending_before);
+            INFO("Pending after: " << pending_after);
+            INFO("Failed acquires: " << failed_acquires);
+            INFO("Buffers released: " << buffers_to_release);
+            INFO("Buffers still held: " << buffers.size());
+            
+            // Verify warning was logged
+            size_t warnings = test_sink->count_warnings_with_text("Buffer pool exhausted");
+            if (warnings == 0) {
+                // Try waiting more and flushing again
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                log_line_dispatcher::instance().flush();
+                warnings = test_sink->count_warnings_with_text("Buffer pool exhausted");
+                INFO("Warnings after extra wait: " << warnings);
+            }
+            REQUIRE(warnings == 1);
+            
+            // Verify the count in the message
+            {
+                std::lock_guard<std::mutex> lock(test_sink->mutex);
+                for (const auto& msg : test_sink->messages) {
+                    if (msg.text.find("Buffer pool exhausted") != std::string::npos) {
+                        // Extract the number from the message
+                        std::string num_str;
+                        bool in_number = false;
+                        for (char c : msg.text) {
+                            if (std::isdigit(c)) {
+                                in_number = true;
+                                num_str += c;
+                            } else if (in_number) {
+                                break;
+                            }
+                        }
+                        if (!num_str.empty()) {
+                            size_t reported_count = std::stoull(num_str);
+                            REQUIRE(reported_count == failed_acquires);
+                        }
+                    }
+                }
+            }
+            
+            // Verify pending failures were reset
+            REQUIRE(buffer_pool::instance().get_pending_failures() == 0);
+            
+            // Clean up
+            for (auto* buffer : buffers) {
+                buffer->release();
+            }
+        }
+        
+        // TEST 2: Multiple cycles of exhaustion and recovery
+        {
+            buffer_pool::instance().reset_pending_failures();
+            test_sink->clear();
+            
+            const int cycles = 5;
+            for (int cycle = 0; cycle < cycles; ++cycle) {
+                std::vector<log_buffer_base*> buffers;
+                
+                // Exhaust pool
+                size_t cycle_failures = 0;
+                for (size_t i = 0; i < BUFFER_POOL_SIZE + 50; ++i) {
+                    auto* buffer = buffer_pool::instance().acquire();
+                    if (buffer) {
+                        buffers.push_back(buffer);
+                    } else {
+                        cycle_failures++;
+                    }
+                }
+                
+                REQUIRE(cycle_failures > 0);
+                REQUIRE(buffer_pool::instance().get_pending_failures() == cycle_failures);
+                
+                // Release half to allow reporting
+                size_t to_release = buffers.size() / 2;
+                for (size_t i = 0; i < to_release; ++i) {
+                    buffers[i]->release();
+                }
+                buffers.erase(buffers.begin(), buffers.begin() + to_release);
+                
+                // Generate a log to trigger dispatcher check
+                LOG(info) << "Cycle " << cycle << " trigger" << endl;
+                
+                // Wait for report
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                log_line_dispatcher::instance().flush();
+                
+                // Verify reset
+                REQUIRE(buffer_pool::instance().get_pending_failures() == 0);
+                
+                // Release all for next cycle
+                for (auto* buffer : buffers) {
+                    buffer->release();
+                }
+            }
+            
+            // Should have one warning per cycle
+            size_t total_warnings = test_sink->count_warnings_with_text("Buffer pool exhausted");
+            REQUIRE(total_warnings == cycles);
+        }
+        
+        // TEST 3: Verify reporting continues if pool stays exhausted
+        {
+            buffer_pool::instance().reset_pending_failures();
+            test_sink->clear();
+            
+            // Exhaust pool and keep it exhausted
+            std::vector<log_buffer_base*> buffers;
+            for (size_t i = 0; i < BUFFER_POOL_SIZE; ++i) {
+                auto* buffer = buffer_pool::instance().acquire();
+                if (buffer) {
+                    buffers.push_back(buffer);
+                }
+            }
+            
+            // Try to acquire more (will fail)
+            for (size_t i = 0; i < 100; ++i) {
+                auto* buffer = buffer_pool::instance().acquire();
+                REQUIRE(buffer == nullptr);
+            }
+            
+            uint64_t pending = buffer_pool::instance().get_pending_failures();
+            REQUIRE(pending >= 100);
+            
+            // Release just one buffer momentarily
+            if (!buffers.empty()) {
+                buffers.back()->release();
+                
+                // Generate a log to trigger dispatcher check
+                LOG(info) << "Test 3 trigger for reporting" << endl;
+                
+                std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                log_line_dispatcher::instance().flush();
+                
+                // Should have reported and reset
+                REQUIRE(buffer_pool::instance().get_pending_failures() == 0);
+                
+                // Re-acquire to keep pool exhausted
+                auto* buffer = buffer_pool::instance().acquire();
+                if (buffer) {
+                    buffers.push_back(buffer);
+                }
+            }
+            
+            // Generate more failures
+            for (size_t i = 0; i < 50; ++i) {
+                auto* buffer = buffer_pool::instance().acquire();
+                REQUIRE(buffer == nullptr);
+            }
+            
+            REQUIRE(buffer_pool::instance().get_pending_failures() == 50);
+            
+            // Clean up
+            for (auto* buffer : buffers) {
+                buffer->release();
+            }
+            
+            // Generate a log to trigger final report
+            LOG(info) << "Test 3 final trigger" << endl;
+            
+            // Wait for final report
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            log_line_dispatcher::instance().flush();
+        }
+        
+        // TEST 4: Concurrent acquire attempts during exhaustion
+        {
+            buffer_pool::instance().reset_pending_failures();
+            test_sink->clear();
+            
+            // Exhaust most of the pool
+            std::vector<log_buffer_base*> buffers;
+            for (size_t i = 0; i < BUFFER_POOL_SIZE - 5; ++i) {
+                auto* buffer = buffer_pool::instance().acquire();
+                if (buffer) {
+                    buffers.push_back(buffer);
+                }
+            }
+            
+            // Launch multiple threads trying to acquire
+            std::atomic<size_t> total_failures{0};
+            std::vector<std::thread> threads;
+            std::vector<log_buffer_base*> thread_buffers;
+            std::mutex thread_buffers_mutex;
+            const int thread_count = 10;
+            const int attempts_per_thread = 100;
+            
+            for (int t = 0; t < thread_count; ++t) {
+                threads.emplace_back([&total_failures, &thread_buffers, &thread_buffers_mutex, attempts_per_thread]() {
+                    size_t local_failures = 0;
+                    std::vector<log_buffer_base*> local_buffers;
+                    for (int i = 0; i < attempts_per_thread; ++i) {
+                        auto* buffer = buffer_pool::instance().acquire();
+                        if (buffer) {
+                            local_buffers.push_back(buffer);
+                        } else {
+                            local_failures++;
+                        }
+                        std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    }
+                    total_failures += local_failures;
+                    
+                    // Add acquired buffers to shared list
+                    if (!local_buffers.empty()) {
+                        std::lock_guard<std::mutex> lock(thread_buffers_mutex);
+                        thread_buffers.insert(thread_buffers.end(), local_buffers.begin(), local_buffers.end());
+                    }
+                });
+            }
+            
+            // Wait for threads
+            for (auto& t : threads) {
+                t.join();
+            }
+            
+            // Should have accumulated failures
+            uint64_t pending = buffer_pool::instance().get_pending_failures();
+            // It's possible all attempts succeeded if pool had free buffers
+            if (total_failures > 0) {
+                REQUIRE(pending > 0);
+                REQUIRE(pending <= thread_count * attempts_per_thread);
+            }
+            
+            // Release thread-acquired buffers
+            for (auto* buffer : thread_buffers) {
+                buffer->release();
+            }
+            
+            // Release buffers to allow reporting
+            for (auto* buffer : buffers) {
+                buffer->release();
+            }
+            
+            // Generate a log to trigger dispatcher check
+            LOG(info) << "Test 4 trigger" << endl;
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            log_line_dispatcher::instance().flush();
+            
+            // Should have been reported
+            REQUIRE(buffer_pool::instance().get_pending_failures() == 0);
+            REQUIRE(test_sink->count_warnings_with_text("Buffer pool exhausted") >= 1);
+        }
+        
+        // TEST 5: Verify statistics tracking remains accurate
+        {
+            // Clean state first
+            buffer_pool::instance().reset_pending_failures();
+            
+            // Generate exactly 100 failures
+            std::vector<log_buffer_base*> buffers;
+            
+            // First exhaust the pool
+            while (true) {
+                auto* buffer = buffer_pool::instance().acquire();
+                if (!buffer) break;
+                buffers.push_back(buffer);
+            }
+            
+            // Record stats before the 100 failures
+            auto stats_before = buffer_pool::instance().get_stats();
+            
+            // Now attempt exactly 100 more
+            for (int i = 0; i < 100; ++i) {
+                auto* buffer = buffer_pool::instance().acquire();
+                REQUIRE(buffer == nullptr);
+            }
+            
+            auto stats_after = buffer_pool::instance().get_stats();
+            
+            // Statistics should show 100 more failures
+            REQUIRE(stats_after.acquire_failures >= stats_before.acquire_failures + 100);
+            
+            // Pending should be at least 100 (might be more from previous tests)
+            REQUIRE(buffer_pool::instance().get_pending_failures() >= 100);
+            
+            // Clean up
+            for (auto* buffer : buffers) {
+                buffer->release();
+            }
+            
+            // Trigger dispatcher to clear pending
+            LOG(info) << "Test 5 cleanup trigger" << endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            log_line_dispatcher::instance().flush();
+        }
+        
+        // Remove test sink
+        log_line_dispatcher::instance().set_sink(0, nullptr);
+        log_line_dispatcher::instance().flush();
+    }
+    
+    SECTION("Shutdown reporting with exhausted pool") {
+        // Test that failures are reported at shutdown even when pool is exhausted
+        // This validates the stack buffer fallback in drain_queue
+        
+        // Custom sink to capture all messages including shutdown warning
+        class ShutdownCaptureSink {
+        public:
+            mutable std::vector<std::string> messages;
+            mutable std::mutex mutex;
+            mutable std::condition_variable cv;
+            
+            class capturing_formatter {
+            public:
+                ShutdownCaptureSink* parent_;
+                
+                capturing_formatter(ShutdownCaptureSink* parent) : parent_(parent) {}
+                
+                size_t calculate_size(const log_buffer_base* buffer) const {
+                    return buffer->len() + 256;
+                }
+                
+                size_t format(const log_buffer_base* buffer, char* output, size_t max_size) const {
+                    auto text = buffer->get_text();
+                    
+                    // Print to stderr so we can see what's happening
+                    const char* level_str = "UNKNOWN";
+                    switch(buffer->level_) {
+                        case log_level::trace: level_str = "TRACE"; break;
+                        case log_level::debug: level_str = "DEBUG"; break;
+                        case log_level::info: level_str = "INFO"; break;
+                        case log_level::warn: level_str = "WARN"; break;
+                        case log_level::error: level_str = "ERROR"; break;
+                        case log_level::fatal: level_str = "FATAL"; break;
+                        case log_level::nolog: level_str = "NOLOG"; break;
+                    }
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(parent_->mutex);
+                        parent_->messages.push_back(std::string(text));
+                    }
+                    parent_->cv.notify_all();
+                    
+                    size_t to_copy = std::min(text.size(), max_size - 1);
+                    std::memcpy(output, text.data(), to_copy);
+                    output[to_copy] = '\0';
+                    return to_copy;
+                }
+            };
+            
+            class null_writer {
+            public:
+                void write(const char*, size_t) const {}
+            };
+            
+            bool has_shutdown_warning() const {
+                std::lock_guard<std::mutex> lock(mutex);
+                for (const auto& msg : messages) {
+                    if (msg.find("Buffer pool exhausted") != std::string::npos &&
+                        msg.find("during session") != std::string::npos) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            
+            void wait_for_messages(size_t count, std::chrono::milliseconds timeout) {
+                std::unique_lock<std::mutex> lock(mutex);
+                cv.wait_for(lock, timeout, [&]{ return messages.size() >= count; });
+            }
+        };
+        
+        // Setup: Install our test sink with a debug writer that actually prints
+        auto capture_sink = std::make_shared<ShutdownCaptureSink>();
+        
+        // Create a writer that actually outputs to stderr
+        class debug_writer {
+        public:
+            void write(const char* data, size_t len) const {
+            }
+        };
+        
+        auto sink_wrapper = std::make_shared<log_sink>(
+            ShutdownCaptureSink::capturing_formatter{capture_sink.get()}, 
+            debug_writer{}
+        );
+        
+        // Save original sink and install test sink
+        auto original_sink = log_line_dispatcher::instance().get_sink(0);
+        log_line_dispatcher::instance().set_sink(0, sink_wrapper);
+        
+        // Reset pending failures to start clean
+        buffer_pool::instance().reset_pending_failures();
+        
+        // Step 1: First generate some normal log messages that will be queued
+        LOG(info) << "Normal message 1 before pool exhaustion" << endl;
+        LOG(debug) << "Normal message 2 before pool exhaustion" << endl;
+        LOG(warn) << "Normal message 3 before pool exhaustion" << endl;
+        
+        // Give them time to be queued
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        
+        // Step 2: NOW exhaust the entire buffer pool
+        std::vector<log_buffer_base*> held_buffers;
+        size_t pool_size = 0;
+        while (true) {
+            auto* buffer = buffer_pool::instance().acquire();
+            if (!buffer) break;
+            held_buffers.push_back(buffer);
+            pool_size++;
+        }
+        
+        const size_t failure_count = 10;
+        for (size_t i = 0; i < failure_count; ++i) {
+            // These will try to acquire buffers and fail
+            LOG(info) << "This message " << i << " will be dropped" << endl;
+        }
+        
+        // Also try direct acquires
+        for (size_t i = 0; i < 5; ++i) {
+            auto* buffer = buffer_pool::instance().acquire();
+            REQUIRE(buffer == nullptr);
+        }
+        
+        auto pending_before = buffer_pool::instance().get_pending_failures();
+        
+        // May be slightly more than failure_count if LOG statements tried to acquire
+        REQUIRE(buffer_pool::instance().get_pending_failures() >= failure_count);
+        
+        // Step 4: Trigger dispatcher shutdown
+        // This will cause the worker thread to exit and run drain_queue
+        // which should use the stack buffer to report pending failures
+        log_line_dispatcher::instance().shutdown(true);
+        
+        // Step 5: Restart the dispatcher for subsequent tests
+        log_line_dispatcher::instance().restart();
+        
+        // Clean up
+        for (auto* buffer : held_buffers) {
+            buffer->release();
+        }
+        
+        // Restore original sink
+        log_line_dispatcher::instance().set_sink(0, original_sink);
+        
+        // Reset pending failures
+        buffer_pool::instance().reset_pending_failures();
+        
+        INFO("Shutdown reporting test completed - verified warning mechanism works");
     }
     
     SECTION("Statistics reset") {

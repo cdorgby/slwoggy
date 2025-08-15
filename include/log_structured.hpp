@@ -321,8 +321,9 @@ struct structured_log_key_registry
  * at the end of each log buffer, growing backward from the buffer end.
  *
  * Storage Format (growing backward from end):
- * - Each KV pair: [value_data (N)][value_length (1)][key_id (2)]
+ * - Each KV pair: [value_data (N)][value_length (2)][key_id (2)]
  * - Count byte (1) at the start of metadata section
+ * - Value length is limited to MAX_FORMATTED_SIZE bytes
  *
  * Memory Layout:
  * |<-- Header -->|<-- Text -->|<-- Gap -->|<-- Metadata -->|
