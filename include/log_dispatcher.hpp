@@ -95,6 +95,8 @@ struct log_line_dispatcher
 
     void dispatch(struct log_line_base &line); // Defined after log_line
     void flush();                         // Flush pending logs
+    void shutdown(bool wait_for_completion = true); // Trigger shutdown
+    void restart();                       // Restart after shutdown
     void worker_thread_func();            // Worker thread function
 
   public:

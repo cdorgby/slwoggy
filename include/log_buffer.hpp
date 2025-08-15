@@ -400,10 +400,11 @@ class buffer_pool
     std::unique_ptr<buffer_type[]> buffer_storage_;
     moodycamel::ConcurrentQueue<log_buffer_base *> available_buffers_;
 
+    std::atomic<uint64_t> pending_failure_report_{0}; // For dispatcher notification
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
+    std::atomic<uint64_t> acquire_failures_{0}; // For statistics
     // Statistics tracking
     std::atomic<uint64_t> total_acquires_{0};
-    std::atomic<uint64_t> acquire_failures_{0};
     std::atomic<uint64_t> total_releases_{0};
     std::atomic<uint64_t> buffers_in_use_{0};
     std::atomic<uint64_t> high_water_mark_{0};
@@ -469,6 +470,7 @@ class buffer_pool
         }
         else
         {
+            pending_failure_report_.fetch_add(1, std::memory_order_relaxed);
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
             acquire_failures_.fetch_add(1, std::memory_order_relaxed);
 #endif
@@ -486,6 +488,23 @@ class buffer_pool
 #endif
             available_buffers_.enqueue(buffer);
         }
+    }
+
+    /**
+     * @brief Get count of pending failures to report
+     * @return Current count of unreported acquire failures
+     */
+    uint64_t get_pending_failures() const
+    {
+        return pending_failure_report_.load(std::memory_order_relaxed);
+    }
+
+    /**
+     * @brief Reset pending failure count after successful reporting
+     */
+    void reset_pending_failures()
+    {
+        pending_failure_report_.store(0, std::memory_order_relaxed);
     }
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
@@ -610,8 +629,8 @@ class buffer_pool
     void reset_stats()
     {
         total_acquires_.store(0, std::memory_order_relaxed);
-        acquire_failures_.store(0, std::memory_order_relaxed);
         total_releases_.store(0, std::memory_order_relaxed);
+        acquire_failures_.store(0, std::memory_order_relaxed);
         // Note: don't reset buffers_in_use_ or high_water_mark_ as they reflect current state
 
         // Reset area usage stats
