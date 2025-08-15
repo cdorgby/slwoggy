@@ -93,7 +93,7 @@ struct log_line_dispatcher
     };
 #endif
 
-    void dispatch(struct log_line &line); // Defined after log_line
+    void dispatch(struct log_line_base &line); // Defined after log_line
     void flush();                         // Flush pending logs
     void worker_thread_func();            // Worker thread function
 

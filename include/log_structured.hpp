@@ -49,13 +49,20 @@ namespace slwoggy
  */
 struct structured_log_key_registry
 {
-    // Internal metadata keys - always registered with fixed IDs
-    static constexpr uint16_t INTERNAL_KEY_TS     = 0; // _ts - timestamp
-    static constexpr uint16_t INTERNAL_KEY_LEVEL  = 1; // _level - log level
-    static constexpr uint16_t INTERNAL_KEY_MODULE = 2; // _module - module name
-    static constexpr uint16_t INTERNAL_KEY_FILE   = 3; // _file - source file
-    static constexpr uint16_t INTERNAL_KEY_LINE   = 4; // _line - source line
+    // Internal metadata key IDs - always registered with fixed IDs
+    static constexpr uint16_t INTERNAL_KEY_TS     = 0; // ts - timestamp
+    static constexpr uint16_t INTERNAL_KEY_LEVEL  = 1; // level - log level
+    static constexpr uint16_t INTERNAL_KEY_MODULE = 2; // module - module name
+    static constexpr uint16_t INTERNAL_KEY_FILE   = 3; // file - source file
+    static constexpr uint16_t INTERNAL_KEY_LINE   = 4; // line - source line
     static constexpr uint16_t FIRST_USER_KEY_ID   = 5; // User keys start here
+    
+    // Internal metadata key names - used for consistency
+    static constexpr const char* INTERNAL_KEY_NAME_TS     = "ts";
+    static constexpr const char* INTERNAL_KEY_NAME_LEVEL  = "level";
+    static constexpr const char* INTERNAL_KEY_NAME_MODULE = "module";
+    static constexpr const char* INTERNAL_KEY_NAME_FILE   = "file";
+    static constexpr const char* INTERNAL_KEY_NAME_LINE   = "line";
 
     /**
      * @brief Get the singleton instance of the key registry
@@ -71,7 +78,7 @@ struct structured_log_key_registry
      * @brief Get or register a key and return its numeric ID
      *
      * This method uses a multi-tier lookup strategy for optimal performance:
-     * 1. Ultra-fast path: Direct comparison for internal keys (_ts, _level, etc.)
+     * 1. Ultra-fast path: Direct comparison for internal keys (ts, level, etc.)
      * 2. Fast path: Thread-local cache lookup (no locks)
      * 3. Medium path: Global registry with shared lock
      * 4. Slow path: Register new key with exclusive lock
@@ -82,15 +89,15 @@ struct structured_log_key_registry
     uint16_t get_or_register_key(std::string_view key)
     {
         // Ultra-fast path for internal keys - no cache or hash lookup needed
-        if (!key.empty() && key[0] == '_')
+        if (!key.empty())
         {
             // Check internal keys with simple string comparison
-            if (key == "_ts") return INTERNAL_KEY_TS;
-            if (key == "_level") return INTERNAL_KEY_LEVEL;
-            if (key == "_module") return INTERNAL_KEY_MODULE;
-            if (key == "_file") return INTERNAL_KEY_FILE;
-            if (key == "_line") return INTERNAL_KEY_LINE;
-            // Fall through for other underscore-prefixed keys
+            if (key == INTERNAL_KEY_NAME_TS) return INTERNAL_KEY_TS;
+            if (key == INTERNAL_KEY_NAME_LEVEL) return INTERNAL_KEY_LEVEL;
+            if (key == INTERNAL_KEY_NAME_MODULE) return INTERNAL_KEY_MODULE;
+            if (key == INTERNAL_KEY_NAME_FILE) return INTERNAL_KEY_FILE;
+            if (key == INTERNAL_KEY_NAME_LINE) return INTERNAL_KEY_LINE;
+            // Fall through for user-defined keys
         }
 
         // Fast path: check thread-local cache (no lock needed)
@@ -147,11 +154,11 @@ struct structured_log_key_registry
         // Ultra-fast path for internal keys - no cache lookup needed
         switch (id)
         {
-        case INTERNAL_KEY_TS: return "_ts";
-        case INTERNAL_KEY_LEVEL: return "_level";
-        case INTERNAL_KEY_MODULE: return "_module";
-        case INTERNAL_KEY_FILE: return "_file";
-        case INTERNAL_KEY_LINE: return "_line";
+        case INTERNAL_KEY_TS: return INTERNAL_KEY_NAME_TS;
+        case INTERNAL_KEY_LEVEL: return INTERNAL_KEY_NAME_LEVEL;
+        case INTERNAL_KEY_MODULE: return INTERNAL_KEY_NAME_MODULE;
+        case INTERNAL_KEY_FILE: return INTERNAL_KEY_NAME_FILE;
+        case INTERNAL_KEY_LINE: return INTERNAL_KEY_NAME_LINE;
         default:
             // Fall through for user keys
             break;
@@ -261,11 +268,11 @@ struct structured_log_key_registry
 
         // Pre-register internal metadata keys with guaranteed IDs
         // These are reserved for system use and always available
-        register_internal_key("_ts", INTERNAL_KEY_TS);
-        register_internal_key("_level", INTERNAL_KEY_LEVEL);
-        register_internal_key("_module", INTERNAL_KEY_MODULE);
-        register_internal_key("_file", INTERNAL_KEY_FILE);
-        register_internal_key("_line", INTERNAL_KEY_LINE);
+        register_internal_key(INTERNAL_KEY_NAME_TS, INTERNAL_KEY_TS);
+        register_internal_key(INTERNAL_KEY_NAME_LEVEL, INTERNAL_KEY_LEVEL);
+        register_internal_key(INTERNAL_KEY_NAME_MODULE, INTERNAL_KEY_MODULE);
+        register_internal_key(INTERNAL_KEY_NAME_FILE, INTERNAL_KEY_FILE);
+        register_internal_key(INTERNAL_KEY_NAME_LINE, INTERNAL_KEY_LINE);
 
         // User keys start after internal ones
         next_key_id_ = FIRST_USER_KEY_ID;

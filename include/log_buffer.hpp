@@ -151,8 +151,16 @@ public:
     }
 
     // Append a character if there's room, otherwise replace the last character
+    // Only adds the character if it's not already the last character in the buffer
     void append_or_replace_last(char c)
     {
+        // Check if the character is already the last character
+        if (text_pos_ > HEADER_SIZE && data_[text_pos_ - 1] == c)
+        {
+            // Character is already at the end, nothing to do
+            return;
+        }
+        
         if (text_pos_ < metadata_pos_)
         {
             // Room to append
