@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
             
             if (target_size <= base_size) {
                 // Small message - no padding
-                auto l = LOG(info);
+                auto l = LOG_STRUCTURED(info);
                 //l.printf("Thread %d iteration %d", thread_id, i);
                 l.format("Thread {} iteration {}", thread_id, i);
                 l.add("thread_id", thread_id);
@@ -160,7 +160,7 @@ int main(int argc, char *argv[])
                 if (pad_size > MAX_PADDING - 1) pad_size = MAX_PADDING - 1;
 
                 // Use %.*s to specify exact number of characters from padding buffer
-                auto l = LOG(info);
+                auto l = LOG_STRUCTURED(info);
                 
                 //l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
                 l.format("Thread {} iteration {} {}", thread_id, i, std::string_view(padding_buffer, pad_size));

@@ -13,6 +13,16 @@
 namespace slwoggy
 {
 
+// Stack-allocated buffer for critical messages when pool is exhausted
+struct stack_buffer : public log_buffer_base
+{
+    alignas(CACHE_LINE_SIZE) char storage[buffer_pool::BUFFER_SIZE];
+    stack_buffer() : log_buffer_base(storage, sizeof(storage))
+    {
+        reset();
+    }
+};
+
 inline log_line_dispatcher::log_line_dispatcher()
 : start_time_(log_fast_timestamp()),
   start_time_us_(std::chrono::duration_cast<std::chrono::microseconds>(start_time_.time_since_epoch()).count()),
@@ -30,17 +40,55 @@ inline log_line_dispatcher::log_line_dispatcher()
     current_sinks_.store(initial_config.release(), std::memory_order_release);
 }
 
-inline log_line_dispatcher::~log_line_dispatcher()
+inline void log_line_dispatcher::shutdown(bool wait_for_completion)
 {
-    // Signal shutdown
-    shutdown_.store(true);
+    // Only shutdown once
+    bool expected = false;
+    if (!shutdown_.compare_exchange_strong(expected, true))
+    {
+        // Already shutting down or shut down
+        if (wait_for_completion && worker_thread_.joinable())
+        {
+            worker_thread_.join();
+        }
+        return;
+    }
 
-    // Enqueue sentinel to ensure worker wakes up
-    // (Important: we must ensure an element arrives per the docs)
+    // Enqueue sentinel to wake worker
     queue_.enqueue(nullptr);
 
-    // Wait for worker to finish
-    if (worker_thread_.joinable()) { worker_thread_.join(); }
+    // Optionally wait for worker to finish
+    if (wait_for_completion && worker_thread_.joinable())
+    {
+        worker_thread_.join();
+    }
+}
+
+inline void log_line_dispatcher::restart()
+{
+    // Only restart if shut down
+    if (!shutdown_.load())
+    {
+        return; // Already running
+    }
+
+    // Wait for any pending shutdown to complete
+    if (worker_thread_.joinable())
+    {
+        worker_thread_.join();
+    }
+
+    // Reset shutdown flag
+    shutdown_.store(false);
+
+    // Start new worker thread
+    worker_thread_ = std::thread(&log_line_dispatcher::worker_thread_func, this);
+}
+
+inline log_line_dispatcher::~log_line_dispatcher()
+{
+    // Use shutdown method with wait
+    shutdown(true);
 
     // Clean up sink config
     auto *config = current_sinks_.load(std::memory_order_acquire);
@@ -386,6 +434,39 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
             }
         }
     }
+    
+    // Final check for any unreported buffer pool failures
+    uint64_t final_failures = buffer_pool::instance().get_pending_failures();
+    if (final_failures > 0)
+    {
+        // Use stack buffer to guarantee we can report this
+        stack_buffer warning_buffer;
+        warning_buffer.level_ = log_level::warn;
+        warning_buffer.timestamp_ = log_fast_timestamp();
+        warning_buffer.file_ = "log_dispatcher";
+        warning_buffer.line_ = 0;
+        
+        // Format the final warning message
+        auto message = fmt::format("Buffer pool exhausted - {} log messages dropped during session", final_failures);
+        warning_buffer.write_raw(message);
+        warning_buffer.finalize();
+        
+        // Get current sinks and process the warning
+        auto* config = current_sinks_.load(std::memory_order_acquire);
+        if (config && !config->sinks.empty())
+        {
+            log_buffer_base* warning_array[1] = { &warning_buffer };
+            // Process directly through sinks, bypassing normal batch processing
+            for (auto& sink : config->sinks)
+            {
+                if (sink)
+                {
+                    sink->process_batch(warning_array, 1);
+                }
+            }
+        }
+        // No need to reset pending_failures since we're shutting down
+    }
 }
 
 // Worker thread function implementation
@@ -401,6 +482,44 @@ inline void log_line_dispatcher::worker_thread_func()
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
         worker_iterations_++;
 #endif
+        
+        // Check for pending buffer pool failures to report
+        uint64_t pending_failures = buffer_pool::instance().get_pending_failures();
+        if (pending_failures > 0)
+        {
+            // Try to acquire a buffer to report the failures
+            auto* warning_buffer = buffer_pool::instance().acquire();
+            if (warning_buffer)
+            {
+                // Successfully got a buffer - format warning message
+                warning_buffer->level_ = log_level::warn;
+                warning_buffer->timestamp_ = log_fast_timestamp();
+                warning_buffer->file_ = "log_dispatcher";
+                warning_buffer->line_ = 0;
+                
+                // Format the warning message
+                auto message = fmt::format("Buffer pool exhausted - {} log messages dropped", pending_failures);
+                warning_buffer->write_raw(message);
+                warning_buffer->finalize();
+                
+                // Get current sinks and process the warning
+                auto* config = current_sinks_.load(std::memory_order_acquire);
+                if (config && !config->sinks.empty())
+                {
+                    log_buffer_base* warning_array[1] = { warning_buffer };
+                    process_buffer_batch(warning_array, 0, 1, config);
+                }
+                else
+                {
+                    // No sinks, just release the buffer
+                    warning_buffer->release();
+                }
+                
+                // Reset the pending count only after successful reporting
+                buffer_pool::instance().reset_pending_failures();
+            }
+            // If we couldn't get a buffer, leave the count for next iteration
+        }
 
         // Try to dequeue a batch of buffers
         dequeued_count = dequeue_buffers(consumer_token, buffers, true);

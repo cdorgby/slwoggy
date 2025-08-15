@@ -31,12 +31,21 @@ inline void log_buffer_metadata_adapter::reset()
 
 inline bool log_buffer_metadata_adapter::add_kv(uint16_t key_id, std::string_view value)
 {
-    // Calculate space needed: 1 byte count + 2 bytes key_id + 1 byte len + value
-    size_t kv_size      = sizeof(uint16_t) + 1 + value.size();
-    size_t total_needed = kv_size + 1; // +1 for count byte
+    // Limit value size to MAX_FORMATTED_SIZE
+    size_t value_len = std::min(value.size(), MAX_FORMATTED_SIZE);
+    
+    // Calculate space needed for new KV pair: 2 bytes key_id + 2 bytes len + value
+    size_t kv_size = sizeof(uint16_t) + sizeof(uint16_t) + value_len;
+    
+    // Check if this is the first KV pair
+    bool first_kv = (buffer_->metadata_pos_ >= buffer_->capacity_);
+    
+    // Total space needed: KV size + 1 byte for count (if first KV)
+    size_t space_needed = first_kv ? (kv_size + 1) : kv_size;
 
-    // Check if we have room
-    if (buffer_->metadata_pos_ < buffer_->text_pos_ + total_needed)
+    // Check if we have room (safe arithmetic to avoid underflow)
+    if (space_needed > buffer_->metadata_pos_ || 
+        buffer_->metadata_pos_ - space_needed < buffer_->text_pos_)
     {
 #ifdef LOG_COLLECT_STRUCTURED_METRICS
         dropped_count_.fetch_add(1, std::memory_order_relaxed);
@@ -45,43 +54,44 @@ inline bool log_buffer_metadata_adapter::add_kv(uint16_t key_id, std::string_vie
         return false;
     }
 
-    // Get current count (or 0 if no metadata yet)
-    uint8_t count = (buffer_->metadata_pos_ < buffer_->capacity_) ? buffer_->data_[buffer_->metadata_pos_] : 0;
-
-    // Move position back to make room for new KV pair
-    size_t new_pos = buffer_->metadata_pos_ - kv_size - 1;
-
-    // If we have existing metadata, move it back
-    if (count > 0)
-    {
-        // Existing data starts at metadata_pos_ + 1 (after count byte)
-        // and goes to capacity_
-        size_t existing_data_size = buffer_->capacity_ - (buffer_->metadata_pos_ + 1);
-        if (existing_data_size > 0)
-        {
-            std::memmove(&buffer_->data_[new_pos + 1 + kv_size], &buffer_->data_[buffer_->metadata_pos_ + 1], existing_data_size);
-        }
+    // Get current count (0 if no metadata yet)
+    uint8_t count = first_kv ? 0 : buffer_->data_[buffer_->metadata_pos_];
+    
+    // Check if we've reached the maximum number of KV pairs
+    if (count >= MAX_STRUCTURED_KEYS) {
+#ifdef LOG_COLLECT_STRUCTURED_METRICS
+        dropped_count_.fetch_add(1, std::memory_order_relaxed);
+        dropped_bytes_.fetch_add(kv_size, std::memory_order_relaxed);
+#endif
+        return false;
     }
 
-    // Write new count at new position
-    buffer_->data_[new_pos] = count + 1;
+    // Calculate new metadata start position
+    size_t new_metadata_pos = buffer_->metadata_pos_ - space_needed;
+    
+    // Write incremented count at new position
+    buffer_->data_[new_metadata_pos] = count + 1;
+    
+    // Write new KV pair right after the new count byte
+    size_t write_pos = new_metadata_pos + 1;
 
-    // Write new KV pair after count (forward order)
-    size_t write_pos = new_pos + 1;
-
-    // Write key_id (2 bytes)
-    *reinterpret_cast<uint16_t *>(&buffer_->data_[write_pos]) = key_id;
+    // Write key_id (2 bytes) - use memcpy to avoid alignment issues
+    uint16_t key_id_val = key_id;
+    std::memcpy(&buffer_->data_[write_pos], &key_id_val, sizeof(uint16_t));
     write_pos += sizeof(uint16_t);
 
-    // Write value length (1 byte)
-    buffer_->data_[write_pos] = static_cast<uint8_t>(value.size());
-    write_pos += 1;
+    // Write value length (2 bytes) - use memcpy to avoid alignment issues
+    uint16_t value_len_val = static_cast<uint16_t>(value_len);
+    std::memcpy(&buffer_->data_[write_pos], &value_len_val, sizeof(uint16_t));
+    write_pos += sizeof(uint16_t);
 
     // Write value
-    if (value.size() > 0) { std::memcpy(&buffer_->data_[write_pos], value.data(), value.size()); }
+    if (value_len > 0) { 
+        std::memcpy(&buffer_->data_[write_pos], value.data(), value_len);
+    }
 
-    // Update metadata position
-    buffer_->metadata_pos_ = new_pos;
+    // Update metadata position to new start
+    buffer_->metadata_pos_ = new_metadata_pos;
 
     return true;
 }
@@ -180,21 +190,24 @@ inline log_buffer_metadata_adapter::iterator::iterator(const char *start, const 
 inline bool log_buffer_metadata_adapter::iterator::has_next() const
 {
     // Check both count and available space
-    // Need at least 2 (key_id) + 1 (len) = 3 bytes for a KV pair
-    return remaining_count_ > 0 && current_ + 3 <= end_;
+    // Need at least 2 (key_id) + 2 (len) = 4 bytes for a KV pair header
+    return remaining_count_ > 0 && current_ + 4 <= end_;
 }
 
 inline log_buffer_metadata_adapter::kv_pair log_buffer_metadata_adapter::iterator::next()
 {
     kv_pair result;
 
-    // Read key_id (2 bytes)
-    result.key_id = *reinterpret_cast<const uint16_t *>(current_);
+    // Read key_id (2 bytes) - use memcpy to avoid alignment issues
+    uint16_t key_id;
+    std::memcpy(&key_id, current_, sizeof(uint16_t));
+    result.key_id = key_id;
     current_ += sizeof(uint16_t);
 
-    // Read value length (1 byte)
-    uint8_t value_len = *current_;
-    current_ += 1;
+    // Read value length (2 bytes) - use memcpy to avoid alignment issues
+    uint16_t value_len;
+    std::memcpy(&value_len, current_, sizeof(uint16_t));
+    current_ += sizeof(uint16_t);
 
     // Read value
     result.value = std::string_view(current_, value_len);
