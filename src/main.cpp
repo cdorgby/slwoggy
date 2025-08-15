@@ -151,8 +151,8 @@ int main(int argc, char *argv[])
                 auto l = LOG(info);
                 //l.printf("Thread %d iteration %d", thread_id, i);
                 l.format("Thread {} iteration {}", thread_id, i);
-                //l.add("thread_id", thread_id);
-                //l.add("iteration", i);
+                l.add("thread_id", thread_id);
+                l.add("iteration", i);
             }
             else {
                 // Add padding to reach target size using printf precision
@@ -165,8 +165,8 @@ int main(int argc, char *argv[])
                 //l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
                 l.format("Thread {} iteration {} {}", thread_id, i, std::string_view(padding_buffer, pad_size));
 
-                //l.add("iteration", i);
-                //l.add("thread_id", thread_id);
+                l.add("iteration", i);
+                l.add("thread_id", thread_id);
             }
         }
     };

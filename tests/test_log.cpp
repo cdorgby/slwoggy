@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include "log.hpp"
+#include "log_line.hpp"
 #include <thread>
 #include <vector>
 #include <atomic>
@@ -559,12 +560,12 @@ TEST_CASE("Multiple concurrent log_line instances", "[log][concurrent]") {
         log_sink_test test_sink;
         LogSinkGuard guard(&test_sink);
         
-        std::vector<std::unique_ptr<log_line>> held_logs;
+        std::vector<std::unique_ptr<log_line_base>> held_logs;
         
         // Try to exhaust the buffer pool
         for (size_t i = 0; i < BUFFER_POOL_SIZE + 10; ++i) {
             log_module_info test_mod{log_module_registry::instance().get_generic()};
-            auto log_ptr = std::make_unique<log_line>(log_level::debug, test_mod, __FILE__, __LINE__);
+            auto log_ptr = std::make_unique<log_line_headered>(log_level::debug, test_mod, __FILE__, __LINE__);
             *log_ptr << "Log " << i;
             held_logs.push_back(std::move(log_ptr));
         }
@@ -734,11 +735,11 @@ TEST_CASE("Timestamp ordering", "[log][timestamp]") {
         log_sink_test test_sink;
         LogSinkGuard guard(&test_sink);
         
-        std::vector<std::unique_ptr<log_line>> logs;
+        std::vector<std::unique_ptr<log_line_headered>> logs;
         
         for (int i = 0; i < 5; ++i) {
             log_module_info test_mod{log_module_registry::instance().get_generic()};
-            auto log_ptr = std::make_unique<log_line>(log_level::info, test_mod, __FILE__, __LINE__);
+            auto log_ptr = std::make_unique<log_line_headered>(log_level::info, test_mod, __FILE__, __LINE__);
             *log_ptr << "Log " << i;
             logs.push_back(std::move(log_ptr));
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -765,9 +766,9 @@ TEST_CASE("Timestamp ordering", "[log][timestamp]") {
         LogSinkGuard guard(&test_sink);
         
         log_module_info test_mod{log_module_registry::instance().get_generic()};
-        auto log1 = std::make_unique<log_line>(log_level::debug, test_mod, __FILE__, __LINE__);
-        auto log2 = std::make_unique<log_line>(log_level::info, test_mod, __FILE__, __LINE__);
-        auto log3 = std::make_unique<log_line>(log_level::warn, test_mod, __FILE__, __LINE__);
+        auto log1 = std::make_unique<log_line_headered>(log_level::debug, test_mod, __FILE__, __LINE__);
+        auto log2 = std::make_unique<log_line_headered>(log_level::info, test_mod, __FILE__, __LINE__);
+        auto log3 = std::make_unique<log_line_headered>(log_level::warn, test_mod, __FILE__, __LINE__);
         
         *log1 << "First created";
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -957,7 +958,7 @@ TEST_CASE("Edge cases and coverage", "[log][edge]") {
         {
             // Create a test module info
             log_module_info test_mod{log_module_registry::instance().get_generic()};
-            log_line long_log(log_level::error, test_mod, long_path, 999999);
+            log_line_headered long_log(log_level::error, test_mod, long_path, 999999);
             long_log << "Message with long location";
         }
         
@@ -1097,7 +1098,7 @@ TEST_CASE("Nolog optimization", "[log][optimization]") {
     SECTION("Nolog level doesn't allocate buffer") {
         // Create a log line with nolog level
         log_module_info test_mod{log_module_registry::instance().get_generic()};
-        log_line nolog_line(log_level::nolog, test_mod, "", 0);
+        log_line_headered nolog_line(log_level::nolog, test_mod, "", 0);
         
         // These operations should all safely do nothing without crashing
         nolog_line << "This should not allocate a buffer";
@@ -1127,10 +1128,10 @@ TEST_CASE("Nolog optimization", "[log][optimization]") {
             constexpr log_level level = static_cast<log_level>(-2); // Below nolog
             if constexpr (level >= GLOBAL_MIN_LOG_LEVEL) {
                 log_module_info test_mod{log_module_registry::instance().get_generic()};
-                return log_line(level, test_mod, __FILE__, __LINE__);
+                return log_line_headered(level, test_mod, __FILE__, __LINE__);
             } else {
                 log_module_info test_mod{log_module_registry::instance().get_generic()};
-                return log_line(log_level::nolog, test_mod, "", 0);
+                return log_line_headered(log_level::nolog, test_mod, "", 0);
             }
         }();
         
@@ -1148,13 +1149,13 @@ TEST_CASE("Nolog optimization", "[log][optimization]") {
         // Create some nolog entries
         {
             log_module_info test_mod{log_module_registry::instance().get_generic()};
-            log_line nolog1(log_level::nolog, test_mod, "", 0);
+            log_line_headered nolog1(log_level::nolog, test_mod, "", 0);
             nolog1 << "Should not appear";
         }
         
         {
             log_module_info test_mod{log_module_registry::instance().get_generic()};
-            log_line nolog2(log_level::nolog, test_mod, __FILE__, __LINE__);
+            log_line_headered nolog2(log_level::nolog, test_mod, __FILE__, __LINE__);
             nolog2.format("Also should not appear: {}", 123);
         }
         

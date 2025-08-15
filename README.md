@@ -51,6 +51,57 @@ int main() {
 }
 ```
 
+## Log Output Formats
+
+slwoggy supports two output formats that can be selected at the call site:
+
+### Traditional Text Format (LOG_TEXT)
+Human-readable format with timestamp, level, module, and location information:
+```cpp
+LOG_TEXT(info) << "User logged in" << endl;
+// Output: 00001234.567 [INFO ] myapp      main.cpp:42 User logged in
+```
+
+### Structured Format (LOG_STRUCTURED)
+Machine-parseable logfmt format with key-value pairs. This format automatically includes standard metadata fields:
+```cpp
+LOG_STRUCTURED(info) << "User logged in" << endl;
+// Output: msg="User logged in" ts=1234567890 level=info module=myapp file=main.cpp line=42
+```
+
+Default metadata fields automatically included:
+- `ts`: Timestamp (nanoseconds since epoch)
+- `level`: Log level (trace, debug, info, warn, error, fatal)
+- `module`: Module name (from LOG_MODULE_NAME or "generic")
+- `file`: Source file name
+- `line`: Source line number
+
+**Note about `msg="..."` field**: The `msg="..."` that appears first in the output is not a true structured field - it's part of the log format prefix and won't interfere with or be searchable as structured metadata. If you add your own `msg` field via `.add("msg", "value")`, both will appear in the output:
+```cpp
+LOG_STRUCTURED(info).add("msg", "custom value") << "Log text" << endl;
+// Output: msg="Log text" msg="custom value" ts=... level=... 
+//         ^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^
+//         Format prefix   Your structured field
+```
+
+### Default Behavior (LOG)
+The `LOG()` macro defaults to `LOG_TEXT()` for backwards compatibility:
+```cpp
+LOG(info) << "This uses traditional text format" << endl;
+// Equivalent to: LOG_TEXT(info) << "This uses traditional text format" << endl;
+```
+
+Both formats support all the same features including:
+- Stream operators (`<<`)
+- Format strings (`.format()`)
+- Structured metadata (`.add()`)
+- Multi-line support with automatic indentation
+
+Choose the format based on your needs:
+- **LOG_TEXT()**: Best for console output, development, and human inspection
+- **LOG_STRUCTURED()**: Best for log aggregation systems, parsing, and analysis
+- **LOG()**: Use when you want the default behavior (currently text format)
+
 ## Default Sink Behavior
 
 The logging system initializes with a default stdout sink for convenience. This ensures that logs are immediately visible without any configuration. The default sink behavior is:
@@ -103,23 +154,30 @@ using namespace slwoggy;
 auto& key_registry = structured_log_key_registry::instance();
 key_registry.batch_register({"user_id", "request_id", "latency_ms"});
 
-// Use in logging
+// Use in logging with either format
 LOG(info).add("user_id", user.id)
          .add("request_id", req.id)
          .add("latency_ms", elapsed.count())
     << "Request completed successfully" << endl;
+
+// For explicit structured format output (logfmt style)
+LOG_STRUCTURED(info).add("user_id", user.id)
+                    .add("request_id", req.id)
+                    .add("latency_ms", elapsed.count())
+    << "Request completed successfully" << endl;
+// Output: msg="Request completed successfully" user_id=123 request_id=456 latency_ms=78 ts=... level=info ...
 ```
 
 ### Internal Metadata Keys
 
 The system pre-registers five internal metadata keys with guaranteed IDs for optimal performance:
-- `_ts` (ID 0) - Timestamp
-- `_level` (ID 1) - Log level  
-- `_module` (ID 2) - Module name
-- `_file` (ID 3) - Source file
-- `_line` (ID 4) - Source line number
+- `ts` (ID 0) - Timestamp (automatically added by LOG_STRUCTURED)
+- `level` (ID 1) - Log level (automatically added by LOG_STRUCTURED)
+- `module` (ID 2) - Module name (automatically added by LOG_STRUCTURED)
+- `file` (ID 3) - Source file (automatically added by LOG_STRUCTURED)
+- `line` (ID 4) - Source line number (automatically added by LOG_STRUCTURED)
 
-These internal keys use ultra-fast lookup paths that bypass all caching layers, making them essentially free to use in JSON formatters or other metadata processors.
+These internal keys use ultra-fast lookup paths that bypass all caching layers, making them essentially free to use. When using `LOG_STRUCTURED()`, these fields are automatically populated. When using `LOG()` or `LOG_TEXT()`, this metadata is still available internally but formatted differently in the output.
 
 ## Custom Sinks
 
