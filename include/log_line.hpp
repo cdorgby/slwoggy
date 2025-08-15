@@ -31,7 +31,7 @@ namespace slwoggy
 struct log_line_base
 {
     log_buffer_base *buffer_;
-    bool needs_header_{true}; // True after swap, header written on first write
+    bool needs_header_{true}; // should the write_header() be called before first text write
 
 
     // Store these for endl support and header writing
@@ -43,7 +43,7 @@ struct log_line_base
 
     log_line_base() = delete;
 
-    log_line_base(log_level level, log_module_info &mod, std::string_view file, uint32_t line, bool needs_header = false)
+    log_line_base(log_level level, log_module_info &mod, std::string_view file, uint32_t line, bool needs_header)
     : buffer_(level != log_level::nolog ? buffer_pool::instance().acquire() : nullptr),
       level_(level),
       file_(file),

@@ -12,12 +12,12 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
 
 1. **log_buffer** (`log_buffer.hpp`)
    - Fixed-size buffers (2KB) with reference counting
-   - Metadata section at start for structured logging
+   - Bidirectional growth: text forward, metadata backward
    - Cache-line aligned to prevent false sharing
    - Automatic padding for multi-line logs
 
 2. **buffer_pool** (`log_buffer.hpp`)
-   - Pre-allocated pool of 128K buffers
+   - Pre-allocated pool of 32K buffers
    - Lock-free acquire/release using ConcurrentQueue
    - Singleton pattern with lazy initialization
    - Metrics tracking (optional)
@@ -46,6 +46,12 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
    - Runtime per-site control
    - Filename width tracking
 
+7. **Structured Key Registry** (`log_structured.hpp`)
+   - Pre-registered internal keys (IDs 0-4)
+   - Ultra-fast path for internal key lookups
+   - Thread-local caching for user keys
+   - Lock-free fast path, shared lock medium path
+
 ## Key Design Decisions
 
 ### Lock-Free Architecture
@@ -70,7 +76,16 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
 - Binary metadata format for efficiency
 - 16-bit key IDs instead of strings
 - Global key registry with thread caching
-- Compact storage in buffer header
+- Bidirectional buffer: text grows forward, metadata backward
+- Dynamic allocation with collision detection
+- Pre-registered internal keys with guaranteed IDs:
+  - `_ts` (ID 0) - Timestamp
+  - `_level` (ID 1) - Log level
+  - `_module` (ID 2) - Module name
+  - `_file` (ID 3) - Source file
+  - `_line` (ID 4) - Source line
+- Ultra-fast path for internal keys using direct comparison
+- Switch-based reverse lookup for internal key IDs
 
 ## Development Guidelines
 
@@ -237,7 +252,7 @@ ASAN_OPTIONS=detect_leaks=1 ./tests/test_log
 
 ### Metadata Drops
 - Check drop statistics
-- Increase `METADATA_RESERVE`
+- Metadata grows dynamically from buffer end
 - Use shorter key names
 
 ### Module Issues
@@ -289,6 +304,9 @@ Potential areas for extension:
 
 - **Latency**: ~100ns per LOG() in fast path
 - **Throughput**: >10M logs/second (single thread)
-- **Memory**: ~256MB for default pool
+- **Memory**: ~64MB for default pool (32K * 2KB)
 - **CPU**: One dedicated worker thread
 - **I/O**: Batched writes reduce syscalls
+- **Structured Logging**: 
+  - Internal keys: Direct comparison/switch (no hash lookup)
+  - User keys: Thread-local cache hit ~5ns, miss ~50ns
