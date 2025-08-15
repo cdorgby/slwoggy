@@ -17,44 +17,51 @@
  *
  * Basic Usage:
  * @code
- * // The logger starts with a default stdout sink, so this works immediately:
+ * // Three logging macros are available - choose based on your needs:
+ *
+ * // LOG() - Default macro, uses traditional text format (same as LOG_TEXT)
  * LOG(info) << "Application started";
+ * // Output: 00001234.567 [INFO ] module     file.cpp:42 Application started
  *
- * // Preferred: Modern C++20 format style
- * LOG(warn).format("Temperature {}°C exceeds threshold {}°C", temp, max_temp);
- * LOG(info).format("User {} logged in from {}", username, ip_address);
+ * // LOG_TEXT() - Explicit traditional format (human-readable)
+ * LOG_TEXT(warn).format("Temperature {}°C exceeds threshold {}°C", temp, max_temp);
+ * // Output: 00001234.567 [WARN ] module     file.cpp:43 Temperature 98°C exceeds threshold 95°C
  *
- * // Stream style with operator<<
- * LOG(debug) << "Processing " << count << " items from " << source;
- * LOG(error) << "Failed to connect: " << error_msg;
+ * // LOG_STRUCTURED() - Machine-parseable logfmt format
+ * LOG_STRUCTURED(info) << "User logged in";
+ * // Output: msg="User logged in" ts=1234567890 level=info module=myapp file=file.cpp line=44
  *
- * // Immediate flush with endl
+ * // All macros support the same features:
+ * LOG(debug) << "Processing " << count << " items";                    // Stream style
+ * LOG_TEXT(error).format("Failed: {}", error_msg);                     // Format style
+ * LOG_STRUCTURED(info).add("user_id", 123) << "Login successful";      // With metadata
+ *
+ * // Immediate flush with endl works with all formats
  * LOG(fatal) << "Critical error: " << error << endl;
- *
- * // Smart pointers are automatically formatted
- * auto ptr = std::make_shared<MyClass>();
- * LOG(debug) << "Object at " << ptr;  // Shows address or "nullptr"
  * @endcode
  *
  * Structured Logging:
  * @code
  * // Add key-value metadata to logs for better searchability
+ * // Works with all log macros - metadata is stored internally
  * LOG(info).add("user_id", 12345)
  *          .add("action", "login")
  *          .add("ip", "192.168.1.1")
  *       << "User logged in successfully";
  *
- * // Supports any formattable type
- * LOG(warn).add("temperature", 98.5)
- *          .add("threshold", 95.0)
- *          .add("sensor", "CPU_CORE_0")
+ * // LOG_STRUCTURED outputs metadata in logfmt format
+ * LOG_STRUCTURED(warn).add("temperature", 98.5)
+ *                     .add("threshold", 95.0)
+ *                     .add("sensor", "CPU_CORE_0")
  *       << "Temperature exceeds threshold";
+ * // Output: msg="Temperature exceeds threshold" temperature=98.5 threshold=95.0 sensor=CPU_CORE_0 ...
  *
- * // Chain with format() for complex messages
- * LOG(error).add("request_id", request.id)
- *           .add("error_code", err.code())
- *           .add("retry_count", retries)
- *           .format("Request failed: {}", err.what());
+ * // Note: The msg="..." in LOG_STRUCTURED output is a format prefix, not structured data
+ * // If you add your own "msg" field, both will appear:
+ * LOG_STRUCTURED(info).add("msg", "custom") << "Text";
+ * // Output: msg="Text" msg="custom" ts=... level=...
+ * //         ^^^^^^^^^^  ^^^^^^^^^^^^
+ * //         Format prefix  Your field
  * @endcode
  *
  * Module Support:
@@ -348,30 +355,18 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 // Fallback to __FILE__ if SOURCE_FILE_NAME is not defined
 #define SOURCE_FILE_NAME __FILE__
 #endif
+
 /**
- * @brief Creates a log line with specified level and automatic source location.
- *
- * This macro is the primary interface for logging. It performs several operations:
+ * @brief Base macro for log line creation with specified type
+ * @internal
+ * 
+ * This macro contains the common logic for all LOG variants:
  * 1. Compile-time filtering: Logs below GLOBAL_MIN_LOG_LEVEL are completely eliminated
  * 2. Site registration: Each unique LOG() location is registered once via static init
  * 3. Runtime filtering: Checks against the current module's dynamic log level
- * 4. Returns a log_line object that supports streaming (<<) and format() operations
- *
- * @param _level The log level (trace, debug, info, warn, error, fatal)
- *
- * Implementation details:
- * - Uses a lambda to create a self-contained expression
- * - Static local struct ensures one-time registration per call site
- * - Registration occurs inside if constexpr, so only active sites are tracked
- * - Two-level filtering: compile-time (GLOBAL_MIN_LOG_LEVEL) and runtime (module level)
- *
- * @code
- * LOG(info) << "Starting application";
- * LOG(debug).format("Processing {} items", count);
- * LOG(error) << "Failed: " << error_msg << endl;  // endl forces immediate flush
- * @endcode
+ * 4. Returns a log_line object of the specified type
  */
-#define LOG(_level)                                                                                                           \
+#define LOG_BASE(_level, _line_type)                                                                                          \
     []()                                                                                                                      \
     {                                                                                                                         \
         constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                                  \
@@ -390,12 +385,81 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
             } _reg;                                                                                                           \
             if (level >= g_log_module_info.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level) \
             {                                                                                                                 \
-                return ::slwoggy::log_line(level, ::slwoggy::g_log_module_info, SOURCE_FILE_NAME, __LINE__);                  \
+                return ::slwoggy::_line_type(level, ::slwoggy::g_log_module_info, SOURCE_FILE_NAME, __LINE__);                \
             }                                                                                                                 \
         }                                                                                                                     \
-        return ::slwoggy::log_line(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                         \
+        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                       \
     }()
 
+/**
+ * @brief Creates a structured log line (logfmt format) with automatic source location
+ * 
+ * Outputs logs in logfmt format with automatic metadata fields.
+ * Ideal for machine parsing, log aggregation systems, and structured queries.
+ *
+ * Format: msg="text" key=value key2=value2 ts=... level=... module=... file=... line=...
+ *
+ * Automatically includes these metadata fields:
+ * - ts: Timestamp in nanoseconds since epoch
+ * - level: Log level (trace, debug, info, warn, error, fatal)
+ * - module: Module name from LOG_MODULE_NAME (defaults to "generic")
+ * - file: Source file name
+ * - line: Source line number
+ *
+ * Note: The msg="..." prefix is part of the output format, not a structured field.
+ * Adding a custom "msg" field via .add() will result in both appearing in output.
+ *
+ * @code
+ * LOG_STRUCTURED(info) << "User logged in";
+ * // Output: msg="User logged in" ts=1234567890 level=info module=auth file=login.cpp line=42
+ * 
+ * LOG_STRUCTURED(debug).add("user_id", 123)
+ *                      .add("latency_ms", 45)
+ *                      .format("Request processed in {}ms", 45);
+ * // Output: msg="Request processed in 45ms" user_id=123 latency_ms=45 ts=... level=debug ...
+ * @endcode
+ */
+#define LOG_STRUCTURED(_level) LOG_BASE(_level, log_line_structured)
+
+/**
+ * @brief Creates a traditional text log line with header and automatic source location
+ * 
+ * Outputs logs in traditional human-readable format with aligned columns.
+ * Ideal for console output, development, and human inspection.
+ *
+ * Format: TTTTTTTT.mmm [LEVEL] module     file:line message
+ *
+ * Where:
+ * - TTTTTTTT.mmm: Milliseconds since logger start with microsecond precision
+ * - LEVEL: 5-character padded log level
+ * - module: 10-character padded module name
+ * - file:line: Source location (file width auto-adjusts to longest filename)
+ * - message: The log message text
+ *
+ * @code
+ * LOG_TEXT(info) << "Starting application";
+ * // Output: 00001234.567 [INFO ] myapp      main.cpp:42 Starting application
+ *
+ * LOG_TEXT(debug).format("Processing {} items", count);
+ * // Output: 00001235.123 [DEBUG] myapp      main.cpp:43 Processing 15 items
+ * @endcode
+ */
+#define LOG_TEXT(_level) LOG_BASE(_level, log_line_headered)
+
+/**
+ * @brief Default log macro - uses the configured default log line type
+ * 
+ * The behavior depends on LOG_LINE_TYPE definition:
+ * - If LOG_LINE_TYPE is defined before including log.hpp, uses that type
+ * - Otherwise defaults to log_line_headered (traditional format)
+ *
+ * @code
+ * LOG(info) << "Starting application";
+ * LOG(debug).format("Processing {} items", count);
+ * LOG(error) << "Failed: " << error_msg << endl;  // endl forces immediate flush
+ * @endcode
+ */
+#define LOG(_level) LOG_TEXT(_level)
 
 #include "log_line_impl.hpp"       // IWYU pragma: keep
 #include "log_dispatcher_impl.hpp" // IWYU pragma: keep

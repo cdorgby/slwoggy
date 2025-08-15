@@ -28,10 +28,11 @@ namespace slwoggy
  * This class handles the formatting and buffering of a single log message
  * along with its associated metadata (timestamp, level, location).
  */
-struct log_line
+struct log_line_base
 {
     log_buffer_base *buffer_;
-    bool needs_header_{false}; // True after swap, header written on first write
+    bool needs_header_{true}; // True after swap, header written on first write
+
 
     // Store these for endl support and header writing
     log_level level_;
@@ -40,15 +41,15 @@ struct log_line
     std::chrono::steady_clock::time_point timestamp_;
     const log_module_info &module_;
 
-    log_line() = delete;
+    log_line_base() = delete;
 
-    log_line(log_level level, log_module_info &mod, std::string_view file, uint32_t line)
+    log_line_base(log_level level, log_module_info &mod, std::string_view file, uint32_t line, bool needs_header = false)
     : buffer_(level != log_level::nolog ? buffer_pool::instance().acquire() : nullptr),
       level_(level),
       file_(file),
       line_(line),
       timestamp_(log_fast_timestamp()),
-      needs_header_(true), // Start with header needed
+      needs_header_(needs_header), // Start with header needed
       module_(mod)
     {
         if (buffer_)
@@ -61,7 +62,7 @@ struct log_line
     }
 
     // Move constructor - swap buffers
-    log_line(log_line &&other) noexcept
+    log_line_base(log_line_base &&other) noexcept
     : buffer_(std::exchange(other.buffer_, nullptr)),
       needs_header_(std::exchange(other.needs_header_, false)),
       level_(other.level_),
@@ -73,15 +74,15 @@ struct log_line
     }
 
     // Move assignment - swap buffers
-    log_line &operator=(log_line &&other) noexcept;
+    log_line_base &operator=(log_line_base &&other) noexcept;
 
     // Keep copy deleted
-    log_line(const log_line &)            = delete;
-    log_line &operator=(const log_line &) = delete;
+    log_line_base(const log_line_base &)            = delete;
+    log_line_base &operator=(const log_line_base &) = delete;
 
-    ~log_line();
+    virtual ~log_line_base();
 
-    log_line &print(std::string_view str)
+    log_line_base &print(std::string_view str)
     {
         if (!buffer_) { return *this; }
 
@@ -92,7 +93,7 @@ struct log_line
         return *this;
     }
 
-    template <typename... Args> log_line &printf(const char *format, Args &&...args) &
+    template <typename... Args> log_line_base &printf(const char *format, Args &&...args) &
     {
         if (!buffer_) { return *this; }
 
@@ -105,20 +106,20 @@ struct log_line
         return *this;
     }
 
-    template <typename... Args> log_line &&printf(const char *format, Args &&...args) &&
+    template <typename... Args> log_line_base &&printf(const char *format, Args &&...args) &&
     {
         printf(format, std::forward<Args>(args)...);
         return std::move(*this);
     }
 
     // Helper method that returns *this for chaining
-    template <typename... Args> log_line &printfmt(const char *format, Args &&...args)
+    template <typename... Args> log_line_base &printfmt(const char *format, Args &&...args)
     {
         printf(format, std::forward<Args>(args)...);
         return *this;
     }
 
-    template <typename... Args> log_line &format(fmt::format_string<Args...> fmt, Args &&...args)
+    template <typename... Args> log_line_base &format(fmt::format_string<Args...> fmt, Args &&...args)
     {
         if (!buffer_) { return *this; }
 
@@ -131,7 +132,7 @@ struct log_line
     }
 
     // Helper method that returns *this for chaining
-    template <typename... Args> log_line &fmtprint(fmt::format_string<Args...> fmt, Args &&...args)
+    template <typename... Args> log_line_base &fmtprint(fmt::format_string<Args...> fmt, Args &&...args)
     {
         format(fmt, std::forward<Args>(args)...);
         return *this;
@@ -140,7 +141,7 @@ struct log_line
     // Generic version for any formattable type
     template <typename T>
         requires Loggable<T>
-    log_line &operator<<(const T &value)
+    log_line_base &operator<<(const T &value)
     {
         if (!buffer_) { return *this; }
 
@@ -152,7 +153,7 @@ struct log_line
         return *this;
     }
 
-    template <typename T> log_line &operator<<(T *ptr)
+    template <typename T> log_line_base &operator<<(T *ptr)
     {
         if (!buffer_) { return *this; }
 
@@ -165,25 +166,25 @@ struct log_line
     }
 
     // Keep specialized versions for common types
-    log_line &operator<<(std::string_view str)
+    log_line_base &operator<<(std::string_view str)
     {
         print(str);
         return *this;
     }
 
-    log_line &operator<<(const char *str)
+    log_line_base &operator<<(const char *str)
     {
         print(std::string_view(str));
         return *this;
     }
 
-    log_line &operator<<(const std::string &str)
+    log_line_base &operator<<(const std::string &str)
     {
         print(std::string_view(str));
         return *this;
     }
 
-    log_line &operator<<(int value)
+    log_line_base &operator<<(int value)
     {
         if (!buffer_) { return *this; }
 
@@ -194,7 +195,7 @@ struct log_line
         return *this;
     }
 
-    log_line &operator<<(unsigned int value)
+    log_line_base &operator<<(unsigned int value)
     {
         if (!buffer_) { return *this; }
 
@@ -205,7 +206,7 @@ struct log_line
         return *this;
     }
 
-    log_line &operator<<(void *ptr)
+    log_line_base &operator<<(void *ptr)
     {
         if (!buffer_) { return *this; }
 
@@ -217,7 +218,7 @@ struct log_line
     }
 
     // Special handling for shared_ptr
-    template <typename T> log_line &operator<<(const std::shared_ptr<T> &ptr)
+    template <typename T> log_line_base &operator<<(const std::shared_ptr<T> &ptr)
     {
         if (!buffer_) { return *this; }
 
@@ -230,7 +231,7 @@ struct log_line
     }
 
     // Special handling for weak_ptr
-    template <typename T> log_line &operator<<(const std::weak_ptr<T> &ptr)
+    template <typename T> log_line_base &operator<<(const std::weak_ptr<T> &ptr)
     {
         if (!buffer_) { return *this; }
 
@@ -242,7 +243,7 @@ struct log_line
         return *this;
     }
 
-    log_line &operator<<(log_line &(*func)(log_line &)) { return func(*this); }
+    log_line_base &operator<<(log_line_base &(*func)(log_line_base &)) { return func(*this); }
 
     /**
      * @brief Add structured key-value metadata to the log entry
@@ -268,7 +269,7 @@ struct log_line
      *       << "User login completed";
      * @endcode
      */
-    template <typename T> log_line &add(std::string_view key, T &&value) &
+    template <typename T> log_line_base &add(std::string_view key, T &&value) &
     {
         if (!buffer_) return *this;
 
@@ -287,7 +288,7 @@ struct log_line
         return *this;
     }
 
-    template <typename T> log_line &&add(std::string_view key, T &&value) &&
+    template <typename T> log_line_base &&add(std::string_view key, T &&value) &&
     {
         add(key, value);
         return std::move(*this);
@@ -339,7 +340,74 @@ struct log_line
      * @brief Write header to buffer and return width
      * @return The number of characters written for the header
      */
-    size_t write_header();
+    virtual size_t write_header() = 0;
+};
+
+/**
+ * @brief Log line implementation for structured logging format (logfmt)
+ * 
+ * This class outputs logs in logfmt format: msg="text" key=value key2=value2
+ * It automatically adds internal metadata fields and wraps the message in quotes.
+ * 
+ * The output format starts with msg="..." which is a format prefix, not a
+ * structured field. This prefix won't interfere with user-defined "msg" fields
+ * added via .add("msg", value).
+ * 
+ * Automatically added metadata fields:
+ * - ts: Timestamp in nanoseconds since epoch
+ * - level: Log level as string
+ * - module: Module name
+ * - file: Source file name
+ * - line: Source line number
+ */
+class log_line_structured : public log_line_base
+{
+  public:
+    log_line_structured(log_level level, log_module_info &mod, std::string_view file, uint32_t line)
+    : log_line_base(level, mod, file, line, true)
+    {
+        if (buffer_)
+        {
+            auto metadata = buffer_->get_metadata_adapter();
+
+            // Add standard metadata fields
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_TS, timestamp_.time_since_epoch().count());
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_LEVEL, string_from_log_level(level));
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_MODULE, module_.detail->name);
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_FILE, file_);
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_LINE, line_);
+        }
+    }
+
+    ~log_line_structured() override
+    {
+        if (buffer_)
+        {
+            buffer_->append_or_replace_last('"');
+        }
+    }
+
+    size_t write_header() override final;
+};
+
+/**
+ * @brief Log line implementation for traditional text format with header
+ * 
+ * This class outputs logs in human-readable format with aligned columns:
+ * TTTTTTTT.mmm [LEVEL] module     file:line message
+ * 
+ * The header provides context information in a fixed-width format for easy
+ * visual scanning and alignment across multiple log lines.
+ */
+class log_line_headered: public log_line_base
+{
+  public:
+    log_line_headered(log_level level, log_module_info &mod, std::string_view file, uint32_t line)
+    : log_line_base(level, mod, file, line, true)
+    {
+    }
+
+    size_t write_header() override final;
 };
 
 } // namespace slwoggy

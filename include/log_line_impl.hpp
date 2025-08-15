@@ -13,7 +13,7 @@
 namespace slwoggy
 {
 
-inline log_line &log_line::operator=(log_line &&other) noexcept
+inline log_line_base &log_line_base::operator=(log_line_base &&other) noexcept
 {
     if (this != &other)
     {
@@ -35,7 +35,7 @@ inline log_line &log_line::operator=(log_line &&other) noexcept
     return *this;
 }
 
-inline log_line::~log_line()
+inline log_line_base::~log_line_base()
 {
     if (!buffer_) return;
 
@@ -51,7 +51,7 @@ inline log_line::~log_line()
     }
 }
 
-inline size_t log_line::write_header()
+inline size_t log_line_headered::write_header()
 {
     if (!buffer_) return 0;
 
@@ -83,13 +83,25 @@ inline size_t log_line::write_header()
     return buffer_->header_width_;
 }
 
+inline size_t log_line_structured::write_header()
+{
+    
+    if (!buffer_) return 0;
+
+    // add msg=" as prefix
+    size_t text_len_before = buffer_->len();
+    buffer_->write_raw("msg=\"");
+    buffer_->header_width_ = buffer_->len() - text_len_before;
+    return buffer_->header_width_;
+}
+
 } // namespace slwoggy
 
 namespace
 {
 
 // our own endl for log_line
-inline slwoggy::log_line &endl(slwoggy::log_line &line)
+inline slwoggy::log_line_base &endl(slwoggy::log_line_base &line)
 {
     if (line.buffer_) { line.buffer_->finalize(); }
     slwoggy::log_line_dispatcher::instance().dispatch(line);

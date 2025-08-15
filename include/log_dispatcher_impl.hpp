@@ -47,7 +47,7 @@ inline log_line_dispatcher::~log_line_dispatcher()
     delete config;
 }
 
-inline void log_line_dispatcher::dispatch(struct log_line &line)
+inline void log_line_dispatcher::dispatch(struct log_line_base &line)
 {
     // Add this check
     if (shutdown_.load(std::memory_order_relaxed))
