@@ -4,7 +4,6 @@
 #include <condition_variable>
 #include <chrono>
 #include <iostream>
-#include <iomanip>
 #include <cstring>
 #include <random>
 #include "log.hpp"
@@ -213,8 +212,6 @@ int main(int argc, char *argv[])
         std::cerr << "  Messages/second (1s): " << std::fixed << std::setprecision(2) << dispatcher_stats.messages_per_second_1s << "\n";
         std::cerr << "  Messages/second (10s): " << std::fixed << std::setprecision(2) << dispatcher_stats.messages_per_second_10s << "\n";
         std::cerr << "  Messages/second (60s): " << std::fixed << std::setprecision(2) << dispatcher_stats.messages_per_second_60s << "\n";
-#else
-        std::cerr << "  Messages/second: " << std::fixed << std::setprecision(2) << dispatcher_stats.messages_per_second << "\n";
 #endif
         std::cerr << "  Messages dropped: " << dispatcher_stats.messages_dropped << "\n";
         
@@ -312,12 +309,14 @@ int main(int argc, char *argv[])
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
     // Print summary line with key metrics
-    std::cerr << "\nTEST: " << num_threads << " threads x " << messages_per_thread 
-              << " msgs x " << message_size << " bytes | sink=" << sink_type
+    std::cerr << "\nTEST: " << num_threads << " threads x " << messages_per_thread << " msgs x " << message_size
+              << " bytes | sink=" << sink_type
+#ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
               << " | SUMMARY: msg/s=" << std::fixed << std::setprecision(0) << dispatcher_stats.messages_per_second_10s
-              << " | dispatch: avg=" << std::setprecision(1) << dispatcher_stats.avg_dispatch_time_us 
+#endif
+              << " | dispatch: avg=" << std::setprecision(1) << dispatcher_stats.avg_dispatch_time_us
               << "µs max=" << dispatcher_stats.max_dispatch_time_us << "µs"
-              << " | in-flight: avg=" << dispatcher_stats.avg_inflight_time_us 
+              << " | in-flight: avg=" << dispatcher_stats.avg_inflight_time_us
               << "µs max=" << dispatcher_stats.max_inflight_time_us << "µs\n";
 #endif
 
