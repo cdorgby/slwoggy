@@ -282,7 +282,12 @@ class taocpp_json_formatter
 
         // Message
         c.key("message");
-        c.string(buffer->get_message());
+        auto msg = buffer->get_message();
+        // Strip trailing quote from logfmt-formatted messages
+        if (!buffer->is_padding_enabled() && !msg.empty() && msg.back() == '"') {
+            msg.remove_suffix(1);
+        }
+        c.string(msg);
         c.member();
 
         // Structured data

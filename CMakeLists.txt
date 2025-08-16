@@ -124,9 +124,29 @@ target_link_libraries(${PROJECT_NAME} PRIVATE taocppjson fmt::fmt)
 # Set per-file compile definitions
 set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
 
+# Add simple test executable
+add_executable(simple src/simple.cpp)
+
+# Add include directories for simple
+target_include_directories(simple PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+# Link with taocpp/json and fmt
+target_link_libraries(simple PRIVATE taocppjson fmt::fmt)
+
+# Set per-file compile definitions for simple
+set_source_file_compile_definitions(simple "src/simple.cpp")
+
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
+        LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_DISPATCHER_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_DISPATCHER_MSG_RATE
+    )
+    target_compile_definitions(simple PRIVATE
         LOG_COLLECT_BUFFER_POOL_METRICS
         LOG_COLLECT_DISPATCHER_METRICS
         LOG_COLLECT_STRUCTURED_METRICS
@@ -139,6 +159,9 @@ if(LOG_RELIABLE_DELIVERY)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
         LOG_RELIABLE_DELIVERY
     )
+    target_compile_definitions(simple PRIVATE
+        LOG_RELIABLE_DELIVERY
+    )
     message(STATUS "Reliable delivery: ENABLED (blocking mode)")
 else()
     message(STATUS "Reliable delivery: DISABLED (best-effort mode)")
@@ -146,6 +169,9 @@ endif()
 
 # Set output directories
 set_target_properties(${PROJECT_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+set_target_properties(simple PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 

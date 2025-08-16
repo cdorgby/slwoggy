@@ -182,7 +182,7 @@ TEST_CASE("Buffer pool basic functionality", "[buffer_pool]") {
     auto& pool = buffer_pool::instance();
     
     SECTION("Acquire and release buffer") {
-        auto* buffer = pool.acquire();
+        auto* buffer = pool.acquire(true);
         REQUIRE(buffer != nullptr);
         REQUIRE(buffer->size() == buffer_pool::BUFFER_SIZE);
         
@@ -190,7 +190,7 @@ TEST_CASE("Buffer pool basic functionality", "[buffer_pool]") {
     }
     
     SECTION("Buffer alignment") {
-        auto* buffer = pool.acquire();
+        auto* buffer = pool.acquire(true);
         REQUIRE(reinterpret_cast<uintptr_t>(buffer) % CACHE_LINE_SIZE == 0);
         pool.release(buffer);
     }
@@ -687,7 +687,7 @@ TEST_CASE("Buffer pool stress test", "[buffer_pool][stress]") {
                 std::uniform_int_distribution<> hold_time(0, 10);
                 
                 for (int j = 0; j < ops_per_thread; ++j) {
-                    auto* buf = buffer_pool::instance().acquire();
+                    auto* buf = buffer_pool::instance().acquire(true);
                     if (buf) {
                         acquired_count++;
                         
@@ -719,7 +719,7 @@ TEST_CASE("Buffer pool stress test", "[buffer_pool][stress]") {
         for (int i = 0; i < num_threads; ++i) {
             threads.emplace_back([&]() {
                 for (int j = 0; j < 100; ++j) {
-                    auto* buf = buffer_pool::instance().acquire();
+                    auto* buf = buffer_pool::instance().acquire(true);
                     if (buf && (reinterpret_cast<uintptr_t>(buf) % CACHE_LINE_SIZE != 0)) {
                         misaligned = true;
                     }
@@ -1018,7 +1018,7 @@ TEST_CASE("Concurrent buffer pool access", "[buffer_pool][concurrent]") {
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([&]() {
             for (int j = 0; j < ops_per_thread; ++j) {
-                auto* buf = buffer_pool::instance().acquire();
+                auto* buf = buffer_pool::instance().acquire(true);
                 if (buf) {
                     buffer_pool::instance().release(buf);
                 }
@@ -1443,7 +1443,7 @@ TEST_CASE("Buffer pool benchmarks", "[!benchmark]") {
     LogSinkGuard guard(&test_sink);
     
     BENCHMARK("Acquire/Release") {
-        auto* buf = buffer_pool::instance().acquire();
+        auto* buf = buffer_pool::instance().acquire(true);
         buffer_pool::instance().release(buf);
     };
     

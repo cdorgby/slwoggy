@@ -1,11 +1,5 @@
-#include <thread>
-#include <vector>
-#include <mutex>
-#include <condition_variable>
-#include <chrono>
 #include <iostream>
 #include <cstring>
-#include <random>
 #include "log.hpp"
 #include "log_dispatcher.hpp"
 #include "log_sinks.hpp"
@@ -17,9 +11,6 @@ LOG_MODULE_NAME("main");
 void print_usage(const char* prog_name) {
     std::cerr << "Usage: " << prog_name << " [options]\n"
               << "Options:\n"
-              << "  -t <threads>      Number of threads (default: 5)\n"
-              << "  -m <messages>     Messages per thread (default: 1000000)\n"
-              << "  -s <size>         Message size in bytes (default: 50)\n"
               << "  -w <sink>         Sink type: raw, writev, json, stdout (default: writev)\n"
               << "  -f <file>         Output file (default: /tmp/log.txt)\n"
               << "  -d                Show detailed statistics\n"
@@ -29,22 +20,13 @@ void print_usage(const char* prog_name) {
 int main(int argc, char *argv[])
 {
     // Default parameters
-    int num_threads = 5;
-    int messages_per_thread = 1000000;
-    int message_size = 50;
     std::string sink_type = "raw";
-    std::string output_file = "/dev/null";
+    std::string output_file = "/tmp/log.txt";
     bool show_detailed_stats = false;
 
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
-            num_threads = std::atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc) {
-            messages_per_thread = std::atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-            message_size = std::atoi(argv[++i]);
-        } else if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "-w") == 0 && i + 1 < argc) {
             sink_type = argv[++i];
         } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
             output_file = argv[++i];
@@ -58,20 +40,6 @@ int main(int argc, char *argv[])
             print_usage(argv[0]);
             return 1;
         }
-    }
-
-    // Validate parameters
-    if (num_threads < 1 || num_threads > 100) {
-        std::cerr << "Error: threads must be between 1 and 100\n";
-        return 1;
-    }
-    if (messages_per_thread < 1) {
-        std::cerr << "Error: messages must be positive\n";
-        return 1;
-    }
-    if (message_size < 10 || message_size > 10000) {
-        std::cerr << "Error: message size must be between 10 and 10000 bytes\n";
-        return 1;
     }
 
     // Pre-register structured log keys to avoid mutex contention during logging
@@ -96,98 +64,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // Create threads that will blast logs simultaneously
-    std::mutex start_mutex;
-    std::condition_variable start_cv;
-    bool start_signal = false;
-    std::vector<std::thread> threads;
-    
-    // Generate array of random message sizes for more realistic testing
-    constexpr size_t RANDOM_SIZE_COUNT = 1000;
-    std::vector<int> random_sizes(RANDOM_SIZE_COUNT);
-    {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        // Create distribution: 80% small (10-50 bytes), 20% larger (up to message_size)
-        std::discrete_distribution<> size_type({80, 20});
-        std::uniform_int_distribution<> small_size(10, 50);
-        std::uniform_int_distribution<> large_size(51, message_size);
-        
-        for (size_t i = 0; i < RANDOM_SIZE_COUNT; ++i) {
-            if (size_type(gen) == 0) {
-                random_sizes[i] = small_size(gen);
-            } else {
-                random_sizes[i] = large_size(gen);
-            }
-        }
-    }
-    
-    // Pre-create a large padding buffer to avoid allocations
-    constexpr size_t MAX_PADDING = 10000;
-    char padding_buffer[MAX_PADDING];
-    std::memset(padding_buffer, 'X', MAX_PADDING);
-    padding_buffer[MAX_PADDING - 1] = '\0';  // Ensure null termination
-
-    // Thread function
-    auto thread_func = [&](int thread_id) {
-        // Wait for start signal
-        {
-            std::unique_lock<std::mutex> lock(start_mutex);
-            start_cv.wait(lock, [&] { return start_signal; });
-        }
-
-        // Blast logs with variable sizes
-        for (int i = 0; i < messages_per_thread; ++i)
-        {
-            // Get size for this message from pre-generated array
-            int target_size = random_sizes[i % RANDOM_SIZE_COUNT];
-            
-            // Base message is ~20-25 chars: "Thread X iteration Y"
-            const int base_size = 25;
-            
-            if (target_size <= base_size) {
-                // Small message - no padding
-                auto l = LOG(info);
-                //l.printf("Thread %d iteration %d", thread_id, i);
-                l.format("Thread {} iteration {}", thread_id, i);
-                l.add("thread_id", thread_id);
-                l.add("iteration", i);
-            }
-            else {
-                // Add padding to reach target size using printf precision
-                int pad_size = target_size - base_size;
-                if (pad_size > MAX_PADDING - 1) pad_size = MAX_PADDING - 1;
-
-                // Use %.*s to specify exact number of characters from padding buffer
-                auto l = LOG(info);
-                
-                //l.printf("Thread %d iteration %d %.*s", thread_id, i, pad_size, padding_buffer);
-                l.format("Thread {} iteration {} {}", thread_id, i, std::string_view(padding_buffer, pad_size));
-
-                l.add("iteration", i);
-                l.add("thread_id", thread_id);
-            }
-        }
-    };
-
-    for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back(thread_func, i);
-    }
-
-    // Give threads time to reach wait state
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    
-    // Signal all threads to start
-    {
-        std::lock_guard<std::mutex> lock(start_mutex);
-        start_signal = true;
-    }
-    start_cv.notify_all();
-    
-    // Wait for all threads to complete
-    for (auto& t : threads) {
-        t.join();
-    }
+    LOG(fatal).fmtprint("Starting log blast test with sink type: {}", sink_type);
+    LOG(error).printf("Starting log blast test with sink type: %s", sink_type.c_str());
+    LOG(warn).printfmt("blah %s", sink_type.c_str());
+    LOG(info) << "Starting log blast test with sink type: " << sink_type << endl;
+    LOG(debug).format("Output file: {}", output_file);
+    LOG(trace).add("sink_type", sink_type).add("output_file", output_file) << "Log blast test "
+                                                                              "initialized\nblah";
+    LOG_STRUCTURED(trace).add("sink_type", sink_type).add("output_file", output_file) << "Log blast test "
+                                                                                         "initialized\nblah";
 
     log_line_dispatcher::instance().flush();
 
@@ -309,8 +194,7 @@ int main(int argc, char *argv[])
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
     // Print summary line with key metrics
-    std::cerr << "\nTEST: " << num_threads << " threads x " << messages_per_thread << " msgs x " << message_size
-              << " bytes | sink=" << sink_type
+    std::cerr << "\nTEST: sink=" << sink_type
 #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
               << " | SUMMARY: msg/s=" << std::fixed << std::setprecision(0) << dispatcher_stats.messages_per_second_10s
 #endif
