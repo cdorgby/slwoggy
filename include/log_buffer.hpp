@@ -285,6 +285,8 @@ public:
                     if (available >= 1) {
                         size_t remaining = text_pos_ - (pos + 1);
                         if (remaining > 0) {
+                            // Bounds check before memmove
+                            assert(pos + 2 + remaining <= capacity_);
                             // Shift text after newline to make room for extra byte
                             std::memmove(data_ + pos + 2, data_ + pos + 1, remaining);
                         }
@@ -295,13 +297,21 @@ public:
                         get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
                         pos += 2; // Skip past the escaped newline
                     } else {
-                        // No room to expand, just replace in place
-                        data_[pos] = '\\';
+                        // No room to expand - truncate to ensure complete escape
+                        // Better to lose one char than have incomplete escape sequence
                         if (pos + 1 < text_pos_) {
+                            // We have room for complete \n
+                            data_[pos] = '\\';
                             data_[pos + 1] = 'n';
-                            pos += 2;
+                            // Truncate anything after to maintain consistency
+                            text_pos_ = pos + 2;
+                            get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+                            break; // Buffer full, stop processing
                         } else {
-                            pos++;
+                            // Can't fit complete escape, truncate at newline position
+                            text_pos_ = pos;
+                            get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+                            break;
                         }
                     }
                 } else {
@@ -329,6 +339,8 @@ public:
                 size_t available = metadata_pos_ - text_pos_;
                 if (available >= header_width_)
                 {
+                    // Bounds check before memmove
+                    assert(newline_pos + 1 + header_width_ + remaining <= capacity_);
                     // Shift remaining text to make room for padding
                     std::memmove(data_ + newline_pos + 1 + header_width_, data_ + newline_pos + 1, remaining);
 
