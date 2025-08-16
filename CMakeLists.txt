@@ -82,6 +82,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Options
+option(LOG_RELIABLE_DELIVERY "Enable blocking behavior when buffer pool exhausted (reliable delivery)" ON)
+
 # Compiler flags
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     # GCC-specific flags
@@ -129,6 +132,16 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR 
         LOG_COLLECT_STRUCTURED_METRICS
         LOG_COLLECT_DISPATCHER_MSG_RATE
     )
+endif()
+
+# Reliable delivery option
+if(LOG_RELIABLE_DELIVERY)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        LOG_RELIABLE_DELIVERY
+    )
+    message(STATUS "Reliable delivery: ENABLED (blocking mode)")
+else()
+    message(STATUS "Reliable delivery: DISABLED (best-effort mode)")
 endif()
 
 # Set output directories
