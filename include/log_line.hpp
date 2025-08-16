@@ -31,8 +31,8 @@ namespace slwoggy
 struct log_line_base
 {
     log_buffer_base *buffer_;
-    bool needs_header_{true}; // should the write_header() be called before first text write
-
+    bool needs_header_{true};      // should the write_header() be called before first text write
+    bool human_readable_{false};   // true for human-readable format with padding, false for structured/logfmt
 
     // Store these for endl support and header writing
     log_level level_;
@@ -43,13 +43,14 @@ struct log_line_base
 
     log_line_base() = delete;
 
-    log_line_base(log_level level, log_module_info &mod, std::string_view file, uint32_t line, bool needs_header)
-    : buffer_(level != log_level::nolog ? buffer_pool::instance().acquire() : nullptr),
+    log_line_base(log_level level, log_module_info &mod, std::string_view file, uint32_t line, bool needs_header, bool human_readable)
+    : buffer_(level != log_level::nolog ? buffer_pool::instance().acquire(human_readable) : nullptr),
+      needs_header_(needs_header), // Start with header needed
+      human_readable_(human_readable),
       level_(level),
       file_(file),
       line_(line),
       timestamp_(log_fast_timestamp()),
-      needs_header_(needs_header), // Start with header needed
       module_(mod)
     {
         if (buffer_)
@@ -302,7 +303,7 @@ struct log_line_base
         // Finalize the old buffer before swapping
         if (old_buffer) { old_buffer->finalize(); }
 
-        buffer_ = buffer_pool::instance().acquire();
+        buffer_ = buffer_pool::instance().acquire(human_readable_);
 
         // Reset positions
         needs_header_ = true;
@@ -364,7 +365,7 @@ class log_line_structured : public log_line_base
 {
   public:
     log_line_structured(log_level level, log_module_info &mod, std::string_view file, uint32_t line)
-    : log_line_base(level, mod, file, line, true)
+    : log_line_base(level, mod, file, line, true, false)
     {
         if (buffer_)
         {
@@ -403,7 +404,7 @@ class log_line_headered: public log_line_base
 {
   public:
     log_line_headered(log_level level, log_module_info &mod, std::string_view file, uint32_t line)
-    : log_line_base(level, mod, file, line, true)
+    : log_line_base(level, mod, file, line, true, true)
     {
     }
 

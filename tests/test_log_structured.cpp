@@ -229,7 +229,7 @@ TEST_CASE("Structured log key registry", "[structured]") {
 }
 
 TEST_CASE("Metadata adapter", "[structured]") {
-    auto* buffer = buffer_pool::instance().acquire();
+    auto* buffer = buffer_pool::instance().acquire(false);
     REQUIRE(buffer != nullptr);
     buffer->reset();
     auto adapter = buffer->get_metadata_adapter();
@@ -454,7 +454,7 @@ TEST_CASE("Structured logging edge cases", "[structured]") {
 
 TEST_CASE("Log buffer with metadata", "[structured]") {
     SECTION("Buffer text starts after metadata") {
-        auto* buffer = buffer_pool::instance().acquire();
+        auto* buffer = buffer_pool::instance().acquire(false);
         REQUIRE(buffer != nullptr);
         
         // Add some metadata
@@ -475,7 +475,7 @@ TEST_CASE("Log buffer with metadata", "[structured]") {
     }
     
     SECTION("Flush marker detection with metadata offset") {
-        auto* buffer = buffer_pool::instance().acquire();
+        auto* buffer = buffer_pool::instance().acquire(false);
         buffer->level_ = log_level::nolog;
         buffer->reset();
         

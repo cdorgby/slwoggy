@@ -64,7 +64,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         const size_t acquire_count = 5;
         
         for (size_t i = 0; i < acquire_count; ++i) {
-            auto* buffer = buffer_pool::instance().acquire();
+            auto* buffer = buffer_pool::instance().acquire(true);
             REQUIRE(buffer != nullptr);
             buffers.push_back(buffer);
         }
@@ -97,7 +97,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         const size_t target_count = BUFFER_POOL_SIZE / 2;
         
         for (size_t i = 0; i < target_count; ++i) {
-            auto* buffer = buffer_pool::instance().acquire();
+            auto* buffer = buffer_pool::instance().acquire(true);
             if (buffer) {
                 buffers.push_back(buffer);
             }
@@ -120,12 +120,15 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
     }
     
     SECTION("Pool exhaustion") {
+#ifdef LOG_RELIABLE_DELIVERY
+        SKIP("Test incompatible with LOG_RELIABLE_DELIVERY - would deadlock");
+#endif
         std::vector<log_buffer_base*> buffers;
         auto initial_stats = buffer_pool::instance().get_stats();
         
         // Try to acquire more than pool size
         for (size_t i = 0; i < BUFFER_POOL_SIZE + 10; ++i) {
-            auto* buffer = buffer_pool::instance().acquire();
+            auto* buffer = buffer_pool::instance().acquire(true);
             if (buffer) {
                 buffers.push_back(buffer);
             }
@@ -145,6 +148,9 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
     }
     
     SECTION("Acquire failures reporting - exhaustive test") {
+#ifdef LOG_RELIABLE_DELIVERY
+        SKIP("Test incompatible with LOG_RELIABLE_DELIVERY - would deadlock");
+#endif
         // Comprehensive test for acquire failures reporting functionality
         
         // Test sink to capture all log messages with detailed tracking
@@ -243,7 +249,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             size_t failed_acquires = 0;
             
             for (size_t i = 0; i < BUFFER_POOL_SIZE * 2; ++i) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 if (buffer) {
                     buffers.push_back(buffer);
                     successful_acquires++;
@@ -347,7 +353,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
                 // Exhaust pool
                 size_t cycle_failures = 0;
                 for (size_t i = 0; i < BUFFER_POOL_SIZE + 50; ++i) {
-                    auto* buffer = buffer_pool::instance().acquire();
+                    auto* buffer = buffer_pool::instance().acquire(true);
                     if (buffer) {
                         buffers.push_back(buffer);
                     } else {
@@ -394,7 +400,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             // Exhaust pool and keep it exhausted
             std::vector<log_buffer_base*> buffers;
             for (size_t i = 0; i < BUFFER_POOL_SIZE; ++i) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 if (buffer) {
                     buffers.push_back(buffer);
                 }
@@ -402,7 +408,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             
             // Try to acquire more (will fail)
             for (size_t i = 0; i < 100; ++i) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 REQUIRE(buffer == nullptr);
             }
             
@@ -423,7 +429,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
                 REQUIRE(buffer_pool::instance().get_pending_failures() == 0);
                 
                 // Re-acquire to keep pool exhausted
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 if (buffer) {
                     buffers.push_back(buffer);
                 }
@@ -431,7 +437,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             
             // Generate more failures
             for (size_t i = 0; i < 50; ++i) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 REQUIRE(buffer == nullptr);
             }
             
@@ -458,7 +464,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             // Exhaust most of the pool
             std::vector<log_buffer_base*> buffers;
             for (size_t i = 0; i < BUFFER_POOL_SIZE - 5; ++i) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 if (buffer) {
                     buffers.push_back(buffer);
                 }
@@ -477,7 +483,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
                     size_t local_failures = 0;
                     std::vector<log_buffer_base*> local_buffers;
                     for (int i = 0; i < attempts_per_thread; ++i) {
-                        auto* buffer = buffer_pool::instance().acquire();
+                        auto* buffer = buffer_pool::instance().acquire(true);
                         if (buffer) {
                             local_buffers.push_back(buffer);
                         } else {
@@ -539,7 +545,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             
             // First exhaust the pool
             while (true) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 if (!buffer) break;
                 buffers.push_back(buffer);
             }
@@ -549,7 +555,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
             
             // Now attempt exactly 100 more
             for (int i = 0; i < 100; ++i) {
-                auto* buffer = buffer_pool::instance().acquire();
+                auto* buffer = buffer_pool::instance().acquire(true);
                 REQUIRE(buffer == nullptr);
             }
             
@@ -578,6 +584,9 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
     }
     
     SECTION("Shutdown reporting with exhausted pool") {
+#ifdef LOG_RELIABLE_DELIVERY
+        SKIP("Test incompatible with LOG_RELIABLE_DELIVERY - would deadlock");
+#endif
         // Test that failures are reported at shutdown even when pool is exhausted
         // This validates the stack buffer fallback in drain_queue
         
@@ -682,7 +691,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         std::vector<log_buffer_base*> held_buffers;
         size_t pool_size = 0;
         while (true) {
-            auto* buffer = buffer_pool::instance().acquire();
+            auto* buffer = buffer_pool::instance().acquire(true);
             if (!buffer) break;
             held_buffers.push_back(buffer);
             pool_size++;
@@ -696,7 +705,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
         
         // Also try direct acquires
         for (size_t i = 0; i < 5; ++i) {
-            auto* buffer = buffer_pool::instance().acquire();
+            auto* buffer = buffer_pool::instance().acquire(true);
             REQUIRE(buffer == nullptr);
         }
         
@@ -729,9 +738,9 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
     
     SECTION("Statistics reset") {
         // Generate some activity
-        auto* buffer1 = buffer_pool::instance().acquire();
+        auto* buffer1 = buffer_pool::instance().acquire(true);
         REQUIRE(buffer1 != nullptr);
-        auto* buffer2 = buffer_pool::instance().acquire();
+        auto* buffer2 = buffer_pool::instance().acquire(true);
         REQUIRE(buffer2 != nullptr);
         buffer1->release();
         buffer2->release();
@@ -883,7 +892,7 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
 #endif
         
         // Create a buffer and try to add too much metadata
-        auto* buffer = buffer_pool::instance().acquire();
+        auto* buffer = buffer_pool::instance().acquire(true);
         REQUIRE(buffer != nullptr);
         
         auto metadata = buffer->get_metadata_adapter();
@@ -918,7 +927,7 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
         auto initial_drops = std::make_pair(0ULL, 0ULL);
 #endif
         
-        auto* buffer = buffer_pool::instance().acquire();
+        auto* buffer = buffer_pool::instance().acquire(true);
         REQUIRE(buffer != nullptr);
         
         auto metadata = buffer->get_metadata_adapter();
@@ -951,7 +960,7 @@ TEST_CASE("Structured logging drop statistics", "[statistics]") {
     
     SECTION("Reset drop statistics") {
         // Generate some drops
-        auto* buffer = buffer_pool::instance().acquire();
+        auto* buffer = buffer_pool::instance().acquire(true);
         REQUIRE(buffer != nullptr);
         
         // Fill buffer to force drops

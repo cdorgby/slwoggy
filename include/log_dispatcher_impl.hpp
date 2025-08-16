@@ -17,9 +17,10 @@ namespace slwoggy
 struct stack_buffer : public log_buffer_base
 {
     alignas(CACHE_LINE_SIZE) char storage[buffer_pool::BUFFER_SIZE];
-    stack_buffer() : log_buffer_base(storage, sizeof(storage))
+    stack_buffer(bool human_readable) : log_buffer_base(storage, sizeof(storage))
     {
         reset();
+        set_padding_enabled(human_readable);
     }
 };
 
@@ -440,7 +441,7 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
     if (final_failures > 0)
     {
         // Use stack buffer to guarantee we can report this
-        stack_buffer warning_buffer;
+        stack_buffer warning_buffer{true}; // Enable padding for newline
         warning_buffer.level_ = log_level::warn;
         warning_buffer.timestamp_ = log_fast_timestamp();
         warning_buffer.file_ = "log_dispatcher";
@@ -488,7 +489,7 @@ inline void log_line_dispatcher::worker_thread_func()
         if (pending_failures > 0)
         {
             // Try to acquire a buffer to report the failures
-            auto* warning_buffer = buffer_pool::instance().acquire();
+            auto* warning_buffer = buffer_pool::instance().acquire(false);
             if (warning_buffer)
             {
                 // Successfully got a buffer - format warning message
@@ -584,7 +585,7 @@ inline void log_line_dispatcher::update_sink_config(std::unique_ptr<sink_config>
 // Flush implementation
 inline void log_line_dispatcher::flush()
 {
-    auto *marker = buffer_pool::instance().acquire();
+    auto *marker = buffer_pool::instance().acquire(false);
     if (!marker) return;
 
     marker->level_ = log_level::nolog;
