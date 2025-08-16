@@ -44,10 +44,10 @@ public:
 
     static constexpr size_t HEADER_SIZE = sizeof(buffer_header);
 
-    // Hot metadata - frequently accessed, keep together in first cache line
     log_level level_{log_level::nolog};
     uint32_t line_{0};
     size_t header_width_{0};
+    bool padding_enabled_{false}; // true for human-readable format with padding, false for structured/logfmt
     
 protected:
     size_t text_pos_{HEADER_SIZE};
@@ -83,6 +83,8 @@ public:
     // Delete move operations - pooled objects shouldn't move
     log_buffer_base(log_buffer_base&&) = delete;
     log_buffer_base& operator=(log_buffer_base&&) = delete;
+
+    ~log_buffer_base() = default;
 
     constexpr size_t size() const noexcept { return capacity_; }
     constexpr size_t len() const noexcept { return text_pos_ - HEADER_SIZE; }
@@ -137,18 +139,79 @@ public:
     {
         if (str.empty()) return 0;
 
-        size_t available_space = metadata_pos_ - text_pos_;
-        size_t to_write        = std::min(str.size(), available_space);
-
-        if (to_write > 0)
-        {
-            std::memcpy(data_ + text_pos_, str.data(), to_write);
-            text_pos_ += to_write;
-            // Update header
-            get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+        // If padding is enabled (human-readable mode), just write as-is
+        if (padding_enabled_) {
+            size_t available_space = metadata_pos_ - text_pos_;
+            size_t to_write = std::min(str.size(), available_space);
+            
+            if (to_write > 0) {
+                std::memcpy(data_ + text_pos_, str.data(), to_write);
+                text_pos_ += to_write;
+                get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+            }
+            return to_write;
         }
 
-        return to_write;
+        // Structured/logfmt mode - escape newlines
+        size_t start = 0;
+        size_t pos = str.find('\n');
+        
+        // No newlines? Write everything as-is
+        if (pos == std::string_view::npos) {
+            size_t available_space = metadata_pos_ - text_pos_;
+            size_t to_write = std::min(str.size(), available_space);
+            
+            if (to_write > 0) {
+                std::memcpy(data_ + text_pos_, str.data(), to_write);
+                text_pos_ += to_write;
+                get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+            }
+            return to_write;
+        }
+        
+        // Has newlines - escape them
+        size_t total_written = 0;
+        while (pos != std::string_view::npos) {
+            // Write text before newline
+            if (pos > start) {
+                size_t available_space = metadata_pos_ - text_pos_;
+                size_t chunk_size = pos - start;
+                size_t to_write = std::min(chunk_size, available_space);
+                
+                if (to_write > 0) {
+                    std::memcpy(data_ + text_pos_, str.data() + start, to_write);
+                    text_pos_ += to_write;
+                    total_written += to_write;
+                }
+            }
+            
+            // Write escaped newline
+            size_t available_space = metadata_pos_ - text_pos_;
+            if (available_space >= 2) {
+                data_[text_pos_++] = '\\';
+                data_[text_pos_++] = 'n';
+                total_written += 2;
+            }
+            
+            start = pos + 1;
+            pos = str.find('\n', start);
+        }
+        
+        // Write remainder
+        if (start < str.size()) {
+            size_t available_space = metadata_pos_ - text_pos_;
+            size_t remainder = str.size() - start;
+            size_t to_write = std::min(remainder, available_space);
+            
+            if (to_write > 0) {
+                std::memcpy(data_ + text_pos_, str.data() + start, to_write);
+                text_pos_ += to_write;
+                total_written += to_write;
+            }
+        }
+        
+        get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+        return total_written;
     }
 
     // Append a character if there's room, otherwise replace the last character
@@ -180,6 +243,11 @@ public:
     // Write string with newline padding
     void write_with_padding(std::string_view str)
     {
+        if (!padding_enabled_) {
+            write_raw(str);
+            return;
+        }
+
         size_t start = 0;
         size_t pos   = str.find('\n');
 
@@ -189,7 +257,10 @@ public:
             write_raw(str.substr(start, pos - start + 1));
 
             // If there's more text after newline, add padding
-            if (pos + 1 < str.size()) { write_raw(std::string(header_width_, ' ')); }
+            if (pos + 1 < str.size())
+            {
+                write_raw(std::string(header_width_, ' '));
+            }
 
             start = pos + 1;
             pos   = str.find('\n', start);
@@ -204,7 +275,43 @@ public:
     {
         if (text_pos_ <= start_pos) return;
 
-        // Scan for newlines in the text we just wrote
+        if (!padding_enabled_) {
+            // Escape newlines for structured/logfmt mode
+            size_t pos = start_pos;
+            while (pos < text_pos_) {
+                if (data_[pos] == '\n') {
+                    // Need to replace '\n' with "\\n" (adds 1 byte)
+                    size_t available = metadata_pos_ - text_pos_;
+                    if (available >= 1) {
+                        size_t remaining = text_pos_ - (pos + 1);
+                        if (remaining > 0) {
+                            // Shift text after newline to make room for extra byte
+                            std::memmove(data_ + pos + 2, data_ + pos + 1, remaining);
+                        }
+                        // Replace newline with escaped version
+                        data_[pos] = '\\';
+                        data_[pos + 1] = 'n';
+                        text_pos_++;
+                        get_header()->text_len = static_cast<uint16_t>(text_pos_ - HEADER_SIZE);
+                        pos += 2; // Skip past the escaped newline
+                    } else {
+                        // No room to expand, just replace in place
+                        data_[pos] = '\\';
+                        if (pos + 1 < text_pos_) {
+                            data_[pos + 1] = 'n';
+                            pos += 2;
+                        } else {
+                            pos++;
+                        }
+                    }
+                } else {
+                    pos++;
+                }
+            }
+            return;
+        }
+
+        // Original padding behavior for normal mode
         size_t pos = start_pos;
 
         while (pos < text_pos_)
@@ -327,9 +434,8 @@ public:
         header->metadata_off = static_cast<uint16_t>(metadata_pos_);
     }
 
-    // Non-virtual destructor - we never delete through base pointer
-    // This keeps the type trivially destructible
-    ~log_buffer_base() = default;
+    bool is_padding_enabled() const noexcept { return padding_enabled_; }
+    void set_padding_enabled(bool enabled) noexcept { padding_enabled_ = enabled; }
 };
 
 // Helper base to hold storage before log_buffer_base
@@ -447,7 +553,7 @@ class buffer_pool
         return instance;
     }
 
-    log_buffer_base *acquire()
+    log_buffer_base *acquire(bool human_readable)
     {
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
         total_acquires_.fetch_add(1, std::memory_order_relaxed);
@@ -465,6 +571,7 @@ class buffer_pool
         if (buffer)
         {
             buffer->add_ref();
+            buffer->set_padding_enabled(human_readable);
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
             // Update usage tracking
