@@ -30,6 +30,12 @@ function(add_metrics_definitions TARGET)
             LOG_COLLECT_DISPATCHER_MSG_RATE
         )
     endif()
+    # Apply LOG_RELIABLE_DELIVERY setting from parent
+    if(LOG_RELIABLE_DELIVERY)
+        target_compile_definitions(${TARGET} PRIVATE
+            LOG_RELIABLE_DELIVERY
+        )
+    endif()
 endfunction()
 
 # Create test executable - NOT built by default

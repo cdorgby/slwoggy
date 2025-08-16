@@ -158,6 +158,10 @@
  *
  * Configuration:
  * - GLOBAL_MIN_LOG_LEVEL: Compile-time minimum log level
+ * - LOG_RELIABLE_DELIVERY: Enable blocking behavior when buffer pool exhausted (default: enabled)
+ *                          When enabled: Threads block until buffers available (no message loss)
+ *                          When disabled: Returns nullptr immediately (higher throughput, may drop)
+ *                          To disable: #undef LOG_RELIABLE_DELIVERY before including log.hpp
  * - SOURCE_FILE_NAME: Set by CMake for relative file paths in log output.
  *                     When using the amalgamated header without CMake, automatically
  *                     falls back to __FILE__ for full paths.

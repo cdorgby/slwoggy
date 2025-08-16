@@ -16,7 +16,8 @@
 #include <memory>
 #include <cassert>
 
-#include "moodycamel/concurrentqueue.h"
+#include "moodycamel/blockingconcurrentqueue.h" // IWYU pragma: keep
+#include "moodycamel/concurrentqueue.h"         // IWYU pragma: keep
 
 #include "log_types.hpp"
 
@@ -398,7 +399,11 @@ class buffer_pool
     using buffer_type = log_buffer<BUFFER_SIZE>;
     
     std::unique_ptr<buffer_type[]> buffer_storage_;
+#ifdef LOG_RELIABLE_DELIVERY
+    moodycamel::BlockingConcurrentQueue<log_buffer_base *> available_buffers_;
+#else
     moodycamel::ConcurrentQueue<log_buffer_base *> available_buffers_;
+#endif
 
     std::atomic<uint64_t> pending_failure_report_{0}; // For dispatcher notification
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
@@ -448,8 +453,16 @@ class buffer_pool
         total_acquires_.fetch_add(1, std::memory_order_relaxed);
 #endif
 
+        // Use thread-local consumer token for better performance
+        thread_local moodycamel::ConsumerToken consumer_token(available_buffers_);
+        
         log_buffer_base *buffer = nullptr;
-        if (available_buffers_.try_dequeue(buffer) && buffer)
+#ifdef LOG_RELIABLE_DELIVERY
+        available_buffers_.wait_dequeue(consumer_token, buffer);
+#else
+        available_buffers_.try_dequeue(consumer_token, buffer);
+#endif
+        if (buffer)
         {
             buffer->add_ref();
 
@@ -486,7 +499,9 @@ class buffer_pool
             total_releases_.fetch_add(1, std::memory_order_relaxed);
             buffers_in_use_.fetch_sub(1, std::memory_order_relaxed);
 #endif
-            available_buffers_.enqueue(buffer);
+            // Use thread-local producer token for better performance
+            thread_local moodycamel::ProducerToken producer_token(available_buffers_);
+            available_buffers_.enqueue(producer_token, buffer);
         }
     }
 
