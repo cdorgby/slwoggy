@@ -24,15 +24,23 @@ inline constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference
 inline constexpr size_t CACHE_LINE_SIZE = 64; // Common cache line size
 #endif
 
+// Buffer pool configuration
+// Define LOG_RELIABLE_DELIVERY to enable blocking behavior when buffer pool is exhausted.
+// When enabled: Threads block until buffers are available (no message loss, ~2M msg/sec)
+// When disabled: Threads get nullptr immediately (higher throughput ~5M msg/sec, may drop messages)
+// #ifndef LOG_RELIABLE_DELIVERY
+// #define LOG_RELIABLE_DELIVERY  // Default to reliable delivery
+// #endif
+
 // Buffer pool constants
-inline constexpr size_t BUFFER_POOL_SIZE        = 32 * 1024; // Number of pre-allocated buffers
+inline constexpr size_t BUFFER_POOL_SIZE        = 4 * 1024; // Number of pre-allocated buffers
 inline constexpr size_t LOG_SINK_BUFFER_SIZE    = 64 * 1024; // Intermediate buffer for batching buffers for writes
-inline constexpr size_t MAX_BATCH_SIZE          = 4 * 1024;  // Number of buffer pulled from the queue during dispatch
-inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 16 * 1024; // Max # buffers waiting to be processed by the dispatcher
+inline constexpr size_t MAX_BATCH_SIZE          = 2 * 1024;  // Number of buffer pulled from the queue during dispatch
+inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 1 * 1024;  // Max # buffers waiting to be processed by the dispatcher
 
 // Batching configuration constants
-inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(100); // Max time to collect a batch
-inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(10);  // Polling interval when collecting
+inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(10); // Max time to collect a batch
+inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(1);  // Polling interval when collecting
 
 // Structured logging constants
 // Maximum structured keys per buffer is limited to 255 because we store the count
@@ -42,12 +50,6 @@ inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(10);  //
 // format to use uint16_t for the count, which affects binary compatibility.
 inline constexpr uint32_t MAX_STRUCTURED_KEYS = 255; // Maximum structured keys per buffer
 inline constexpr size_t MAX_FORMATTED_SIZE    = 512; // max size of values when allowed in the metadata
-
-// JSON formatting constants
-inline constexpr size_t UNICODE_ESCAPE_SIZE   = 7;   // \uXXXX + null terminator
-inline constexpr size_t UNICODE_ESCAPE_CHARS  = 6;   // \uXXXX
-inline constexpr size_t TIMESTAMP_BUFFER_SIZE = 256; // Buffer for timestamp formatting
-inline constexpr size_t LINE_BUFFER_SIZE      = 64;  // Buffer for line number formatting
 
 // Metrics collection configuration
 // Define these before including log.hpp to enable metrics collection:
