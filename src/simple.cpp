@@ -74,6 +74,82 @@ int main(int argc, char *argv[])
     LOG_STRUCTURED(trace).add("sink_type", sink_type).add("output_file", output_file) << "Log blast test "
                                                                                          "initialized\nblah";
 
+    // Test hex dump functionality
+    uint8_t test_data[256];
+    for (int i = 0; i < 256; i++) {
+        test_data[i] = i;
+    }
+    
+    // Test with duplicate data
+    uint8_t dup_data[128];
+    memset(dup_data, 0xAA, sizeof(dup_data));
+    
+    LOG(info).hex_dump_best_effort(test_data, 64, log_line_base::hex_dump_format::full);
+    LOG(info).hex_dump_best_effort(dup_data, sizeof(dup_data), log_line_base::hex_dump_format::no_ascii);
+    
+    // Test different inline formats
+    LOG(info) << "Default inline: ";
+    LOG(info).hex_dump_best_effort(test_data, 16, log_line_base::hex_dump_format::inline_hex);
+    
+    LOG(info) << "With 0x prefix: ";
+    hex_inline_config hex_0x = {"0x", "", " ", "", ""};
+    LOG(info).hex_dump_best_effort(test_data, 16, log_line_base::hex_dump_format::inline_hex, 8, hex_0x);
+    
+    LOG(info) << "With brackets: ";
+    hex_inline_config hex_brackets = {"", "", " ", "[", "]"};
+    LOG(info).hex_dump_best_effort(test_data, 16, log_line_base::hex_dump_format::inline_hex, 8, hex_brackets);
+    
+    LOG(info) << "With dashes: ";
+    hex_inline_config hex_dash = {"", "", "-", "", ""};
+    LOG(info).hex_dump_best_effort(test_data, 16, log_line_base::hex_dump_format::inline_hex, 8, hex_dash);
+    
+    // Large 4KB test with multiple repeating patterns and randomness
+    LOG(info) << "Testing large 4KB hex dump with patterns:";
+    uint8_t* large_data = new uint8_t[4096];
+    
+    // Fill with various patterns:
+    // 0x000-0x1FF: Incremental pattern
+    for (int i = 0; i < 512; i++) {
+        large_data[i] = i & 0xFF;
+    }
+    
+    // 0x200-0x3FF: Repeating 0xDE (512 bytes)
+    memset(large_data + 512, 0xDE, 512);
+    
+    // 0x400-0x5FF: Random-ish data
+    for (int i = 1024; i < 1536; i++) {
+        large_data[i] = (i * 31 + 17) & 0xFF;
+    }
+    
+    // 0x600-0x7FF: Repeating 0xAD (512 bytes)
+    memset(large_data + 1536, 0xAD, 512);
+    
+    // 0x800-0x9FF: Another incremental pattern
+    for (int i = 2048; i < 2560; i++) {
+        large_data[i] = (i - 2048) & 0xFF;
+    }
+    
+    // 0xA00-0xBFF: All zeros (512 bytes)
+    memset(large_data + 2560, 0x00, 512);
+    
+    // 0xC00-0xDFF: Repeating pattern AABBCCDD
+    for (int i = 3072; i < 3584; i += 4) {
+        large_data[i] = 0xAA;
+        large_data[i+1] = 0xBB;
+        large_data[i+2] = 0xCC;
+        large_data[i+3] = 0xDD;
+    }
+    
+    // 0xE00-0xFFF: More random-ish data
+    for (int i = 3584; i < 4096; i++) {
+        large_data[i] = ((i * 13) ^ (i >> 3)) & 0xFF;
+    }
+    
+    // Dump the entire 4KB - this will test buffer boundaries and multiple star patterns
+    LOG(info).hex_dump_full(large_data, 4096, log_line_base::hex_dump_format::no_ascii);
+    
+    delete[] large_data;
+
     log_line_dispatcher::instance().flush();
 
     // Print out metrics from dispatcher and buffer pool
