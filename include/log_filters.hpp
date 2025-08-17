@@ -63,9 +63,14 @@ private:
     {
         if (!buffer || buffer->is_flush_marker()) return 0;
         
-        // Simple hash of message text
+        // Direct FNV-1a hash on message data without temporary objects
         auto text = buffer->get_message();
-        return std::hash<std::string_view>{}(text);
+        size_t hash = 14695981039346656037ULL; // FNV-1a offset basis
+        for (char c : text) {
+            hash ^= static_cast<size_t>(c);
+            hash *= 1099511628211ULL; // FNV-1a prime
+        }
+        return hash;
     }
     
     void cleanup_old_entries()
@@ -208,34 +213,43 @@ public:
  * @brief Rate limiting filter - limits messages per time window
  * 
  * Enforces a maximum number of messages per time window.
- * Uses a token bucket algorithm for smooth rate limiting.
+ * Uses a token bucket algorithm with integer arithmetic for performance.
  * Note: This filter is only called from the dispatcher's worker thread.
  */
 class rate_limit_filter : public log_filter
 {
 private:
-    size_t max_per_second_;
+    static constexpr int64_t NANOS_PER_SECOND = 1000000000LL;
+    
+    int64_t max_per_second_;
+    int64_t tokens_in_nanos_;  // Tokens * NANOS_PER_SECOND for precision
     std::chrono::steady_clock::time_point last_refill_;
-    double tokens_;
     
 public:
     explicit rate_limit_filter(size_t max_per_second = 1000)
-        : max_per_second_(max_per_second),
-          last_refill_(log_fast_timestamp()),
-          tokens_(static_cast<double>(max_per_second))
+        : max_per_second_(static_cast<int64_t>(max_per_second)),
+          tokens_in_nanos_(static_cast<int64_t>(max_per_second) * NANOS_PER_SECOND),
+          last_refill_(log_fast_timestamp())
     {}
     
     void process_batch(log_buffer_base** buffers, size_t count) override
     {
-        // Refill tokens based on elapsed time
+        // Refill tokens based on elapsed time using integer arithmetic
         auto now = log_fast_timestamp();
-        auto elapsed = std::chrono::duration<double>(now - last_refill_).count();
+        auto elapsed_nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(now - last_refill_).count();
         
-        if (elapsed > 0)
+        if (elapsed_nanos > 0)
         {
-            tokens_ += elapsed * max_per_second_;
+            // Add tokens: elapsed_nanos * max_per_second / NANOS_PER_SECOND
+            // But we keep tokens scaled by NANOS_PER_SECOND for precision
+            int64_t new_tokens = elapsed_nanos * max_per_second_;
+            tokens_in_nanos_ += new_tokens;
+            
             // Cap at bucket size (1 second worth of messages)
-            tokens_ = std::min(tokens_, static_cast<double>(max_per_second_));
+            int64_t max_tokens_in_nanos = max_per_second_ * NANOS_PER_SECOND;
+            if (tokens_in_nanos_ > max_tokens_in_nanos) {
+                tokens_in_nanos_ = max_tokens_in_nanos;
+            }
             last_refill_ = now;
         }
         
@@ -249,10 +263,10 @@ public:
                 continue;
             }
             
-            // Check if we have tokens available
-            if (tokens_ >= 1.0)
+            // Check if we have tokens available (1 token = NANOS_PER_SECOND in our scale)
+            if (tokens_in_nanos_ >= NANOS_PER_SECOND)
             {
-                tokens_ -= 1.0;
+                tokens_in_nanos_ -= NANOS_PER_SECOND;
             }
             else
             {
@@ -269,7 +283,7 @@ public:
     void reset() override
     {
         last_refill_ = log_fast_timestamp();
-        tokens_ = static_cast<double>(max_per_second_);
+        tokens_in_nanos_ = max_per_second_ * NANOS_PER_SECOND;
     }
 };
 
