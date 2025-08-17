@@ -120,8 +120,16 @@ private:
     {
         // Format all buffers into the provided write buffer, flushing as needed
         size_t offset = 0;
+        size_t processed = 0;
+        
         for (size_t i = 0; i < count; ++i)
         {
+            // Skip filtered buffers
+            if (buffers[i]->filtered_)
+            {
+                continue;
+            }
+            
             size_t buffer_size = formatter_.calculate_size(buffers[i]);
             
             // Check if this buffer would overflow our write buffer
@@ -140,6 +148,7 @@ private:
             
             // Format into write buffer
             offset += formatter_.format(buffers[i], write_buffer + offset, write_buffer_size - offset);
+            processed++;
         }
         
         // Flush any remaining data
@@ -148,7 +157,8 @@ private:
             writer_.write(write_buffer, offset);
         }
         
-        return count;
+        // Return count of buffers actually processed (non-filtered)
+        return processed;
     }
 };
 

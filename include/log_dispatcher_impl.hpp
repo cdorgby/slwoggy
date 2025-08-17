@@ -39,6 +39,10 @@ inline log_line_dispatcher::log_line_dispatcher()
     auto initial_config = std::make_unique<sink_config>();
     initial_config->sinks.push_back(make_stdout_sink());
     current_sinks_.store(initial_config.release(), std::memory_order_release);
+    
+    // Initialize empty filter config
+    auto initial_filter_config = std::make_unique<filter_config>();
+    current_filters_.store(initial_filter_config.release(), std::memory_order_release);
 }
 
 inline void log_line_dispatcher::shutdown(bool wait_for_completion)
@@ -92,8 +96,23 @@ inline log_line_dispatcher::~log_line_dispatcher()
     shutdown(true);
 
     // Clean up sink config
-    auto *config = current_sinks_.load(std::memory_order_acquire);
-    delete config;
+    auto *sink_config = current_sinks_.load(std::memory_order_acquire);
+    delete sink_config;
+    
+    // Clean up filter config
+    auto *filter_cfg = current_filters_.load(std::memory_order_acquire);
+    if (filter_cfg)
+    {
+        // Notify filters they're being removed
+        for (auto& filter : filter_cfg->filters)
+        {
+            if (filter)
+            {
+                filter->shutdown();
+            }
+        }
+        delete filter_cfg;
+    }
 }
 
 inline void log_line_dispatcher::dispatch(struct log_line_base &line)
@@ -229,18 +248,66 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
         return 0;
     }
 
-    size_t processed = 0;
-
-    if (config && !config->sinks.empty())
+    // First, determine how many regular buffers we can process
+    // Stop at the first flush marker or null buffer
+    size_t processable_count = 0;
+    for (size_t i = 0; i < count; ++i)
     {
-        // Dispatch batch to all sinks
+        auto* buffer = buffers[start_idx + i];
+        if (!buffer || buffer->is_flush_marker())
+        {
+            break;  // Stop here - don't process markers or null buffers
+        }
+        processable_count++;
+    }
+    
+    if (processable_count == 0)
+    {
+        return 0;  // First buffer is a marker or null
+    }
+
+    // Apply filters only to regular buffers
+    // Clear any previous filter state (buffers may be reused)
+    for (size_t i = 0; i < processable_count; ++i)
+    {
+        buffers[start_idx + i]->filtered_ = false;
+    }
+    
+    // Apply filters if configured
+    auto* filter_cfg = current_filters_.load(std::memory_order_acquire);
+    if (filter_cfg && !filter_cfg->filters.empty())
+    {
+        for (auto& filter : filter_cfg->filters)
+        {
+            if (!filter) continue;
+            
+            // Filter directly sets filtered_ flag on buffers
+            filter->process_batch(&buffers[start_idx], processable_count);
+        }
+    }
+    
+    // Count non-filtered buffers that sinks should process
+    size_t expected_processed = 0;
+    for (size_t i = 0; i < processable_count; ++i)
+    {
+        if (!buffers[start_idx + i]->filtered_)
+        {
+            expected_processed++;
+        }
+    }
+    
+    size_t processed = 0;
+    
+    if (config && !config->sinks.empty() && expected_processed > 0)
+    {
+        // Dispatch all buffers to sinks - sinks will skip filtered ones
         for (size_t i = 0; i < config->sinks.size(); ++i)
         {
             if (config->sinks[i])
             {
-                size_t sink_processed = config->sinks[i]->process_batch(&buffers[start_idx], count);
+                size_t sink_processed = config->sinks[i]->process_batch(&buffers[start_idx], processable_count);
 
-#ifndef NDEBUG
+    #ifndef NDEBUG
                 if (i == 0)
                 {
                     processed = sink_processed;
@@ -250,25 +317,28 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
                     // All sinks must process the same number of buffers
                     assert(sink_processed == processed);
                 }
-#else
+                // Verify sink processed the expected number
+                assert(sink_processed == expected_processed);
+    #else
                 processed = sink_processed;
-#endif
+    #endif
             }
         }
     }
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
-    // Track in-flight time for processed buffers
-    track_inflight_times(buffers, start_idx, processed);
+    // Track in-flight time for processable buffers (both passed and dropped)
+    track_inflight_times(buffers, start_idx, processable_count);
 #endif
 
-    // Release processed buffers
-    for (size_t j = 0; j < processed; ++j)
+    // Release all processable buffers - dispatcher owns them all
+    for (size_t j = 0; j < processable_count; ++j)
     {
         buffers[start_idx + j]->release();
     }
 
-    return processed;
+    // Return count of buffers we consumed from input (not what sinks processed)
+    return processable_count;
 }
 
 inline bool log_line_dispatcher::process_queue(log_buffer_base** buffers, size_t dequeued_count, sink_config* config)
@@ -578,6 +648,30 @@ inline void log_line_dispatcher::update_sink_config(std::unique_ptr<sink_config>
         // Simple but safe approach: flush to ensure worker thread is done with old config
         // Since sink modifications are extremely rare, this is acceptable
         flush();
+        delete old_config;
+    }
+}
+
+// Helper to update filter configuration
+inline void log_line_dispatcher::update_filter_config(std::unique_ptr<filter_config> new_config)
+{
+    auto *old_config = current_filters_.exchange(new_config.release(), std::memory_order_acq_rel);
+
+    if (old_config)
+    {
+        // Simple but safe approach: flush to ensure worker thread is done with old config
+        // Since filter modifications are extremely rare, this is acceptable
+        flush();
+        
+        // Notify filters they're being removed
+        for (auto& filter : old_config->filters)
+        {
+            if (filter)
+            {
+                filter->shutdown();
+            }
+        }
+        
         delete old_config;
     }
 }

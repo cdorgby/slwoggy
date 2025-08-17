@@ -48,6 +48,7 @@ public:
     uint32_t line_{0};
     size_t header_width_{0};
     bool padding_enabled_{false}; // true for human-readable format with padding, false for structured/logfmt
+    bool filtered_{false}; // Set by filters to indicate this message should be dropped
     
 protected:
     size_t text_pos_{HEADER_SIZE};
@@ -126,6 +127,7 @@ public:
         metadata_pos_ = capacity_;
         level_        = log_level::nolog;
         header_width_ = 0;
+        filtered_     = false;  // Clear filter state on reset
 
         // Initialize header
         auto *header         = get_header();

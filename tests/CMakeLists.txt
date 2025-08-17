@@ -6,6 +6,7 @@ set(TEST_SOURCES
     test_log_statistics.cpp
     test_log_level_control.cpp
     test_log_site_control.cpp
+    test_log_filters.cpp
 )
 
 # Function to set per-file compile definitions for tests
@@ -122,8 +123,21 @@ target_include_directories(test_log_site_control PRIVATE
 add_metrics_definitions(test_log_site_control)
 catch_discover_tests(test_log_site_control)
 
+# Filter tests
+set(TEST_LOG_FILTERS_SOURCES main.cpp test_log_filters.cpp)
+add_executable(test_log_filters ${TEST_LOG_FILTERS_SOURCES})
+set_target_properties(test_log_filters PROPERTIES EXCLUDE_FROM_ALL TRUE)
+set_test_source_file_compile_definitions(test_log_filters "${TEST_LOG_FILTERS_SOURCES}")
+target_link_libraries(test_log_filters PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
+target_include_directories(test_log_filters PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_metrics_definitions(test_log_filters)
+catch_discover_tests(test_log_filters)
+
 # Custom target to build all tests
 add_custom_target(tests
-    DEPENDS all_tests test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control
+    DEPENDS all_tests test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control test_log_filters
     COMMENT "Building all test executables"
 )
+

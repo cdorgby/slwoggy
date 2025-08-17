@@ -245,6 +245,32 @@ LOG(info).hex_dump_full(large_data, sizeof(large_data), log_line_base::hex_dump_
 - **Proper Alignment**: Hex dump lines are properly indented to align with log headers
 - **Complete Line Guarantee**: Never writes partial lines when buffer space is insufficient
 
+## Filters
+
+Apply filters to drop or modify log messages before they reach sinks:
+
+```cpp
+using namespace slwoggy;
+using namespace std::chrono_literals;
+
+// Deduplication filter - drops duplicate messages within time window
+auto dedup = std::make_shared<dedup_filter>(100ms);
+log_line_dispatcher::instance().add_filter(dedup);
+
+// Rate limiting filter - limits messages per second
+auto rate_limit = std::make_shared<rate_limit_filter>(1000);  // 1000 msg/s
+log_line_dispatcher::instance().add_filter(rate_limit);
+
+// Statistical sampling - only pass a percentage of messages
+auto sampler = std::make_shared<sampler_filter>(0.1);  // 10% sampling
+log_line_dispatcher::instance().add_filter(sampler);
+
+// Multiple filters are applied in order (AND logic)
+// Message must pass ALL filters to reach sinks
+```
+
+Filters use the same RCU pattern as sinks for lock-free updates. The provided filters are examples for testing - production use should implement proper metrics and configuration.
+
 ## Custom Sinks
 
 Create custom output handlers:
