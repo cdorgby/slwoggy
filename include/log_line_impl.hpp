@@ -100,106 +100,82 @@ inline size_t log_line_base::format_hex_line_inline(char* buffer, size_t buffer_
                                                     const uint8_t* bytes, size_t byte_count,
                                                     const hex_inline_config& config)
 {
-    char* ptr = buffer;
-    char* end = buffer + buffer_size;
+    // Use fmt to format into the provided buffer
+    auto result = fmt::format_to_n(buffer, buffer_size, "");
+    auto out = result.out;
+    size_t remaining = buffer_size;
     
-    // Format with configurable prefix, suffix, separator and brackets
-    for (size_t i = 0; i < byte_count; i++) {
+    for (size_t i = 0; i < byte_count && remaining > 0; i++) {
         // Add separator before byte (except first)
         if (i > 0 && config.separator[0] != '\0') {
-            size_t sep_len = strlen(config.separator);
-            if (ptr + sep_len <= end) {
-                memcpy(ptr, config.separator, sep_len);
-                ptr += sep_len;
-            }
+            auto sep_result = fmt::format_to_n(out, remaining, "{}", config.separator);
+            size_t written = sep_result.out - out;
+            out = sep_result.out;
+            remaining = (written < remaining) ? remaining - written : 0;
         }
         
-        // Add left bracket
-        if (config.left_bracket[0] != '\0') {
-            size_t len = strlen(config.left_bracket);
-            if (ptr + len <= end) {
-                memcpy(ptr, config.left_bracket, len);
-                ptr += len;
-            }
-        }
-        
-        // Add prefix
-        if (config.prefix[0] != '\0') {
-            size_t len = strlen(config.prefix);
-            if (ptr + len <= end) {
-                memcpy(ptr, config.prefix, len);
-                ptr += len;
-            }
-        }
-        
-        // Add hex byte
-        if (ptr + 2 <= end) {
-            ptr += snprintf(ptr, end - ptr, "%02x", bytes[i]);
-        }
-        
-        // Add suffix
-        if (config.suffix[0] != '\0') {
-            size_t len = strlen(config.suffix);
-            if (ptr + len <= end) {
-                memcpy(ptr, config.suffix, len);
-                ptr += len;
-            }
-        }
-        
-        // Add right bracket
-        if (config.right_bracket[0] != '\0') {
-            size_t len = strlen(config.right_bracket);
-            if (ptr + len <= end) {
-                memcpy(ptr, config.right_bracket, len);
-                ptr += len;
-            }
+        // Format the byte with brackets and prefix/suffix
+        if (remaining > 0) {
+            auto byte_result = fmt::format_to_n(out, remaining, "{}{}{:02x}{}{}", 
+                config.left_bracket ? config.left_bracket : "",
+                config.prefix ? config.prefix : "",
+                bytes[i],
+                config.suffix ? config.suffix : "",
+                config.right_bracket ? config.right_bracket : ""
+            );
+            size_t written = byte_result.out - out;
+            out = byte_result.out;
+            remaining = (written < remaining) ? remaining - written : 0;
         }
     }
     
-    // No newline for inline format!
-    return ptr - buffer;
+    // Return number of bytes written
+    return out - buffer;
 }
 
 inline size_t log_line_base::format_hex_line_formatted(char* buffer, size_t buffer_size,
                                                        const uint8_t* bytes, size_t byte_count,
                                                        size_t offset, bool include_ascii)
 {
-    char* ptr = buffer;
-    char* end = buffer + buffer_size;
+    // Build the hex line using fmt
+    fmt::memory_buffer temp_buf;
     
-    // Offset
-    ptr += snprintf(ptr, end - ptr, "%04zx: ", offset);
+    // Format offset
+    fmt::format_to(std::back_inserter(temp_buf), "{:04x}: ", offset);
     
     // Hex bytes with grouping
     for (size_t i = 0; i < 16; i++) {
         if (i < byte_count) {
-            ptr += snprintf(ptr, end - ptr, "%02x ", bytes[i]);
+            fmt::format_to(std::back_inserter(temp_buf), "{:02x} ", bytes[i]);
         } else {
-            ptr += snprintf(ptr, end - ptr, "   ");
+            fmt::format_to(std::back_inserter(temp_buf), "   ");
         }
         
         // Add extra space for grouping
         if (i == 3 || i == 7 || i == 11) {
-            if (ptr < end) *ptr++ = ' ';
+            fmt::format_to(std::back_inserter(temp_buf), " ");
         }
     }
     
     // ASCII representation if requested
     if (include_ascii) {
-        ptr += snprintf(ptr, end - ptr, " |");
+        fmt::format_to(std::back_inserter(temp_buf), " |");
         for (size_t i = 0; i < byte_count; i++) {
             uint8_t c = bytes[i];
             if (c >= 32 && c < 127) {
-                if (ptr < end) *ptr++ = c;
+                fmt::format_to(std::back_inserter(temp_buf), "{:c}", static_cast<char>(c));
             } else {
-                if (ptr < end) *ptr++ = '.';
+                fmt::format_to(std::back_inserter(temp_buf), ".");
             }
         }
-        if (ptr < end) *ptr++ = '|';
+        fmt::format_to(std::back_inserter(temp_buf), "|");
     }
     
-    // Don't add newline here - caller will handle it
-    return ptr - buffer;
+    // Copy to output buffer
+    size_t bytes_to_copy = std::min(temp_buf.size(), buffer_size);
+    std::memcpy(buffer, temp_buf.data(), bytes_to_copy);
+    
+    return bytes_to_copy;
 }
 
 inline size_t log_line_base::hex_dump_inline_impl(const uint8_t* bytes, size_t len, size_t max_lines,
@@ -261,8 +237,9 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
     size_t last_shown_offset = 0;  // Track the last offset we actually showed
 
     // First, write the header with progress
-    int header_len = snprintf(line_buf, sizeof(line_buf), "binary data len: %zu/%zu", start_offset, total_len);
-    buffer_->write_raw(std::string_view(line_buf, header_len));
+    fmt::memory_buffer header_buf;
+    fmt::format_to(std::back_inserter(header_buf), "binary data len: {}/{}", start_offset, total_len);
+    buffer_->write_raw(std::string_view(header_buf.data(), header_buf.size()));
 
     size_t bytes_dumped  = 0;
     size_t lines_written = 0;
