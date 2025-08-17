@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cstring>
+#include <memory>
 #include "log.hpp"
 #include "log_dispatcher.hpp"
 #include "log_sinks.hpp"
@@ -105,7 +106,7 @@ int main(int argc, char *argv[])
     
     // Large 4KB test with multiple repeating patterns and randomness
     LOG(info) << "Testing large 4KB hex dump with patterns:";
-    uint8_t* large_data = new uint8_t[4096];
+    auto large_data = std::make_unique<uint8_t[]>(4096);
     
     // Fill with various patterns:
     // 0x000-0x1FF: Incremental pattern
@@ -114,7 +115,7 @@ int main(int argc, char *argv[])
     }
     
     // 0x200-0x3FF: Repeating 0xDE (512 bytes)
-    memset(large_data + 512, 0xDE, 512);
+    memset(large_data.get() + 512, 0xDE, 512);
     
     // 0x400-0x5FF: Random-ish data
     for (int i = 1024; i < 1536; i++) {
@@ -122,7 +123,7 @@ int main(int argc, char *argv[])
     }
     
     // 0x600-0x7FF: Repeating 0xAD (512 bytes)
-    memset(large_data + 1536, 0xAD, 512);
+    memset(large_data.get() + 1536, 0xAD, 512);
     
     // 0x800-0x9FF: Another incremental pattern
     for (int i = 2048; i < 2560; i++) {
@@ -130,7 +131,7 @@ int main(int argc, char *argv[])
     }
     
     // 0xA00-0xBFF: All zeros (512 bytes)
-    memset(large_data + 2560, 0x00, 512);
+    memset(large_data.get() + 2560, 0x00, 512);
     
     // 0xC00-0xDFF: Repeating pattern AABBCCDD
     for (int i = 3072; i < 3584; i += 4) {
@@ -146,9 +147,7 @@ int main(int argc, char *argv[])
     }
     
     // Dump the entire 4KB - this will test buffer boundaries and multiple star patterns
-    LOG(info).hex_dump_full(large_data, 4096, log_line_base::hex_dump_format::no_ascii);
-    
-    delete[] large_data;
+    LOG(info).hex_dump_full(large_data.get(), 4096, log_line_base::hex_dump_format::no_ascii);
 
     log_line_dispatcher::instance().flush();
 
