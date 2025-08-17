@@ -241,8 +241,16 @@ public:
     }
 
     // Write string with newline padding
-    void write_with_padding(std::string_view str)
+    void write_with_padding(std::string_view str, bool start_with_newline_and_pad = false)
     {
+        // If requested, start with newline and padding
+        if (start_with_newline_and_pad) {
+            write_raw("\n");
+            if (padding_enabled_) {
+                write_raw(std::string(header_width_, ' '));
+            }
+        }
+        
         if (!padding_enabled_) {
             write_raw(str);
             return;
