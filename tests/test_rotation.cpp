@@ -18,20 +18,20 @@
 #include "log_sink.hpp"
 #include "log_formatters.hpp"
 #include "log_writers.hpp"
-#include "log_file_rotator.hpp"
-#include "log_file_rotator_impl.hpp"
 
 using namespace slwoggy;
 using namespace std::chrono_literals;
 namespace fs = std::filesystem;
 
 // Test fixtures
-class rotation_test_fixture {
-protected:
+class rotation_test_fixture
+{
+  protected:
     std::string test_dir;
     std::string base_filename;
-    
-    rotation_test_fixture() {
+
+    rotation_test_fixture()
+    {
         // Create unique test directory
         auto pid = getpid();
         auto tid = std::hash<std::thread::id>{}(std::this_thread::get_id());
@@ -39,462 +39,503 @@ protected:
         fs::create_directories(test_dir);
         base_filename = test_dir + "/test.log";
     }
-    
-    ~rotation_test_fixture() {
+
+    ~rotation_test_fixture()
+    {
         // Cleanup test directory
-        try {
+        try
+        {
             fs::remove_all(test_dir);
-        } catch (...) {
+        }
+        catch (...)
+        {
             // Ignore cleanup errors
         }
     }
-    
-    size_t count_rotated_files() {
+
+    size_t count_rotated_files()
+    {
         size_t count = 0;
         std::regex pattern("test-\\d{8}-\\d{6}-\\d{3}\\.log");
-        for (const auto& entry : fs::directory_iterator(test_dir)) {
-            if (entry.is_regular_file()) {
+        for (const auto &entry : fs::directory_iterator(test_dir))
+        {
+            if (entry.is_regular_file())
+            {
                 std::string filename = entry.path().filename().string();
-                if (std::regex_match(filename, pattern)) {
-                    count++;
-                }
+                if (std::regex_match(filename, pattern)) { count++; }
             }
         }
         return count;
     }
-    
-    size_t get_file_size(const std::string& path) {
-        try {
+
+    size_t get_file_size(const std::string &path)
+    {
+        try
+        {
             return fs::file_size(path);
-        } catch (...) {
+        }
+        catch (...)
+        {
             return 0;
         }
     }
-    
-    bool file_exists(const std::string& path) {
-        return fs::exists(path);
-    }
-    
-    void write_data(file_writer& writer, size_t bytes) {
+
+    bool file_exists(const std::string &path) { return fs::exists(path); }
+
+    void write_data(file_writer &writer, size_t bytes)
+    {
         std::string data(bytes, 'A');
         writer.write(data.c_str(), data.size());
     }
 };
 
-TEST_CASE_METHOD(rotation_test_fixture, "Basic rotation service instantiation", "[rotation]") {
-    SECTION("Singleton creation") {
-        auto& service1 = file_rotation_service::instance();
-        auto& service2 = file_rotation_service::instance();
+TEST_CASE_METHOD(rotation_test_fixture, "Basic rotation service instantiation", "[rotation]")
+{
+    SECTION("Singleton creation")
+    {
+        auto &service1 = file_rotation_service::instance();
+        auto &service2 = file_rotation_service::instance();
         REQUIRE(&service1 == &service2);
     }
-    
-    SECTION("Metrics singleton") {
-        auto& metrics1 = rotation_metrics::instance();
-        auto& metrics2 = rotation_metrics::instance();
+
+    SECTION("Metrics singleton")
+    {
+        auto &metrics1 = rotation_metrics::instance();
+        auto &metrics2 = rotation_metrics::instance();
         REQUIRE(&metrics1 == &metrics2);
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Size-based rotation", "[rotation][size]") {
+TEST_CASE_METHOD(rotation_test_fixture, "Size-based rotation", "[rotation][size]")
+{
     // Reset metrics
-    auto& metrics = rotation_metrics::instance();
+    auto &metrics          = rotation_metrics::instance();
     auto initial_rotations = metrics.rotations_total.load();
-    
-    SECTION("Rotation at exact size boundary") {
+
+    SECTION("Rotation at exact size boundary")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 1024;  // 1KB
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 1024; // 1KB
         policy.keep_files = 3;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Write just under limit
         write_data(writer, 1020);
         REQUIRE(file_exists(base_filename));
         REQUIRE(count_rotated_files() == 0);
-        
+
         // Write over limit - should trigger rotation
         write_data(writer, 100);
-        
+
         // Give rotator thread time to process
         std::this_thread::sleep_for(100ms);
-        
+
         REQUIRE(count_rotated_files() == 1);
         REQUIRE(file_exists(base_filename));
-        
+
         // Verify metrics
         REQUIRE(metrics.rotations_total.load() > initial_rotations);
     }
-    
-    SECTION("Multiple rotations") {
+
+    SECTION("Multiple rotations")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 512;  // Small size for quick rotation
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 512; // Small size for quick rotation
         policy.keep_files = 5;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger 3 rotations
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 3; ++i)
+        {
             write_data(writer, 600);
             std::this_thread::sleep_for(50ms);
         }
-        
+
         // Give rotator thread time to process
         std::this_thread::sleep_for(200ms);
-        
+
         REQUIRE(count_rotated_files() == 3);
         REQUIRE(file_exists(base_filename));
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Time-based rotation", "[rotation][time]") {
-    auto& metrics = rotation_metrics::instance();
-    
-    SECTION("Rotation on time boundary during write") {
+TEST_CASE_METHOD(rotation_test_fixture, "Time-based rotation", "[rotation][time]")
+{
+    auto &metrics = rotation_metrics::instance();
+
+    SECTION("Rotation on time boundary during write")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::time;
-        policy.every = 1min;  // Rotate every minute
-        
+        policy.mode  = rotate_policy::kind::time;
+        policy.every = 1min; // Rotate every minute
+
         // Create writer
         file_writer writer(base_filename, policy);
-        
+
         // Write initial data
         write_data(writer, 100);
         REQUIRE(count_rotated_files() == 0);
-        
+
         // Note: We can't easily test actual time-based rotation without
         // mocking time or waiting a full minute. This test validates the setup.
         REQUIRE(file_exists(base_filename));
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Size OR time rotation", "[rotation][combined]") {
-    SECTION("Size triggers before time") {
+TEST_CASE_METHOD(rotation_test_fixture, "Size OR time rotation", "[rotation][combined]")
+{
+    SECTION("Size triggers before time")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size_or_time;
+        policy.mode      = rotate_policy::kind::size_or_time;
         policy.max_bytes = 1024;
-        policy.every = 60min;  // Won't trigger in test
-        
+        policy.every     = 60min; // Won't trigger in test
+
         file_writer writer(base_filename, policy);
-        
+
         // Size threshold should trigger
         write_data(writer, 1100);
         std::this_thread::sleep_for(100ms);
-        
+
         REQUIRE(count_rotated_files() == 1);
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retention]") {
-    SECTION("keep_files limit") {
+TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retention]")
+{
+    SECTION("keep_files limit")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 256;  // Very small for quick rotation
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 256; // Very small for quick rotation
         policy.keep_files = 2;   // Keep only 2 files
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Create 4 rotations
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 4; ++i)
+        {
             write_data(writer, 300);
             std::this_thread::sleep_for(100ms);
         }
-        
+
         // Give time for retention cleanup
         std::this_thread::sleep_for(500ms);
-        
+
         // Should have at most 2 rotated files (retention may have deleted some)
         REQUIRE(count_rotated_files() <= 2);
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Error handling", "[rotation][errors]") {
-    auto& metrics = rotation_metrics::instance();
-    
-    SECTION("Handle missing directory") {
+TEST_CASE_METHOD(rotation_test_fixture, "Error handling", "[rotation][errors]")
+{
+    auto &metrics = rotation_metrics::instance();
+
+    SECTION("Handle missing directory")
+    {
         std::string bad_path = test_dir + "/nonexistent/test.log";
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        
+
         // Should throw on open
         REQUIRE_THROWS(file_writer(bad_path, policy));
     }
-    
-    SECTION("Silent data loss on error") {
+
+    SECTION("Silent data loss on error")
+    {
         // Create a writer
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 512;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Simulate error state by creating max retries scenario
         // This is hard to test without mocking, but we can verify metrics
-        
+
         auto initial_dropped = metrics.dropped_records_total.load();
-        
+
         // Normal write should succeed
         write_data(writer, 100);
-        
+
         REQUIRE(metrics.dropped_records_total.load() == initial_dropped);
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Zero-gap rotation", "[rotation][zero-gap]") {
-    auto& metrics = rotation_metrics::instance();
+TEST_CASE_METHOD(rotation_test_fixture, "Zero-gap rotation", "[rotation][zero-gap]")
+{
+    auto &metrics          = rotation_metrics::instance();
     auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
-    
-    SECTION("Hard link success path") {
+
+    SECTION("Hard link success path")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger rotation
         write_data(writer, 1100);
         std::this_thread::sleep_for(100ms);
-        
+
         // Verify rotation happened
         REQUIRE(count_rotated_files() == 1);
-        
+
         // On same filesystem, hard link should succeed (no fallback)
         // Note: This may vary based on filesystem support
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Filename generation", "[rotation][filenames]") {
-    SECTION("Timestamped format") {
+TEST_CASE_METHOD(rotation_test_fixture, "Filename generation", "[rotation][filenames]")
+{
+    SECTION("Timestamped format")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 512;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger rotation
         write_data(writer, 600);
         std::this_thread::sleep_for(100ms);
-        
+
         // Check filename format: test-YYYYMMDD-HHMMSS-NNN.log
         std::regex pattern("test-\\d{8}-\\d{6}-\\d{3}\\.log");
         bool found_match = false;
-        
-        for (const auto& entry : fs::directory_iterator(test_dir)) {
-            if (entry.is_regular_file()) {
+
+        for (const auto &entry : fs::directory_iterator(test_dir))
+        {
+            if (entry.is_regular_file())
+            {
                 std::string filename = entry.path().filename().string();
-                if (std::regex_match(filename, pattern)) {
+                if (std::regex_match(filename, pattern))
+                {
                     found_match = true;
                     break;
                 }
             }
         }
-        
+
         REQUIRE(found_match);
     }
-    
-    SECTION("Collision handling") {
+
+    SECTION("Collision handling")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 256;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger multiple rotations quickly
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 3; ++i)
+        {
             write_data(writer, 300);
             // No sleep - maximize collision chance
         }
-        
+
         std::this_thread::sleep_for(200ms);
-        
+
         // All files should have unique names
         std::set<std::string> filenames;
-        for (const auto& entry : fs::directory_iterator(test_dir)) {
-            if (entry.is_regular_file()) {
-                filenames.insert(entry.path().filename().string());
-            }
+        for (const auto &entry : fs::directory_iterator(test_dir))
+        {
+            if (entry.is_regular_file()) { filenames.insert(entry.path().filename().string()); }
         }
-        
+
         // Should have unique filenames (base + rotated files)
         REQUIRE(filenames.size() >= 3);
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Concurrent rotation", "[rotation][concurrent]") {
-    SECTION("Multiple writers to same file") {
+TEST_CASE_METHOD(rotation_test_fixture, "Concurrent rotation", "[rotation][concurrent]")
+{
+    SECTION("Multiple writers to same file")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        
+
         // Create multiple writers sharing rotation handle
         file_writer writer1(base_filename, policy);
-        file_writer writer2(writer1);  // Copy constructor shares handle
-        
+        file_writer writer2(writer1); // Copy constructor shares handle
+
         // Write from both concurrently
-        std::thread t1([&]() {
-            for (int i = 0; i < 5; ++i) {
-                write_data(writer1, 250);
-                std::this_thread::sleep_for(10ms);
-            }
-        });
-        
-        std::thread t2([&]() {
-            for (int i = 0; i < 5; ++i) {
-                write_data(writer2, 250);
-                std::this_thread::sleep_for(10ms);
-            }
-        });
-        
+        std::thread t1(
+            [&]()
+            {
+                for (int i = 0; i < 5; ++i)
+                {
+                    write_data(writer1, 250);
+                    std::this_thread::sleep_for(10ms);
+                }
+            });
+
+        std::thread t2(
+            [&]()
+            {
+                for (int i = 0; i < 5; ++i)
+                {
+                    write_data(writer2, 250);
+                    std::this_thread::sleep_for(10ms);
+                }
+            });
+
         t1.join();
         t2.join();
-        
+
         // Give time for rotation
         std::this_thread::sleep_for(200ms);
-        
+
         // Should have triggered at least one rotation
         REQUIRE(count_rotated_files() >= 1);
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Metrics accuracy", "[rotation][metrics]") {
-    auto& metrics = rotation_metrics::instance();
-    
+TEST_CASE_METHOD(rotation_test_fixture, "Metrics accuracy", "[rotation][metrics]")
+{
+    auto &metrics = rotation_metrics::instance();
+
     // Reset/baseline metrics
-    auto initial_rotations = metrics.rotations_total.load();
+    auto initial_rotations       = metrics.rotations_total.load();
     auto initial_dropped_records = metrics.dropped_records_total.load();
-    auto initial_dropped_bytes = metrics.dropped_bytes_total.load();
-    
-    SECTION("Track rotation count") {
+    auto initial_dropped_bytes   = metrics.dropped_bytes_total.load();
+
+    SECTION("Track rotation count")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 512;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger exactly 2 rotations
         write_data(writer, 600);
         std::this_thread::sleep_for(100ms);
         write_data(writer, 600);
         std::this_thread::sleep_for(100ms);
-        
+
         auto new_rotations = metrics.rotations_total.load();
         REQUIRE(new_rotations == initial_rotations + 2);
     }
-    
-    SECTION("Track rotation duration") {
+
+    SECTION("Track rotation duration")
+    {
         auto initial_count = metrics.rotation_duration_us_count.load();
-        
+
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 512;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger rotation
         write_data(writer, 600);
         std::this_thread::sleep_for(100ms);
-        
+
         auto new_count = metrics.rotation_duration_us_count.load();
         REQUIRE(new_count > initial_count);
-        
+
         // Duration should be reasonable (< 1 second)
-        if (new_count > initial_count) {
+        if (new_count > initial_count)
+        {
             auto total_duration = metrics.rotation_duration_us_sum.load();
-            auto avg_duration = total_duration / new_count;
-            REQUIRE(avg_duration < 1'000'000);  // Less than 1 second
+            auto avg_duration   = total_duration / new_count;
+            REQUIRE(avg_duration < 1'000'000); // Less than 1 second
         }
     }
 }
 
-TEST_CASE_METHOD(rotation_test_fixture, "Integration with log system", "[rotation][integration]") {
-    
-    SECTION("Rotating file sink") {
+TEST_CASE_METHOD(rotation_test_fixture, "Integration with log system", "[rotation][integration]")
+{
+
+    SECTION("Rotating file sink")
+    {
         // Create rotating sink
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        
-        auto sink = std::make_shared<log_sink>(
-            raw_formatter{},
-            file_writer(base_filename, policy)
-        );
-        
+
+        auto sink = std::make_shared<log_sink>(raw_formatter{}, file_writer(base_filename, policy));
+
         // Add to dispatcher (this replaces default sink if present)
         log_line_dispatcher::instance().add_sink(sink);
-        
+
         // Generate logs to trigger rotation
-        for (int i = 0; i < 50; ++i) {
-            LOG(info) << "Test message " << i << " with some padding data";
-        }
-        
+        for (int i = 0; i < 50; ++i) { LOG(info) << "Test message " << i << " with some padding data"; }
+
         // Flush and wait
         log_line_dispatcher::instance().flush();
         std::this_thread::sleep_for(200ms);
-        
+
         // Should have rotated at least once
         REQUIRE(count_rotated_files() >= 1);
-        
+
         // Clean up - set sink to nullptr to remove it
         log_line_dispatcher::instance().set_sink(0, nullptr);
     }
-    
-    SECTION("Large volume test with retention") {
-        
+
+    SECTION("Large volume test with retention")
+    {
+
         // Simulate the test_rotation_example scenario
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 10 * 1024;  // 10KB
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 10 * 1024; // 10KB
         policy.keep_files = 3;
-        
-        auto sink = std::make_shared<log_sink>(
-            raw_formatter{},
-            file_writer(base_filename, policy)
-        );
-        
+
+        auto sink = std::make_shared<log_sink>(raw_formatter{}, file_writer(base_filename, policy));
+
         log_line_dispatcher::instance().add_sink(sink);
-        
+
         // Generate many logs to test rotation and retention
-        for (int i = 0; i < 200; ++i) {
-            LOG(info) << "Test message " << i 
-                      << " - Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+        for (int i = 0; i < 200; ++i)
+        {
+            LOG(info) << "Test message " << i << " - Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
                       << "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
         }
-        
+
         log_line_dispatcher::instance().flush();
         std::this_thread::sleep_for(500ms);
-        
+
         // Check metrics
-        auto& metrics = rotation_metrics::instance();
+        auto &metrics = rotation_metrics::instance();
         REQUIRE(metrics.rotations_total.load() > 0);
         REQUIRE(metrics.dropped_records_total.load() == 0);
-        
+
         // Verify retention - should have at most keep_files rotated files
         REQUIRE(count_rotated_files() <= 3);
-        
+
         log_line_dispatcher::instance().set_sink(0, nullptr);
     }
-    
-    SECTION("Direct write with rotation") {
+
+    SECTION("Direct write with rotation")
+    {
         // Simulate the debug_rotation scenario
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 100;  // Very small for immediate rotation
-        
+        policy.mode      = rotate_policy::kind::size;
+        policy.max_bytes = 100; // Very small for immediate rotation
+
         file_writer writer(base_filename, policy);
-        
+
         // First write (under limit)
         std::string msg1(50, 'A');
         ssize_t written = writer.write(msg1.c_str(), msg1.size());
         REQUIRE(written == 50);
         REQUIRE(count_rotated_files() == 0);
-        
+
         // Second write (triggers rotation)
         std::string msg2(60, 'B');
         written = writer.write(msg2.c_str(), msg2.size());
         REQUIRE(written == 60);
-        
+
         std::this_thread::sleep_for(100ms);
         REQUIRE(count_rotated_files() == 1);
         REQUIRE(file_exists(base_filename));
@@ -502,257 +543,270 @@ TEST_CASE_METHOD(rotation_test_fixture, "Integration with log system", "[rotatio
 }
 
 // Failure metrics tests - critical for forensics/traceability
-TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][metrics]") {
-    auto& metrics = rotation_metrics::instance();
-    
-    SECTION("ENOSPC metrics tracking") {
+TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][metrics]")
+{
+    auto &metrics = rotation_metrics::instance();
+
+    SECTION("ENOSPC metrics tracking")
+    {
         // Create a small tmpfs to simulate ENOSPC
         std::string small_fs = "/tmp/test_enospc_" + std::to_string(getpid());
         fs::create_directories(small_fs);
-        
+
         // Note: Can't easily create actual tmpfs in tests, simulate with many files
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 1024;  // 1KB files
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 1024; // 1KB files
         policy.keep_files = 100;  // Try to keep many
-        
+
         std::string test_file = small_fs + "/enospc.log";
-        
+
         // Record initial metrics
         auto initial_pending = metrics.enospc_deletions_pending.load();
-        auto initial_gz = metrics.enospc_deletions_gz.load();
-        auto initial_raw = metrics.enospc_deletions_raw.load();
-        auto initial_bytes = metrics.enospc_deleted_bytes.load();
-        
+        auto initial_gz      = metrics.enospc_deletions_gz.load();
+        auto initial_raw     = metrics.enospc_deletions_raw.load();
+        auto initial_bytes   = metrics.enospc_deleted_bytes.load();
+
         // Create some .pending and .gz files to test priority deletion
         std::ofstream pending_file(small_fs + "/enospc-20250101-000000-001.log.pending");
         pending_file << std::string(500, 'P');
         pending_file.close();
-        
+
         std::ofstream gz_file(small_fs + "/enospc-20250101-000000-002.log.gz");
         gz_file << std::string(500, 'G');
         gz_file.close();
-        
+
         file_writer writer(test_file, policy);
-        
+
         // Write enough to trigger rotations
-        for (int i = 0; i < 10; ++i) {
-            std::string data(1100, 'D');  // Over max_bytes
+        for (int i = 0; i < 10; ++i)
+        {
+            std::string data(1100, 'D'); // Over max_bytes
             writer.write(data.c_str(), data.size());
             std::this_thread::sleep_for(50ms);
         }
-        
+
         // Cleanup
         fs::remove_all(small_fs);
-        
+
         // Verify metrics updated (may or may not trigger depending on system)
         INFO("ENOSPC pending deletions: " << (metrics.enospc_deletions_pending.load() - initial_pending));
         INFO("ENOSPC gz deletions: " << (metrics.enospc_deletions_gz.load() - initial_gz));
         INFO("ENOSPC raw deletions: " << (metrics.enospc_deletions_raw.load() - initial_raw));
         INFO("ENOSPC deleted bytes: " << (metrics.enospc_deleted_bytes.load() - initial_bytes));
     }
-    
-    SECTION("Prepare FD failure metrics") {
+
+    SECTION("Prepare FD failure metrics")
+    {
         // Test prepare_fd_failures counter
         auto initial_prepare_failures = metrics.prepare_fd_failures.load();
-        
+
         // Create a test file first
         std::string test_file = test_dir + "/prepare_fail.log";
-        
+
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 100;
-        policy.max_retries = 2;  // Fail faster in tests
-        
+        policy.mode        = rotate_policy::kind::size;
+        policy.max_bytes   = 100;
+        policy.max_retries = 2; // Fail faster in tests
+
         {
             file_writer writer(test_file, policy);
-            
+
             // Write to trigger rotation need
             std::string data(150, 'F');
             writer.write(data.c_str(), data.size());
-            
+
             // Now make directory read-only to prevent temp file creation
             fs::permissions(test_dir, fs::perms::owner_read | fs::perms::owner_exec);
-            
+
             // Try to write more - should fail to prepare next fd
             std::string more_data(150, 'M');
             writer.write(more_data.c_str(), more_data.size());
-            
+
             // Give time for async rotation to attempt and fail
             std::this_thread::sleep_for(500ms);
-            
+
             // Restore permissions before writer destructor
             fs::permissions(test_dir, fs::perms::owner_all);
         }
-        
+
         // Check if prepare_fd_failures incremented
         auto new_failures = metrics.prepare_fd_failures.load();
         INFO("Prepare FD failures: initial=" << initial_prepare_failures << " new=" << new_failures);
-        
+
         // May or may not fail depending on timing, but counter should be accessible
         REQUIRE(new_failures >= initial_prepare_failures);
     }
-    
-    SECTION("Fsync failure metrics") {
+
+    SECTION("Fsync failure metrics")
+    {
         auto initial_fsync_failures = metrics.fsync_failures.load();
-        
+
         // Hard to simulate fsync failures in tests
         // Would need to mock/inject failures
         // For now just verify the counter exists and is accessible
         REQUIRE(metrics.fsync_failures.load() >= 0);
         INFO("Fsync failures counter accessible: " << metrics.fsync_failures.load());
     }
-    
-    SECTION("Compression failure metrics") {
+
+    SECTION("Compression failure metrics")
+    {
         auto initial_compression_failures = metrics.compression_failures.load();
-        
+
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        policy.compress = true;  // Enable compression
-        
+        policy.compress  = true; // Enable compression
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger rotation with compression
         std::string data(2000, 'C');
         writer.write(data.c_str(), data.size());
-        
+
         std::this_thread::sleep_for(200ms);
-        
+
         // Compression not implemented yet, so no failures expected
         // Just verify counter is accessible
         REQUIRE(metrics.compression_failures.load() >= 0);
         INFO("Compression failures counter: " << metrics.compression_failures.load());
     }
-    
-    SECTION("Zero-gap fallback metrics") {
+
+    SECTION("Zero-gap fallback metrics")
+    {
         auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
-        
+
         // Create cross-device scenario (hard to simulate in tests)
         // Would need different mount points
-        
+
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Normal rotation
         std::string data(2000, 'Z');
         writer.write(data.c_str(), data.size());
-        
+
         std::this_thread::sleep_for(200ms);
-        
+
         // Verify counter is accessible
         REQUIRE(metrics.zero_gap_fallback_total.load() >= initial_fallbacks);
         INFO("Zero-gap fallbacks: " << metrics.zero_gap_fallback_total.load());
     }
-    
-    SECTION("Dropped records metrics") {
+
+    SECTION("Dropped records metrics")
+    {
         auto initial_dropped_records = metrics.dropped_records_total.load();
-        auto initial_dropped_bytes = metrics.dropped_bytes_total.load();
-        
+        auto initial_dropped_bytes   = metrics.dropped_bytes_total.load();
+
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 100;
-        policy.max_retries = 1;  // Fail fast
-        
+        policy.mode        = rotate_policy::kind::size;
+        policy.max_bytes   = 100;
+        policy.max_retries = 1; // Fail fast
+
         // Create a file in a directory
         std::string drop_test_dir = test_dir + "/drops";
         fs::create_directories(drop_test_dir);
         std::string test_file = drop_test_dir + "/drop_test.log";
-        
+
         {
             file_writer writer(test_file, policy);
-            
+
             // First write succeeds
             std::string data1(50, 'D');
             auto written = writer.write(data1.c_str(), data1.size());
             REQUIRE(written == 50);
-            
+
             // Trigger rotation
             std::string data2(60, 'R');
             written = writer.write(data2.c_str(), data2.size());
             REQUIRE(written == 60);
-            
+
             // Remove write permissions to cause prepare_fd to fail
             fs::permissions(drop_test_dir, fs::perms::owner_read | fs::perms::owner_exec);
-            
+
             // Wait for rotation to fail and enter error state
             std::this_thread::sleep_for(200ms);
-            
+
             // Now writes should be dropped (return -1)
             std::string data3(100, 'X');
             written = writer.write(data3.c_str(), data3.size());
-            
+
             // In error state, write returns len (pretending success) but increments dropped metrics
             INFO("Write returned " << written << " in potential error state");
-            
+
             // Try a few more writes to accumulate drops
-            for (int i = 0; i < 5; ++i) {
+            for (int i = 0; i < 5; ++i)
+            {
                 auto w = writer.write(data3.c_str(), data3.size());
                 INFO("Additional write " << i << " returned " << w);
             }
-            
+
             // Restore permissions
             fs::permissions(drop_test_dir, fs::perms::owner_all);
         }
-        
+
         // Check if drops were recorded
         auto new_dropped_records = metrics.dropped_records_total.load();
-        auto new_dropped_bytes = metrics.dropped_bytes_total.load();
-        
+        auto new_dropped_bytes   = metrics.dropped_bytes_total.load();
+
         INFO("Dropped records: initial=" << initial_dropped_records << " new=" << new_dropped_records);
         INFO("Dropped bytes: initial=" << initial_dropped_bytes << " new=" << new_dropped_bytes);
-        
+
         // Verify metrics are accessible
         REQUIRE(new_dropped_records >= initial_dropped_records);
         REQUIRE(new_dropped_bytes >= initial_dropped_bytes);
     }
-    
-    SECTION("Metrics persistence across rotations") {
-        auto& metrics = rotation_metrics::instance();
-        
+
+    SECTION("Metrics persistence across rotations")
+    {
+        auto &metrics = rotation_metrics::instance();
+
         // Record all initial values
-        auto initial_rotations = metrics.rotations_total.load();
-        auto initial_duration_sum = metrics.rotation_duration_us_sum.load();
+        auto initial_rotations      = metrics.rotations_total.load();
+        auto initial_duration_sum   = metrics.rotation_duration_us_sum.load();
         auto initial_duration_count = metrics.rotation_duration_us_count.load();
-        
+
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
+        policy.mode      = rotate_policy::kind::size;
         policy.max_bytes = 1024;
-        
+
         file_writer writer(base_filename, policy);
-        
+
         // Trigger multiple rotations
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < 5; ++i)
+        {
             std::string data(1500, 'M');
             writer.write(data.c_str(), data.size());
             std::this_thread::sleep_for(100ms);
         }
-        
+
         // All metrics should increment
         REQUIRE(metrics.rotations_total.load() >= initial_rotations + 5);
         REQUIRE(metrics.rotation_duration_us_count.load() >= initial_duration_count + 5);
         REQUIRE(metrics.rotation_duration_us_sum.load() > initial_duration_sum);
-        
+
         // Average rotation time should be reasonable
-        if (metrics.rotation_duration_us_count > 0) {
+        if (metrics.rotation_duration_us_count > 0)
+        {
             auto avg_us = metrics.rotation_duration_us_sum / metrics.rotation_duration_us_count;
             INFO("Average rotation time: " << avg_us << " microseconds");
-            REQUIRE(avg_us < 1'000'000);  // Less than 1 second
+            REQUIRE(avg_us < 1'000'000); // Less than 1 second
         }
     }
-    
-    SECTION("Metrics dump functionality") {
+
+    SECTION("Metrics dump functionality")
+    {
         // Test that dump_metrics() doesn't crash
         REQUIRE_NOTHROW(metrics.dump_metrics());
-        
+
         // Verify metrics are logged (can't easily capture LOG output in tests)
         // Just ensure dump_metrics runs without crashing
         metrics.dump_metrics();
         log_line_dispatcher::instance().flush();
-        
+
         // Verify all metric counters are accessible
         REQUIRE(metrics.dropped_records_total.load() >= 0);
         REQUIRE(metrics.dropped_bytes_total.load() >= 0);
@@ -771,32 +825,32 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
 }
 
 // Performance test (not run by default)
-TEST_CASE_METHOD(rotation_test_fixture, "Throughput with rotation", "[.][rotation][performance]") {
-    SECTION("2M msg/sec target") {
+TEST_CASE_METHOD(rotation_test_fixture, "Throughput with rotation", "[.][rotation][performance]")
+{
+    SECTION("2M msg/sec target")
+    {
         rotate_policy policy;
-        policy.mode = rotate_policy::kind::size;
-        policy.max_bytes = 10 * 1024 * 1024;  // 10MB files
-        
+        policy.mode      = rotate_policy::kind::size;
+        policy.max_bytes = 10 * 1024 * 1024; // 10MB files
+
         file_writer writer(base_filename, policy);
-        
+
         const size_t msg_count = 100'000;
-        const std::string msg(100, 'X');  // 100 byte messages
-        
+        const std::string msg(100, 'X'); // 100 byte messages
+
         auto start = std::chrono::steady_clock::now();
-        
-        for (size_t i = 0; i < msg_count; ++i) {
-            writer.write(msg.c_str(), msg.size());
-        }
-        
-        auto end = std::chrono::steady_clock::now();
+
+        for (size_t i = 0; i < msg_count; ++i) { writer.write(msg.c_str(), msg.size()); }
+
+        auto end      = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-        
+
         double msgs_per_sec = (msg_count * 1'000'000.0) / duration.count();
-        
+
         INFO("Throughput: " << msgs_per_sec << " msg/sec");
-        
+
         // Should maintain reasonable throughput even with rotation
         // Note: 2M msg/sec may not be achievable in test environment
-        REQUIRE(msgs_per_sec > 100'000);  // At least 100K msg/sec
+        REQUIRE(msgs_per_sec > 100'000); // At least 100K msg/sec
     }
 }
