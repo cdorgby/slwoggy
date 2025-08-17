@@ -33,20 +33,28 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
    - Formatter + Writer composition
    - Batch processing interface
    - Move semantics support
+   - Skips buffers marked as filtered
 
-5. **Module Registry** (`log_module.hpp`)
+5. **Filter System** (`log_filter.hpp`, `log_filters.hpp`)
+   - RCU-based filter chain management
+   - Zero-allocation filtering via buffer flags
+   - Example filters: dedup, rate limit, sampler
+   - Filters run in dispatcher worker thread only
+   - Filters set `filtered_` flag on buffers to drop
+
+6. **Module Registry** (`log_module.hpp`)
    - Thread-safe module management
    - Runtime log level control
    - Wildcard pattern matching
    - Per-compilation-unit configuration
 
-6. **Site Registry** (`log_site.hpp`)
+7. **Site Registry** (`log_site.hpp`)
    - Automatic registration of all LOG() locations
    - Compile-time filtering
    - Runtime per-site control
    - Filename width tracking
 
-7. **Structured Key Registry** (`log_structured.hpp`)
+8. **Structured Key Registry** (`log_structured.hpp`)
    - Pre-registered internal keys (IDs 0-4)
    - Ultra-fast path for internal key lookups
    - Thread-local caching for user keys

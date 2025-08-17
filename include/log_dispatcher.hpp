@@ -33,6 +33,7 @@
 #include "log_types.hpp"
 #include "log_buffer.hpp"
 #include "log_sink.hpp"
+#include "log_filter.hpp"
 
 namespace slwoggy
 {
@@ -189,6 +190,61 @@ struct log_line_dispatcher
 
         update_sink_config(std::move(new_config));
     }
+    
+    /**
+     * @brief Add a log filter to the processing chain
+     * 
+     * @warning Filter modifications use RCU pattern. Frequent changes
+     *          will impact performance. Configure filters at startup.
+     * 
+     * @param filter Filter to add to the chain
+     */
+    void add_filter(std::shared_ptr<log_filter> filter)
+    {
+        std::lock_guard<std::mutex> lock(filter_modify_mutex_);
+        auto current = current_filters_.load(std::memory_order_acquire);
+        
+        auto new_config = current ? current->copy() : std::make_unique<filter_config>();
+        new_config->filters.push_back(filter);
+        
+        update_filter_config(std::move(new_config));
+    }
+    
+    /**
+     * @brief Remove a filter from the chain
+     * 
+     * @param index Index of filter to remove
+     */
+    void remove_filter(size_t index)
+    {
+        std::lock_guard<std::mutex> lock(filter_modify_mutex_);
+        auto current = current_filters_.load(std::memory_order_acquire);
+        if (!current || index >= current->filters.size()) return;
+        
+        auto new_config = current->copy();
+        new_config->filters.erase(new_config->filters.begin() + index);
+        
+        update_filter_config(std::move(new_config));
+    }
+    
+    /**
+     * @brief Clear all filters
+     */
+    void clear_filters()
+    {
+        std::lock_guard<std::mutex> lock(filter_modify_mutex_);
+        auto new_config = std::make_unique<filter_config>();
+        update_filter_config(std::move(new_config));
+    }
+    
+    /**
+     * @brief Get current filter count
+     */
+    size_t filter_count() const
+    {
+        auto config = current_filters_.load(std::memory_order_acquire);
+        return config ? config->filters.size() : 0;
+    }
 
     ~log_line_dispatcher();
 
@@ -209,6 +265,7 @@ struct log_line_dispatcher
     log_line_dispatcher();
 
     void update_sink_config(std::unique_ptr<sink_config> new_config);
+    void update_filter_config(std::unique_ptr<filter_config> new_config);
 
     // Worker thread helper methods
     size_t dequeue_buffers(moodycamel::ConsumerToken& token, log_buffer_base** buffers, bool wait);
@@ -284,6 +341,10 @@ struct log_line_dispatcher
     std::atomic<sink_config *> current_sinks_{nullptr};
     std::mutex sink_modify_mutex_;
     bool has_default_sink_{true}; // Flag to track if we still have the default stdout sink // Only for modifications
+
+    // Lock-free filter access
+    std::atomic<filter_config *> current_filters_{nullptr};
+    std::mutex filter_modify_mutex_;
 
     // Async processing members
     moodycamel::BlockingConcurrentQueue<log_buffer_base *> queue_;
