@@ -63,27 +63,18 @@ struct sink_model final : sink_concept
     
     size_t process_batch(log_buffer_base** buffers, size_t count, char* write_buffer, size_t write_buffer_size) const override
     {
-        // Process buffers until we hit a marker (null or flush marker)
-        size_t processed = 0;
-        for (size_t i = 0; i < count; ++i)
-        {
-            if (!buffers[i] || buffers[i]->is_flush_marker())
-            {
-                break; // Stop at markers to maintain ordering
-            }
-            processed++;
-        }
-        
-        if (processed == 0) return 0;
+        // Process all buffers given to us, counting non-filtered ones
+        // The dispatcher expects us to process exactly 'count' buffers and return
+        // the number of non-filtered ones we processed
         
         // Use bulk write if available, otherwise fall back to format/write
         if constexpr (has_bulk_write_v<Writer>) 
         { 
-            return process_batch_bulk(buffers, processed); 
+            return process_batch_bulk(buffers, count); 
         }
         else 
         { 
-            return process_batch_individual(buffers, processed, write_buffer, write_buffer_size); 
+            return process_batch_individual(buffers, count, write_buffer, write_buffer_size); 
         }
     }
     
@@ -118,7 +109,8 @@ private:
     // Standard path with formatting to intermediate buffer
     size_t process_batch_individual(log_buffer_base** buffers, size_t count, char* write_buffer, size_t write_buffer_size) const
     {
-        // Format all buffers into the provided write buffer, flushing as needed
+        // Format all non-filtered buffers into the provided write buffer, flushing as needed
+        // The dispatcher has already determined the count - we process exactly that many
         size_t offset = 0;
         size_t processed = 0;
         
@@ -130,6 +122,7 @@ private:
                 continue;
             }
             
+            // This is a non-filtered buffer we need to format
             size_t buffer_size = formatter_.calculate_size(buffers[i]);
             
             // Check if this buffer would overflow our write buffer
@@ -157,7 +150,7 @@ private:
             writer_.write(write_buffer, offset);
         }
         
-        // Return count of buffers actually processed (non-filtered)
+        // Return count of non-filtered buffers we processed
         return processed;
     }
 };

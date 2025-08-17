@@ -138,6 +138,20 @@ target_link_libraries(simple PRIVATE taocppjson fmt::fmt)
 # Set per-file compile definitions for simple
 set_source_file_compile_definitions(simple "src/simple.cpp")
 
+# Add rotation_demo executable
+add_executable(rotation_demo src/rotation_demo.cpp)
+
+# Add include directories for rotation_demo
+target_include_directories(rotation_demo PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+# Link with taocpp/json and fmt
+target_link_libraries(rotation_demo PRIVATE taocppjson fmt::fmt)
+
+# Set per-file compile definitions for rotation_demo
+set_source_file_compile_definitions(rotation_demo "src/rotation_demo.cpp")
+
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -147,6 +161,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR 
         LOG_COLLECT_DISPATCHER_MSG_RATE
     )
     target_compile_definitions(simple PRIVATE
+        LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_DISPATCHER_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_DISPATCHER_MSG_RATE
+    )
+    target_compile_definitions(rotation_demo PRIVATE
         LOG_COLLECT_BUFFER_POOL_METRICS
         LOG_COLLECT_DISPATCHER_METRICS
         LOG_COLLECT_STRUCTURED_METRICS
@@ -162,6 +182,9 @@ if(LOG_RELIABLE_DELIVERY)
     target_compile_definitions(simple PRIVATE
         LOG_RELIABLE_DELIVERY
     )
+    target_compile_definitions(rotation_demo PRIVATE
+        LOG_RELIABLE_DELIVERY
+    )
     message(STATUS "Reliable delivery: ENABLED (blocking mode)")
 else()
     message(STATUS "Reliable delivery: DISABLED (best-effort mode)")
@@ -172,6 +195,9 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 set_target_properties(simple PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+set_target_properties(rotation_demo PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
