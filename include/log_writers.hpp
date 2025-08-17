@@ -147,6 +147,9 @@ class file_writer
     std::shared_ptr<rotation_handle> rotation_handle_; ///< Rotation handle
 };
 
+// Constants for writer configuration
+static constexpr size_t WRITER_MAX_IOV = 1024;  // Maximum iovec entries for writev
+
 // High-performance writer using writev for zero-copy bulk writes
 class writev_file_writer : public file_writer
 {
@@ -160,8 +163,7 @@ class writev_file_writer : public file_writer
         if (fd_ < 0 || count == 0) return 0;
 
         // Build iovec array
-        constexpr size_t MAX_IOV = 1024;
-        struct iovec iov[MAX_IOV];
+        struct iovec iov[WRITER_MAX_IOV];
         size_t iov_count = 0;
         size_t processed = 0;
 
@@ -169,7 +171,7 @@ class writev_file_writer : public file_writer
         bool add_newline = false;
         if constexpr (requires { formatter.add_newline; }) { add_newline = formatter.add_newline; }
 
-        for (size_t i = 0; i < count && iov_count < MAX_IOV; ++i)
+        for (size_t i = 0; i < count && iov_count < WRITER_MAX_IOV; ++i)
         {
             log_buffer_base *buf = buffers[i];
 

@@ -238,6 +238,13 @@ class file_rotation_service
     void handle_rotation(const rotation_message &msg);
     void handle_close(const rotation_message &msg);
     void drain_queue();
+    
+    // Helper functions for rotation
+    bool perform_zero_gap_rotation(const std::filesystem::path& base_path,
+                                    const std::filesystem::path& rotated_path,
+                                    const std::string& temp_filename,
+                                    rotation_handle* handle);
+    void sync_directory(const std::filesystem::path& base_path);
 
     std::string generate_rotated_filename(const std::string &base);
     std::string generate_temp_filename(const std::string &base);

@@ -15,6 +15,43 @@
 namespace slwoggy
 {
 
+// Constants for rotation service
+static constexpr int ROTATION_MAX_RETRIES = 10;
+static constexpr auto ROTATION_INITIAL_BACKOFF = std::chrono::milliseconds(1);
+static constexpr auto ROTATION_MAX_BACKOFF = std::chrono::seconds(1);
+static constexpr int ROTATION_LINK_ATTEMPTS = 3;
+
+// Helper function to convert filesystem time to system clock time
+// This is more robust than trying to calculate epoch differences
+inline std::chrono::system_clock::time_point 
+filesystem_time_to_system_time(const std::filesystem::file_time_type& ftime)
+{
+    // C++20 would allow std::chrono::clock_cast, but for C++17 compatibility
+    // we use a more portable approach
+    
+    // Get current time in both clocks to calculate offset
+    auto sys_now = std::chrono::system_clock::now();
+    auto file_now = std::filesystem::file_time_type::clock::now();
+    
+    // Calculate the difference and apply to the target time
+    // This assumes the clock offset is relatively stable
+    auto file_epoch = file_now.time_since_epoch();
+    auto sys_epoch = sys_now.time_since_epoch();
+    auto ftime_epoch = ftime.time_since_epoch();
+    
+    // Convert to common duration type (nanoseconds for precision)
+    auto file_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(file_epoch);
+    auto sys_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(sys_epoch);
+    auto ftime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(ftime_epoch);
+    
+    // Calculate offset and apply
+    auto offset_ns = sys_ns - file_ns;
+    auto result_ns = ftime_ns + offset_ns;
+    
+    return std::chrono::system_clock::time_point(
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(result_ns));
+}
+
 // rotation_metrics implementation
 inline void rotation_metrics::dump_metrics() const
 {
@@ -99,84 +136,62 @@ inline void file_rotation_service::rotator_thread_func()
     }
 }
 
-inline void file_rotation_service::handle_rotation(const rotation_message &msg)
+// Helper: Perform atomic zero-gap rotation
+inline bool file_rotation_service::perform_zero_gap_rotation(
+    const std::filesystem::path& base_path,
+    const std::filesystem::path& rotated_path,
+    const std::string& temp_filename,
+    rotation_handle* handle)
 {
-    // This function handles PHASE 2 of rotation
-    // The writer has already swapped to the next fd
-
-    auto rotation_start = std::chrono::steady_clock::now();
-
-    // Durability - fdatasync before rotation if configured
-    if (msg.handle->policy_.sync_on_rotate && msg.old_fd >= 0)
+    int link_attempts = 0;
+    while (link_attempts < ROTATION_LINK_ATTEMPTS)
     {
-        if (fdatasync(msg.old_fd) != 0) { rotation_metrics::instance().fsync_failures.fetch_add(1); }
-    }
-
-    // Generate timestamped filename for rotated file
-    std::string rotated_name = generate_rotated_filename(msg.handle->base_filename_);
-    namespace fs             = std::filesystem;
-    fs::path base_path(msg.handle->base_filename_);
-    fs::path rotated_path(rotated_name);
-
-    if (!msg.temp_filename.empty())
-    {
-        // Normal case: writer has swapped to temp file
-        close(msg.old_fd);
-
-        // Zero-gap rotation via link()+rename()
-        int link_attempts = 0;
-        while (link_attempts < 3)
+        if (link(base_path.c_str(), rotated_path.c_str()) == 0)
         {
-            if (link(base_path.c_str(), rotated_path.c_str()) == 0)
+            // Success: hard link created
+            // Atomically replace current with temp (NO GAP!)
+            if (rename(temp_filename.c_str(), base_path.c_str()) != 0)
             {
-                // Success: hard link created
-                // Atomically replace current with temp (NO GAP!)
-                if (rename(msg.temp_filename.c_str(), base_path.c_str()) != 0)
-                {
-                    LOG(error) << "Failed to rename temp to base: " << strerror(errno);
-                }
-                break;
+                LOG(error) << "Failed to rename temp to base: " << strerror(errno);
             }
-            else if (errno == EEXIST)
+            return true;
+        }
+        else if (errno == EEXIST)
+        {
+            // Race: another rotation created this name - regenerate
+            link_attempts++;
+            if (link_attempts < ROTATION_LINK_ATTEMPTS)
             {
-                // Race: another rotation created this name
-                LOG(info) << "Rotated filename exists, regenerating";
-                rotated_name = generate_rotated_filename(msg.handle->base_filename_);
-                rotated_path = rotated_name;
-                link_attempts++;
+                LOG(info) << "Rotated filename exists, will retry with new name";
             }
-            else
-            {
-                // Other failure (cross-device, permission, etc.)
-                rotation_metrics::instance().zero_gap_fallback_total.fetch_add(1);
-
-                LOG(warn) << "Hard link failed, using fallback rotation with gap: " << strerror(errno);
-
-                // Use two-rename sequence (HAS BRIEF GAP)
-                if (rename(base_path.c_str(), rotated_path.c_str()) == 0)
-                {
-                    rename(msg.temp_filename.c_str(), base_path.c_str());
-                }
-                else if (errno == EEXIST)
-                {
-                    // Rotated name exists, retry with new name
-                    rotated_name = generate_rotated_filename(msg.handle->base_filename_);
-                    rotated_path = rotated_name;
-                    rename(base_path.c_str(), rotated_path.c_str());
-                    rename(msg.temp_filename.c_str(), base_path.c_str());
-                }
-                break;
-            }
+            return false; // Caller will regenerate filename
+        }
+        else
+        {
+            // Other failure - use fallback
+            break;
         }
     }
-    else
+    
+    // Fall back to two-rename sequence
+    rotation_metrics::instance().zero_gap_fallback_total.fetch_add(1);
+    LOG(warn) << "Hard link failed, using fallback rotation with gap: " << strerror(errno);
+    
+    if (rename(base_path.c_str(), rotated_path.c_str()) == 0)
     {
-        // This should never happen - writer must swap fd first
-        LOG(fatal) << "Rotation message without temp file - programming error!";
-        abort();
+        rename(temp_filename.c_str(), base_path.c_str());
     }
+    else if (errno == EEXIST)
+    {
+        // Rotated name exists, caller should retry with new name
+        return false;
+    }
+    return true;
+}
 
-    // Directory durability: BATCH fsync (not per-mutation)
+// Helper: Ensure directory metadata is synced
+inline void file_rotation_service::sync_directory(const std::filesystem::path& base_path)
+{
     std::string dir_path = base_path.parent_path().string();
     if (dir_path.empty()) dir_path = ".";
 
@@ -200,9 +215,60 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
         fsync(dir_fd); // Single fsync after batch
         close(dir_fd);
     }
-    else { LOG(error) << "Failed to fsync directory - renames not durable!"; }
+    else 
+    { 
+        LOG(error) << "Failed to fsync directory - renames not durable!"; 
+    }
+}
 
-    // Add rotated file to cache
+inline void file_rotation_service::handle_rotation(const rotation_message &msg)
+{
+    // This function handles PHASE 2 of rotation
+    // The writer has already swapped to the next fd
+    auto rotation_start = std::chrono::steady_clock::now();
+    namespace fs = std::filesystem;
+
+    // Step 1: Durability - fdatasync before rotation if configured
+    if (msg.handle->policy_.sync_on_rotate && msg.old_fd >= 0)
+    {
+        if (fdatasync(msg.old_fd) != 0) 
+        { 
+            rotation_metrics::instance().fsync_failures.fetch_add(1); 
+        }
+    }
+
+    // Step 2: Perform rotation
+    if (msg.temp_filename.empty())
+    {
+        // This should never happen - writer must swap fd first
+        LOG(fatal) << "Rotation message without temp file - programming error!";
+        abort();
+    }
+    
+    close(msg.old_fd);
+    
+    // Generate timestamped filename and perform rotation
+    fs::path base_path(msg.handle->base_filename_);
+    std::string rotated_name;
+    fs::path rotated_path;
+    
+    // Retry rotation with new filenames if collision occurs
+    for (int retry = 0; retry < ROTATION_LINK_ATTEMPTS; ++retry)
+    {
+        rotated_name = generate_rotated_filename(msg.handle->base_filename_);
+        rotated_path = rotated_name;
+        
+        if (perform_zero_gap_rotation(base_path, rotated_path, msg.temp_filename, msg.handle.get()))
+        {
+            break; // Success
+        }
+        // perform_zero_gap_rotation returns false if filename exists, retry with new name
+    }
+
+    // Step 3: Ensure directory durability
+    sync_directory(base_path);
+
+    // Step 4: Update cache with rotated file
     try
     {
         size_t file_size = fs::file_size(rotated_path);
@@ -213,18 +279,22 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
         LOG(error) << "Failed to get file size for cache: " << e.what();
     }
 
-    // Apply retention policies
+    // Step 5: Apply retention policies
     apply_retention_timestamped(msg.handle.get());
 
-    // Compress if needed
-    if (msg.handle->policy_.compress) { compress_file_async(rotated_name); }
+    // Step 6: Compress if needed
+    if (msg.handle->policy_.compress) 
+    { 
+        compress_file_async(rotated_name); 
+    }
 
-    // Prepare next fd with retry logic
+    // Step 7: Prepare next fd for future rotation
     prepare_next_fd_with_retry(msg.handle.get());
 
-    // Track rotation progress
+    // Step 8: Track metrics
     auto rotation_end = std::chrono::steady_clock::now();
-    auto duration_us  = std::chrono::duration_cast<std::chrono::microseconds>(rotation_end - rotation_start).count();
+    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
+        rotation_end - rotation_start).count();
     rotation_metrics::instance().rotations_total.fetch_add(1);
     rotation_metrics::instance().rotation_duration_us_sum.fetch_add(duration_us);
     rotation_metrics::instance().rotation_duration_us_count.fetch_add(1);
@@ -294,21 +364,12 @@ inline std::string file_rotation_service::generate_temp_filename(const std::stri
 
 inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *handle)
 {
-    static constexpr int MAX_RETRIES      = 10;
-    static constexpr auto INITIAL_BACKOFF = std::chrono::milliseconds(1);
-    static constexpr auto MAX_BACKOFF     = std::chrono::seconds(1);
-
-    // Guard against overwriting an unconsumed fd
-    if (handle->next_fd_.load(std::memory_order_acquire) != -1)
-    {
-        return; // Previous fd not consumed yet
-    }
-
-    auto backoff       = INITIAL_BACKOFF;
+    // Use constants defined at namespace level
+    auto backoff       = ROTATION_INITIAL_BACKOFF;
     int retry_count    = 0;
     bool tried_cleanup = false;
 
-    while (retry_count < MAX_RETRIES)
+    while (retry_count < ROTATION_MAX_RETRIES)
     {
         // Generate temp filename
         std::string temp_name = generate_temp_filename(handle->base_filename_);
@@ -317,15 +378,27 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
         int new_fd = ::open(temp_name.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_APPEND | O_CLOEXEC, 0644);
         if (new_fd >= 0)
         {
-            // Success - store the new fd
-            handle->next_temp_filename_ = temp_name;
-            handle->next_fd_.store(new_fd, std::memory_order_release);
-            handle->next_fd_ready_.store(true, std::memory_order_release);
-            handle->consecutive_failures_.store(0);
+            // Use compare-and-swap to atomically check and set the FD
+            // This prevents race conditions where multiple threads might prepare FDs
+            int expected = -1;
+            if (handle->next_fd_.compare_exchange_strong(expected, new_fd, std::memory_order_acq_rel))
+            {
+                // Successfully claimed the slot - store metadata
+                handle->next_temp_filename_ = temp_name;
+                handle->next_fd_ready_.store(true, std::memory_order_release);
+                handle->consecutive_failures_.store(0);
 
-            // Signal semaphore in case sink is waiting
-            handle->next_fd_semaphore_.signal();
-            return;
+                // Signal semaphore in case sink is waiting
+                handle->next_fd_semaphore_.signal();
+                return;
+            }
+            else
+            {
+                // Another thread already set next_fd - clean up our FD
+                ::close(new_fd);
+                ::unlink(temp_name.c_str());
+                return; // Previous fd not consumed yet
+            }
         }
 
         // Check if it's ENOSPC
@@ -342,17 +415,17 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
 
         // Failed - log and retry with backoff
         LOG(error) << "Failed to open rotation file " << temp_name << ": " << strerror(errno) << " (retry "
-                   << retry_count + 1 << "/" << MAX_RETRIES << ")";
+                   << retry_count + 1 << "/" << ROTATION_MAX_RETRIES << ")";
 
         retry_count++;
         handle->consecutive_failures_.fetch_add(1);
 
         std::this_thread::sleep_for(backoff);
-        backoff = (backoff * 2 > MAX_BACKOFF) ? MAX_BACKOFF : backoff * 2;
+        backoff = (backoff * 2 > ROTATION_MAX_BACKOFF) ? ROTATION_MAX_BACKOFF : backoff * 2;
     }
 
     // Max retries exceeded - enter error state
-    LOG(error) << "Failed to prepare next fd after " << MAX_RETRIES << " attempts for " << handle->base_filename_
+    LOG(error) << "Failed to prepare next fd after " << ROTATION_MAX_RETRIES << " attempts for " << handle->base_filename_
                << " - entering error state";
 
     rotation_metrics::instance().prepare_fd_failures.fetch_add(1);
@@ -463,15 +536,9 @@ inline void file_rotation_service::add_to_cache(rotation_handle *handle, const s
 
     namespace fs = std::filesystem;
     auto ftime   = fs::last_write_time(filename);
-
-    // Convert file_time to system_clock time_point
-    // Note: This is platform-specific and may need adjustment
-    auto now_sys  = std::chrono::system_clock::now();
-    auto now_file = fs::file_time_type::clock::now();
-    auto diff     = now_sys.time_since_epoch() -
-                std::chrono::duration_cast<std::chrono::system_clock::duration>(now_file.time_since_epoch());
-    auto sctp = std::chrono::system_clock::time_point(
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(ftime.time_since_epoch()) + diff);
+    
+    // Use robust conversion helper
+    auto sctp = filesystem_time_to_system_time(ftime);
 
     handle->rotated_files_cache_.push_back({filename, sctp, size});
 }
@@ -507,13 +574,8 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
                         (filename.ends_with(".log") || filename.ends_with(".log.gz") || filename.ends_with(".log.pending")))
                     {
 
-                        auto ftime    = fs::last_write_time(entry);
-                        auto now_sys  = std::chrono::system_clock::now();
-                        auto now_file = fs::file_time_type::clock::now();
-                        auto diff     = now_sys.time_since_epoch() -
-                                    std::chrono::duration_cast<std::chrono::system_clock::duration>(now_file.time_since_epoch());
-                        auto sctp = std::chrono::system_clock::time_point(
-                            std::chrono::duration_cast<std::chrono::system_clock::duration>(ftime.time_since_epoch()) + diff);
+                        auto ftime = fs::last_write_time(entry);
+                        auto sctp = filesystem_time_to_system_time(ftime);
 
                         handle->rotated_files_cache_.push_back(
                             {entry.path().string(), sctp, static_cast<size_t>(entry.file_size())});
