@@ -179,6 +179,72 @@ The system pre-registers five internal metadata keys with guaranteed IDs for opt
 
 These internal keys use ultra-fast lookup paths that bypass all caching layers, making them essentially free to use. When using `LOG_STRUCTURED()`, these fields are automatically populated. When using `LOG()` or `LOG_TEXT()`, this metadata is still available internally but formatted differently in the output.
 
+## Binary Data and Hex Dumps
+
+slwoggy provides built-in support for logging binary data in various hex dump formats:
+
+### Basic Hex Dump
+
+```cpp
+uint8_t data[64];
+// ... fill data ...
+
+// Dump with ASCII sidebar (like hexdump -C)
+LOG(info).hex_dump_best_effort(data, sizeof(data), log_line_base::hex_dump_format::full);
+// Output: 0000: 00 01 02 03  04 05 06 07  08 09 0a 0b  0c 0d 0e 0f  |................|
+//         0010: 10 11 12 13  14 15 16 17  18 19 1a 1b  1c 1d 1e 1f  |................|
+
+// Hex only without ASCII
+LOG(info).hex_dump_best_effort(data, sizeof(data), log_line_base::hex_dump_format::no_ascii);
+// Output: 0000: 00 01 02 03  04 05 06 07  08 09 0a 0b  0c 0d 0e 0f
+//         0010: 10 11 12 13  14 15 16 17  18 19 1a 1b  1c 1d 1e 1f
+```
+
+### Inline Hex Format
+
+For compact inline representation with customizable formatting:
+
+```cpp
+// Simple inline hex
+LOG(info) << "Data: ";
+LOG(info).hex_dump_best_effort(data, 16, log_line_base::hex_dump_format::inline_hex);
+// Output: Data: 000102030405060708090a0b0c0d0e0f
+
+// With custom formatting
+hex_inline_config hex_0x = {"0x", "", " ", "", ""};  // prefix, suffix, separator, left/right brackets
+LOG(info).hex_dump_best_effort(data, 16, log_line_base::hex_dump_format::inline_hex, 8, hex_0x);
+// Output: 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0a 0x0b 0x0c 0x0d 0x0e 0x0f
+
+hex_inline_config hex_brackets = {"", "", " ", "[", "]"};
+LOG(info).hex_dump_best_effort(data, 16, log_line_base::hex_dump_format::inline_hex, 8, hex_brackets);
+// Output: [00] [01] [02] [03] [04] [05] [06] [07] [08] [09] [0a] [0b] [0c] [0d] [0e] [0f]
+```
+
+### Large Data Dumps
+
+For dumping large amounts of data that may exceed buffer capacity:
+
+```cpp
+uint8_t large_data[4096];
+// ... fill data ...
+
+// Automatically handles buffer boundaries and continues across multiple log lines
+LOG(info).hex_dump_full(large_data, sizeof(large_data), log_line_base::hex_dump_format::no_ascii);
+// Output: binary data len: 0/4096
+//         0000: 00 01 02 03  04 05 06 07  08 09 0a 0b  0c 0d 0e 0f
+//         ...
+//         binary data len: 2048/4096  (continues in next buffer)
+//         0800: ...
+```
+
+### Features
+
+- **Duplicate Line Compression**: Repeated 16-byte lines are compressed with `*` (like `hexdump -C`)
+- **Automatic Buffer Management**: Large dumps automatically continue across buffer boundaries
+- **Progress Tracking**: Shows current offset/total for multi-buffer dumps
+- **Proper Alignment**: Hex dump lines are properly indented to align with log headers
+- **Complete Line Guarantee**: Never writes partial lines when buffer space is insufficient
+
 ## Custom Sinks
 
 Create custom output handlers:
