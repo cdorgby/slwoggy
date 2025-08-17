@@ -101,8 +101,7 @@ inline size_t log_line_base::format_hex_line_inline(char* buffer, size_t buffer_
                                                     const hex_inline_config& config)
 {
     // Use fmt to format into the provided buffer
-    auto result = fmt::format_to_n(buffer, buffer_size, "");
-    auto out = result.out;
+    auto out = buffer;
     size_t remaining = buffer_size;
     
     for (size_t i = 0; i < byte_count && remaining > 0; i++) {
@@ -117,11 +116,11 @@ inline size_t log_line_base::format_hex_line_inline(char* buffer, size_t buffer_
         // Format the byte with brackets and prefix/suffix
         if (remaining > 0) {
             auto byte_result = fmt::format_to_n(out, remaining, "{}{}{:02x}{}{}", 
-                config.left_bracket ? config.left_bracket : "",
-                config.prefix ? config.prefix : "",
+                config.left_bracket,
+                config.prefix,
                 bytes[i],
-                config.suffix ? config.suffix : "",
-                config.right_bracket ? config.right_bracket : ""
+                config.suffix,
+                config.right_bracket
             );
             size_t written = byte_result.out - out;
             out = byte_result.out;
@@ -144,7 +143,7 @@ inline size_t log_line_base::format_hex_line_formatted(char* buffer, size_t buff
     fmt::format_to(std::back_inserter(temp_buf), "{:04x}: ", offset);
     
     // Hex bytes with grouping
-    for (size_t i = 0; i < 16; i++) {
+    for (size_t i = 0; i < HEX_BYTES_PER_LINE; i++) {
         if (i < byte_count) {
             fmt::format_to(std::back_inserter(temp_buf), "{:02x} ", bytes[i]);
         } else {
@@ -231,7 +230,7 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
     char line_buf[128];
 
     // Track previous line for duplicate detection
-    uint8_t prev_line[16]    = {0};
+    uint8_t prev_line[HEX_BYTES_PER_LINE]    = {0};
     bool prev_line_valid     = false;
     bool in_star_mode        = false;
     size_t last_shown_offset = 0;  // Track the last offset we actually showed
@@ -247,11 +246,11 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
     while (bytes_dumped < len && lines_written < max_lines)
     {
         size_t line_offset = start_offset + bytes_dumped;  // Use absolute offset
-        size_t line_bytes  = std::min(size_t(16), len - bytes_dumped);
+        size_t line_bytes  = std::min(HEX_BYTES_PER_LINE, len - bytes_dumped);
 
         // Check for duplicate line
         bool is_duplicate = false;
-        if (prev_line_valid && line_bytes == 16) { is_duplicate = (memcmp(bytes + bytes_dumped, prev_line, 16) == 0); }
+        if (prev_line_valid && line_bytes == HEX_BYTES_PER_LINE) { is_duplicate = (memcmp(bytes + bytes_dumped, prev_line, HEX_BYTES_PER_LINE) == 0); }
 
         if (is_duplicate)
         {
@@ -283,7 +282,7 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
         {
             // Format the line first to see its exact size
             size_t line_len = format_hex_line_formatted(line_buf, sizeof(line_buf), 
-                                                       bytes + (last_shown_offset - start_offset), 16,
+                                                       bytes + (last_shown_offset - start_offset), HEX_BYTES_PER_LINE,
                                                        last_shown_offset, include_ascii);
             
             // Calculate exact space needed: line + "\n" (1) + padding (buffer_->header_width_ if enabled)
@@ -321,9 +320,9 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
         }
 
         // Copy current line for next comparison
-        if (line_bytes == 16)
+        if (line_bytes == HEX_BYTES_PER_LINE)
         {
-            memcpy(prev_line, bytes + bytes_dumped, 16);
+            memcpy(prev_line, bytes + bytes_dumped, HEX_BYTES_PER_LINE);
             prev_line_valid = true;
         }
 
@@ -339,7 +338,7 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
     if (in_star_mode && last_shown_offset < start_offset + len)
     {
         size_t final_offset = last_shown_offset - start_offset;
-        size_t final_bytes = std::min(size_t(16), len - final_offset);
+        size_t final_bytes = std::min(HEX_BYTES_PER_LINE, len - final_offset);
         size_t line_len = format_hex_line_formatted(line_buf, sizeof(line_buf), 
                                                    bytes + final_offset, final_bytes,
                                                    last_shown_offset, include_ascii);

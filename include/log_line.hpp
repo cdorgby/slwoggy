@@ -329,6 +329,9 @@ struct log_line_base
         no_ascii,   ///< Hex dump with offset and hex bytes only, no ASCII representation
         inline_hex  ///< Compact inline hex string without offsets or formatting
     };
+    
+    /// Number of bytes per line in hex dump output (standard hexdump width)
+    static constexpr size_t HEX_BYTES_PER_LINE = 16;
 
     /**
      * @brief Dump binary data in hex format (best effort within current buffer)
