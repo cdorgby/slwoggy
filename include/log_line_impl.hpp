@@ -10,6 +10,7 @@
 #include "log_site.hpp"
 #include "log_dispatcher.hpp"
 #include <cstring>
+#include <cassert>
 
 namespace slwoggy
 {
@@ -233,7 +234,7 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
     uint8_t prev_line[HEX_BYTES_PER_LINE]    = {0};
     bool prev_line_valid     = false;
     bool in_star_mode        = false;
-    size_t last_shown_offset = 0;  // Track the last offset we actually showed
+    size_t last_shown_offset = start_offset;  // Track the last offset we actually showed (initialize to start_offset to prevent underflow)
 
     // First, write the header with progress
     fmt::memory_buffer header_buf;
@@ -280,6 +281,8 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
         // If we were in star mode, write the last duplicate line
         if (in_star_mode && last_shown_offset < start_offset + bytes_dumped)
         {
+            // Assert invariant: last_shown_offset should always be >= start_offset
+            assert(last_shown_offset >= start_offset);
             // Format the line first to see its exact size
             size_t line_len = format_hex_line_formatted(line_buf, sizeof(line_buf), 
                                                        bytes + (last_shown_offset - start_offset), HEX_BYTES_PER_LINE,
@@ -337,6 +340,7 @@ inline size_t log_line_base::hex_dump_formatted_full_impl(const uint8_t* bytes, 
     // If we ended in star mode, show the last duplicate line
     if (in_star_mode && last_shown_offset < start_offset + len)
     {
+        assert(last_shown_offset >= start_offset);  // Invariant: no underflow
         size_t final_offset = last_shown_offset - start_offset;
         size_t final_bytes = std::min(HEX_BYTES_PER_LINE, len - final_offset);
         size_t line_len = format_hex_line_formatted(line_buf, sizeof(line_buf), 
