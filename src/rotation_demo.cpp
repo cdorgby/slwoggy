@@ -1,7 +1,7 @@
 /**
  * @file rotation_demo.cpp
  * @brief Comprehensive demonstration of file rotation functionality
- * @author slwoggy
+ * @author dorgby.net
  *
  * This demo showcases all rotation features:
  * - Size-based rotation
