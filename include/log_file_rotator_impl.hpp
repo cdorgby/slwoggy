@@ -53,8 +53,13 @@ inline file_rotation_service::~file_rotation_service() {
     
     // Final fdatasync for all open handles and cleanup temp files
     std::lock_guard<std::mutex> lock(handles_mutex_);
+    auto& metrics = rotation_metrics::instance();
     for (auto& weak_handle : handles_) {
         if (auto handle = weak_handle.lock()) {
+            // Aggregate dropped metrics before shutdown
+            metrics.dropped_records_total.fetch_add(handle->dropped_records_.load());
+            metrics.dropped_bytes_total.fetch_add(handle->dropped_bytes_.load());
+            
             int fd = handle->current_fd_.load();
             if (fd >= 0) {
                 fdatasync(fd);
@@ -523,6 +528,13 @@ inline void file_rotation_service::handle_close(const rotation_message& msg) {
     if (msg.old_fd >= 0) {
         fdatasync(msg.old_fd);
         close(msg.old_fd);
+    }
+    
+    // Aggregate handle metrics to global metrics before removing
+    if (msg.handle) {
+        auto& metrics = rotation_metrics::instance();
+        metrics.dropped_records_total.fetch_add(msg.handle->dropped_records_.load());
+        metrics.dropped_bytes_total.fetch_add(msg.handle->dropped_bytes_.load());
     }
     
     // Remove from active handles

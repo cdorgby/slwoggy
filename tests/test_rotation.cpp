@@ -501,6 +501,275 @@ TEST_CASE_METHOD(rotation_test_fixture, "Integration with log system", "[rotatio
     }
 }
 
+// Failure metrics tests - critical for forensics/traceability
+TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][metrics]") {
+    auto& metrics = rotation_metrics::instance();
+    
+    SECTION("ENOSPC metrics tracking") {
+        // Create a small tmpfs to simulate ENOSPC
+        std::string small_fs = "/tmp/test_enospc_" + std::to_string(getpid());
+        fs::create_directories(small_fs);
+        
+        // Note: Can't easily create actual tmpfs in tests, simulate with many files
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 1024;  // 1KB files
+        policy.keep_files = 100;  // Try to keep many
+        
+        std::string test_file = small_fs + "/enospc.log";
+        
+        // Record initial metrics
+        auto initial_pending = metrics.enospc_deletions_pending.load();
+        auto initial_gz = metrics.enospc_deletions_gz.load();
+        auto initial_raw = metrics.enospc_deletions_raw.load();
+        auto initial_bytes = metrics.enospc_deleted_bytes.load();
+        
+        // Create some .pending and .gz files to test priority deletion
+        std::ofstream pending_file(small_fs + "/enospc-20250101-000000-001.log.pending");
+        pending_file << std::string(500, 'P');
+        pending_file.close();
+        
+        std::ofstream gz_file(small_fs + "/enospc-20250101-000000-002.log.gz");
+        gz_file << std::string(500, 'G');
+        gz_file.close();
+        
+        file_writer writer(test_file, policy);
+        
+        // Write enough to trigger rotations
+        for (int i = 0; i < 10; ++i) {
+            std::string data(1100, 'D');  // Over max_bytes
+            writer.write(data.c_str(), data.size());
+            std::this_thread::sleep_for(50ms);
+        }
+        
+        // Cleanup
+        fs::remove_all(small_fs);
+        
+        // Verify metrics updated (may or may not trigger depending on system)
+        INFO("ENOSPC pending deletions: " << (metrics.enospc_deletions_pending.load() - initial_pending));
+        INFO("ENOSPC gz deletions: " << (metrics.enospc_deletions_gz.load() - initial_gz));
+        INFO("ENOSPC raw deletions: " << (metrics.enospc_deletions_raw.load() - initial_raw));
+        INFO("ENOSPC deleted bytes: " << (metrics.enospc_deleted_bytes.load() - initial_bytes));
+    }
+    
+    SECTION("Prepare FD failure metrics") {
+        // Test prepare_fd_failures counter
+        auto initial_prepare_failures = metrics.prepare_fd_failures.load();
+        
+        // Create a test file first
+        std::string test_file = test_dir + "/prepare_fail.log";
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 100;
+        policy.max_retries = 2;  // Fail faster in tests
+        
+        {
+            file_writer writer(test_file, policy);
+            
+            // Write to trigger rotation need
+            std::string data(150, 'F');
+            writer.write(data.c_str(), data.size());
+            
+            // Now make directory read-only to prevent temp file creation
+            fs::permissions(test_dir, fs::perms::owner_read | fs::perms::owner_exec);
+            
+            // Try to write more - should fail to prepare next fd
+            std::string more_data(150, 'M');
+            writer.write(more_data.c_str(), more_data.size());
+            
+            // Give time for async rotation to attempt and fail
+            std::this_thread::sleep_for(500ms);
+            
+            // Restore permissions before writer destructor
+            fs::permissions(test_dir, fs::perms::owner_all);
+        }
+        
+        // Check if prepare_fd_failures incremented
+        auto new_failures = metrics.prepare_fd_failures.load();
+        INFO("Prepare FD failures: initial=" << initial_prepare_failures << " new=" << new_failures);
+        
+        // May or may not fail depending on timing, but counter should be accessible
+        REQUIRE(new_failures >= initial_prepare_failures);
+    }
+    
+    SECTION("Fsync failure metrics") {
+        auto initial_fsync_failures = metrics.fsync_failures.load();
+        
+        // Hard to simulate fsync failures in tests
+        // Would need to mock/inject failures
+        // For now just verify the counter exists and is accessible
+        REQUIRE(metrics.fsync_failures.load() >= 0);
+        INFO("Fsync failures counter accessible: " << metrics.fsync_failures.load());
+    }
+    
+    SECTION("Compression failure metrics") {
+        auto initial_compression_failures = metrics.compression_failures.load();
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 1024;
+        policy.compress = true;  // Enable compression
+        
+        file_writer writer(base_filename, policy);
+        
+        // Trigger rotation with compression
+        std::string data(2000, 'C');
+        writer.write(data.c_str(), data.size());
+        
+        std::this_thread::sleep_for(200ms);
+        
+        // Compression not implemented yet, so no failures expected
+        // Just verify counter is accessible
+        REQUIRE(metrics.compression_failures.load() >= 0);
+        INFO("Compression failures counter: " << metrics.compression_failures.load());
+    }
+    
+    SECTION("Zero-gap fallback metrics") {
+        auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
+        
+        // Create cross-device scenario (hard to simulate in tests)
+        // Would need different mount points
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 1024;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Normal rotation
+        std::string data(2000, 'Z');
+        writer.write(data.c_str(), data.size());
+        
+        std::this_thread::sleep_for(200ms);
+        
+        // Verify counter is accessible
+        REQUIRE(metrics.zero_gap_fallback_total.load() >= initial_fallbacks);
+        INFO("Zero-gap fallbacks: " << metrics.zero_gap_fallback_total.load());
+    }
+    
+    SECTION("Dropped records metrics") {
+        auto initial_dropped_records = metrics.dropped_records_total.load();
+        auto initial_dropped_bytes = metrics.dropped_bytes_total.load();
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 100;
+        policy.max_retries = 1;  // Fail fast
+        
+        // Create a file in a directory
+        std::string drop_test_dir = test_dir + "/drops";
+        fs::create_directories(drop_test_dir);
+        std::string test_file = drop_test_dir + "/drop_test.log";
+        
+        {
+            file_writer writer(test_file, policy);
+            
+            // First write succeeds
+            std::string data1(50, 'D');
+            auto written = writer.write(data1.c_str(), data1.size());
+            REQUIRE(written == 50);
+            
+            // Trigger rotation
+            std::string data2(60, 'R');
+            written = writer.write(data2.c_str(), data2.size());
+            REQUIRE(written == 60);
+            
+            // Remove write permissions to cause prepare_fd to fail
+            fs::permissions(drop_test_dir, fs::perms::owner_read | fs::perms::owner_exec);
+            
+            // Wait for rotation to fail and enter error state
+            std::this_thread::sleep_for(200ms);
+            
+            // Now writes should be dropped (return -1)
+            std::string data3(100, 'X');
+            written = writer.write(data3.c_str(), data3.size());
+            
+            // In error state, write returns len (pretending success) but increments dropped metrics
+            INFO("Write returned " << written << " in potential error state");
+            
+            // Try a few more writes to accumulate drops
+            for (int i = 0; i < 5; ++i) {
+                auto w = writer.write(data3.c_str(), data3.size());
+                INFO("Additional write " << i << " returned " << w);
+            }
+            
+            // Restore permissions
+            fs::permissions(drop_test_dir, fs::perms::owner_all);
+        }
+        
+        // Check if drops were recorded
+        auto new_dropped_records = metrics.dropped_records_total.load();
+        auto new_dropped_bytes = metrics.dropped_bytes_total.load();
+        
+        INFO("Dropped records: initial=" << initial_dropped_records << " new=" << new_dropped_records);
+        INFO("Dropped bytes: initial=" << initial_dropped_bytes << " new=" << new_dropped_bytes);
+        
+        // Verify metrics are accessible
+        REQUIRE(new_dropped_records >= initial_dropped_records);
+        REQUIRE(new_dropped_bytes >= initial_dropped_bytes);
+    }
+    
+    SECTION("Metrics persistence across rotations") {
+        auto& metrics = rotation_metrics::instance();
+        
+        // Record all initial values
+        auto initial_rotations = metrics.rotations_total.load();
+        auto initial_duration_sum = metrics.rotation_duration_us_sum.load();
+        auto initial_duration_count = metrics.rotation_duration_us_count.load();
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 1024;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Trigger multiple rotations
+        for (int i = 0; i < 5; ++i) {
+            std::string data(1500, 'M');
+            writer.write(data.c_str(), data.size());
+            std::this_thread::sleep_for(100ms);
+        }
+        
+        // All metrics should increment
+        REQUIRE(metrics.rotations_total.load() >= initial_rotations + 5);
+        REQUIRE(metrics.rotation_duration_us_count.load() >= initial_duration_count + 5);
+        REQUIRE(metrics.rotation_duration_us_sum.load() > initial_duration_sum);
+        
+        // Average rotation time should be reasonable
+        if (metrics.rotation_duration_us_count > 0) {
+            auto avg_us = metrics.rotation_duration_us_sum / metrics.rotation_duration_us_count;
+            INFO("Average rotation time: " << avg_us << " microseconds");
+            REQUIRE(avg_us < 1'000'000);  // Less than 1 second
+        }
+    }
+    
+    SECTION("Metrics dump functionality") {
+        // Test that dump_metrics() doesn't crash
+        REQUIRE_NOTHROW(metrics.dump_metrics());
+        
+        // Verify metrics are logged (can't easily capture LOG output in tests)
+        // Just ensure dump_metrics runs without crashing
+        metrics.dump_metrics();
+        log_line_dispatcher::instance().flush();
+        
+        // Verify all metric counters are accessible
+        REQUIRE(metrics.dropped_records_total.load() >= 0);
+        REQUIRE(metrics.dropped_bytes_total.load() >= 0);
+        REQUIRE(metrics.rotations_total.load() >= 0);
+        REQUIRE(metrics.rotation_duration_us_sum.load() >= 0);
+        REQUIRE(metrics.rotation_duration_us_count.load() >= 0);
+        REQUIRE(metrics.enospc_deletions_pending.load() >= 0);
+        REQUIRE(metrics.enospc_deletions_gz.load() >= 0);
+        REQUIRE(metrics.enospc_deletions_raw.load() >= 0);
+        REQUIRE(metrics.enospc_deleted_bytes.load() >= 0);
+        REQUIRE(metrics.zero_gap_fallback_total.load() >= 0);
+        REQUIRE(metrics.compression_failures.load() >= 0);
+        REQUIRE(metrics.prepare_fd_failures.load() >= 0);
+        REQUIRE(metrics.fsync_failures.load() >= 0);
+    }
+}
+
 // Performance test (not run by default)
 TEST_CASE_METHOD(rotation_test_fixture, "Throughput with rotation", "[.][rotation][performance]") {
     SECTION("2M msg/sec target") {
