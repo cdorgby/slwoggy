@@ -53,5 +53,6 @@ if g++ -std=c++20 -I"$TOP/amalgamation" -c "$TOP/test_amalgamation.cpp" -o "$TOP
 else
     echo "✗ Amalgamation compilation failed"
     echo "  Run: g++ -std=c++20 -Iamalgamation -Ithird_party/fmt/include -Ithird_party/taocpp-json/include -c test_amalgamation.cpp"
-    echo "  to see errors"
+    echo "  This indicates a bug: the amalgamation should be self-contained and compile with only -Iamalgamation."
+    echo "  Please check the error output and report this issue."
 fi
