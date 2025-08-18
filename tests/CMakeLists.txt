@@ -7,6 +7,7 @@ set(TEST_SOURCES
     test_log_level_control.cpp
     test_log_site_control.cpp
     test_log_filters.cpp
+    test_rotation.cpp
 )
 
 # Function to set per-file compile definitions for tests
@@ -39,24 +40,8 @@ function(add_metrics_definitions TARGET)
     endif()
 endfunction()
 
-# Create test executable - NOT built by default
-add_executable(all_tests ${TEST_SOURCES})
-set_target_properties(all_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)
-
-# Set per-file compile definitions
-set_test_source_file_compile_definitions(all_tests "${TEST_SOURCES}")
-
-# Link with Catch2 and project includes
-target_link_libraries(all_tests PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(all_tests PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Enable metrics collection for Debug, MemCheck, and Profile builds
-add_metrics_definitions(all_tests)
-
-# Register tests with CTest
-catch_discover_tests(all_tests)
+# Note: all_tests removed - run individual test executables instead
+# Each test file has its own executable for better isolation
 
 # Individual test executables (also excluded from default build)
 set(TEST_LOG_SOURCES main.cpp test_log.cpp)
@@ -135,9 +120,21 @@ target_include_directories(test_log_filters PRIVATE
 add_metrics_definitions(test_log_filters)
 catch_discover_tests(test_log_filters)
 
+# Rotation tests
+set(TEST_ROTATION_SOURCES main.cpp test_rotation.cpp)
+add_executable(test_rotation ${TEST_ROTATION_SOURCES})
+set_target_properties(test_rotation PROPERTIES EXCLUDE_FROM_ALL TRUE)
+set_test_source_file_compile_definitions(test_rotation "${TEST_ROTATION_SOURCES}")
+target_link_libraries(test_rotation PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
+target_include_directories(test_rotation PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_metrics_definitions(test_rotation)
+catch_discover_tests(test_rotation)
+
 # Custom target to build all tests
 add_custom_target(tests
-    DEPENDS all_tests test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control test_log_filters
+    DEPENDS test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control test_log_filters test_rotation
     COMMENT "Building all test executables"
 )
 
