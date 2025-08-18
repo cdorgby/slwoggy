@@ -1,3 +1,17 @@
+/**
+ * @file log_file_rotator.hpp
+ * @brief File rotation support for log files
+ * @author dorgby.net
+ * 
+ * This file provides comprehensive file rotation capabilities including:
+ * - Size-based rotation (rotate when file reaches specified size)
+ * - Time-based rotation (rotate at intervals or specific times)
+ * - Combined rotation (size OR time triggers)
+ * - Retention policies (by count, age, or total size)
+ * - Automatic compression of rotated files
+ * - Zero-gap rotation using atomic operations
+ * - ENOSPC handling with automatic cleanup
+ */
 #pragma once
 
 #include <atomic>
@@ -30,40 +44,66 @@ namespace slwoggy
 class file_rotation_service;
 class rotation_handle;
 
-// Rotation policy configuration
+/**
+ * @brief Rotation policy configuration
+ * 
+ * Defines when and how log files should be rotated, including
+ * rotation triggers, retention policies, and post-rotation actions.
+ */
 struct rotate_policy
 {
+    /**
+     * @brief Rotation trigger mode
+     */
     enum class kind
     {
-        none,
-        size,
-        time,
-        size_or_time
+        none,          ///< No rotation (default)
+        size,          ///< Rotate based on file size
+        time,          ///< Rotate based on time interval
+        size_or_time   ///< Rotate on size OR time (whichever triggers first)
     };
-    kind mode = kind::none;
+    kind mode = kind::none;  ///< Active rotation mode
 
-    // Size policy
-    uint64_t max_bytes = 0; // e.g. 256_MB
+    /// @name Size-based rotation
+    /// @{
+    uint64_t max_bytes = 0; ///< Maximum file size before rotation (0 = disabled)
+    /// @}
 
-    // Time policy
-    std::chrono::seconds every{0}; // e.g. 24h for daily, but allows seconds for testing
-    std::chrono::seconds at{0};    // cutover time for daily, in seconds since midnight
+    /// @name Time-based rotation
+    /// @{
+    std::chrono::seconds every{0}; ///< Rotation interval (e.g., 86400s for daily)
+    std::chrono::seconds at{0};    ///< Time of day for rotation (seconds since midnight UTC)
+    /// @}
 
-    // Retention (NOT GUARANTEED - violated on ENOSPC!)
-    // Precedence: 1. keep_files, 2. max_total_bytes, 3. max_age
-    int keep_files = 5;
-    std::chrono::seconds max_age{0}; // Use seconds for flexibility (can still set hours/days)
-    uint64_t max_total_bytes = 0;
+    /// @name Retention policies
+    /// @note Applied in precedence order: keep_files, max_total_bytes, max_age
+    /// @warning Retention may be violated during ENOSPC conditions
+    /// @{
+    int keep_files = 5;                  ///< Maximum number of rotated files to keep
+    std::chrono::seconds max_age{0};     ///< Delete files older than this (0 = no age limit)
+    uint64_t max_total_bytes = 0;        ///< Maximum total size of all log files (0 = no limit)
+    /// @}
 
-    // Post-rotate
-    bool compress       = false;
-    bool sync_on_rotate = false; // fdatasync before rotation
+    /// @name Post-rotation actions
+    /// @{
+    bool compress       = false;         ///< Compress rotated files with gzip
+    bool sync_on_rotate = false;         ///< Call fdatasync before rotation for durability
+    /// @}
 
-    // Error handling
-    int max_retries = 10;
+    /// @name Error handling
+    /// @{
+    int max_retries = 10;                ///< Maximum retry attempts on rotation failure
+    /// @}
 };
 
-// Metrics for observability
+/**
+ * @brief Metrics for monitoring rotation behavior
+ * 
+ * Provides comprehensive metrics about file rotation operations,
+ * including rotation counts, timing, error conditions, and ENOSPC handling.
+ * 
+ * @note All metrics are thread-safe using atomic operations
+ */
 struct rotation_metrics
 {
     // Dropped writes (POSIX violation detection)
@@ -152,7 +192,15 @@ struct rotation_metrics
     void dump_metrics() const; // Implementation in .cpp file
 };
 
-// Handle/token that sinks use
+/**
+ * @brief Handle for managing a rotating log file
+ * 
+ * This class represents a handle to a log file with rotation capabilities.
+ * It manages the current file descriptor, tracks bytes written, and
+ * coordinates with the rotation service for seamless file rotation.
+ * 
+ * @note This class is thread-safe and can be shared across multiple writers
+ */
 class rotation_handle : public std::enable_shared_from_this<rotation_handle>
 {
   private:
@@ -218,8 +266,17 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
     }
 
   public:
+    /**
+     * @brief Get the current file descriptor
+     * @return Current file descriptor, or -1 if in error state
+     */
     int get_current_fd() const { return current_fd_.load(std::memory_order_acquire); }
 
+    /**
+     * @brief Check if rotation is needed
+     * @param next_write_size Size of the next write in bytes
+     * @return true if rotation should occur, false otherwise
+     */
     bool should_rotate(size_t next_write_size) const
     {
         // Don't attempt rotation if in error state
@@ -267,7 +324,18 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
     void close();
 };
 
-// Singleton rotation service
+/**
+ * @brief Singleton service managing all file rotation operations
+ * 
+ * This service runs a background thread that handles:
+ * - File rotation when size/time thresholds are reached
+ * - Retention policy enforcement (deleting old files)
+ * - Compression of rotated files
+ * - ENOSPC emergency cleanup
+ * - Zero-gap rotation using atomic operations
+ * 
+ * @note Thread-safe singleton accessed via instance() method
+ */
 class file_rotation_service
 {
   private:
@@ -326,12 +394,23 @@ class file_rotation_service
     void cleanup_expired_handles();
 
   public:
+    /**
+     * @brief Get the singleton instance of the rotation service
+     * @return Reference to the global rotation service
+     */
     static file_rotation_service &instance()
     {
         static file_rotation_service service;
         return service;
     }
 
+    /**
+     * @brief Open a file with rotation support
+     * @param filename Path to the log file
+     * @param policy Rotation policy to apply
+     * @return Shared pointer to rotation handle
+     * @throws std::runtime_error if file cannot be opened
+     */
     std::shared_ptr<rotation_handle> open(const std::string &filename, const rotate_policy &policy);
 
     void enqueue_rotation(std::shared_ptr<rotation_handle> handle, int old_fd, const std::string &temp_filename)
