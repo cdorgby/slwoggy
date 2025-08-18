@@ -1,0 +1,96 @@
+name: Gemini 2.5 Pro Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gemini-pro-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - uses: actions/github-script@v7
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number
+            });
+            
+            // Prepare diff with file context
+            const diff = files.data.map(f => `# ${f.filename}\n${f.patch || ''}`).join('\n\n').slice(0, 120000);
+            
+            // Call Gemini for review
+            const reviewText = await callGemini(process.env.GEMINI_API_KEY, {
+              title: pr.title,
+              body: pr.body || '',
+              diff
+            });
+            
+            // Post review comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: reviewText
+            });
+            
+            async function callGemini(apiKey, payload) {
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-latest:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  contents: [{
+                    parts: [{
+                      text: `As an expert C++20 systems programmer specializing in high-performance, asynchronous, and header-only libraries, please review this Pull Request for the 'slwoggy' logging library.
+                      
+                      Your review must be critical, direct, and adhere to the project's core design principles.
+                      
+                      PR Title: ${payload.title}
+                      PR Description: ${payload.body}
+                      
+                      Diff:
+                      ${payload.diff}
+                      
+                      Focus on the following key areas:
+                      
+                      1. **Performance & Zero-Allocation**: Does the change adhere to the zero-allocation fast path? Does it introduce any potential performance regressions, unnecessary locks, or heap allocations in performance-critical code?
+                      2. **Concurrency & Thread Safety**: Are there any potential race conditions? Is memory ordering for atomic operations correct (acquire/release semantics)? Is the use of lock-free structures appropriate and correct?
+                      3. **Correctness & Robustness**: Identify potential bugs, logic errors, resource leaks (especially file descriptors), and unhandled edge cases. Does the code handle POSIX APIs and potential errors correctly?
+                      4. **C++20 Best Practices**: Does the code use modern C++20 features (concepts, ranges, constexpr, etc.) idiomatically and effectively?
+                      5. **API Design & Readability**: Is the API clean and intuitive? Is the code maintainable and well-structured?
+                      
+                      Provide your feedback concisely and actionably. Be direct and critical where necessary.`
+                    }]
+                  }],
+                  generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 8192,
+                    topP: 0.95,
+                    topK: 40
+                  }
+                })
+              });
+              
+              if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+              }
+              
+              const data = await response.json();
+              const content = data.candidates[0].content.parts[0].text;
+              return `## 🔮 Gemini 2.5 Pro Code Review\n\n${content}`;
+            }
