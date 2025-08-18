@@ -301,6 +301,7 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
     if (config && !config->sinks.empty() && expected_processed > 0)
     {
         // Dispatch all buffers to sinks - sinks will skip filtered ones
+        bool first_sink = true;
         for (size_t i = 0; i < config->sinks.size(); ++i)
         {
             if (config->sinks[i])
@@ -308,9 +309,10 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
                 size_t sink_processed = config->sinks[i]->process_batch(&buffers[start_idx], processable_count);
 
     #ifndef NDEBUG
-                if (i == 0)
+                if (first_sink)
                 {
                     processed = sink_processed;
+                    first_sink = false;
                 }
                 else
                 {

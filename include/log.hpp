@@ -330,6 +330,7 @@
 #include "log_version.hpp"    // IWYU pragma: keep
 #include "log_line.hpp"       // IWYU pragma: keep
 #include "log_dispatcher.hpp" // IWYU pragma: keep
+#include "log_file_rotator.hpp" // IWYU pragma: keep
 
 // formatter specializations for smart pointers
 namespace std
@@ -467,3 +468,4 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 
 #include "log_line_impl.hpp"       // IWYU pragma: keep
 #include "log_dispatcher_impl.hpp" // IWYU pragma: keep
+#include "log_file_rotator_impl.hpp" // IWYU pragma: keep

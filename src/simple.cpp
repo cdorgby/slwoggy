@@ -1,11 +1,12 @@
 #include <iostream>
 #include <cstring>
 #include <memory>
-#include "log.hpp"
-#include "log_dispatcher.hpp"
-#include "log_sinks.hpp"
+#include "slwoggy.hpp"
+
+#include "log_filters.hpp"
 
 using namespace slwoggy;
+using namespace std::chrono_literals;
 
 LOG_MODULE_NAME("main");
 
@@ -63,6 +64,14 @@ int main(int argc, char *argv[])
         std::cerr << "Error: unknown sink type: " << sink_type << "\n";
         print_usage(argv[0]);
         return 1;
+    }
+
+    auto &dispatcher = log_line_dispatcher::instance();
+    auto dedup       = std::make_shared<dedup_filter>(100ms);
+    dispatcher.add_filter(dedup);
+
+    for(int i = 0; i < 20; ++i) {
+        LOG(info) << "Hello world " << " from main";
     }
 
     LOG(fatal).fmtprint("Starting log blast test with sink type: {}", sink_type);

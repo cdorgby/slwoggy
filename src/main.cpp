@@ -6,9 +6,7 @@
 #include <iostream>
 #include <cstring>
 #include <random>
-#include "log.hpp"
-#include "log_dispatcher.hpp"
-#include "log_sinks.hpp"
+#include "slwoggy.hpp"
 
 using namespace slwoggy;
 
@@ -81,13 +79,19 @@ int main(int argc, char *argv[])
     key_registry.get_or_register_key(std::string_view("hi"));
     key_registry.get_or_register_key(std::string_view("hello"));
 
+    rotate_policy policy;
+    policy.mode           = rotate_policy::kind::size;
+    policy.max_bytes      = 100 * 1024 * 1024; // 1MB files
+    policy.keep_files     = 10;
+    policy.sync_on_rotate = true; // Ensure durability
+
     // Create sink based on type
     if (sink_type == "raw") {
-        log_line_dispatcher::instance().add_sink(make_raw_file_sink(output_file));
+        log_line_dispatcher::instance().add_sink(make_raw_file_sink(output_file, policy));
     } else if (sink_type == "writev") {
-        log_line_dispatcher::instance().add_sink(make_writev_file_sink(output_file));
+        log_line_dispatcher::instance().add_sink(make_writev_file_sink(output_file, policy));
     } else if (sink_type == "json") {
-        log_line_dispatcher::instance().add_sink(make_json_sink(output_file));
+        log_line_dispatcher::instance().add_sink(make_json_sink(output_file, policy));
     } else if (sink_type == "stdout") {
         // Use the default stdout sink
     } else {
@@ -306,6 +310,39 @@ int main(int argc, char *argv[])
         std::cerr << "=========================================\n";
     }
 #endif
+
+    // Display rotation metrics if file rotation is being used
+    if (show_detailed_stats && (sink_type == "raw" || sink_type == "writev" || sink_type == "json"))
+    {
+        auto rot_stats = rotation_metrics::instance().get_stats();
+        
+        std::cerr << "========== FILE ROTATION METRICS ==========\n";
+        
+        std::cerr << "Rotation Activity:\n";
+        std::cerr << "  Total rotations: " << rot_stats.total_rotations << "\n";
+        if (rot_stats.total_rotations > 0) {
+            std::cerr << "  Avg rotation time: " << rot_stats.avg_rotation_time_us << " µs\n";
+            std::cerr << "  Total rotation time: " << rot_stats.total_rotation_time_us << " µs\n";
+        }
+        
+        std::cerr << "Data Loss Prevention:\n";
+        std::cerr << "  Dropped records: " << rot_stats.dropped_records << "\n";
+        std::cerr << "  Dropped bytes: " << rot_stats.dropped_bytes << "\n";
+        
+        std::cerr << "ENOSPC Emergency Cleanup:\n";
+        std::cerr << "  Pending files deleted: " << rot_stats.enospc_pending_deleted << "\n";
+        std::cerr << "  Compressed files deleted: " << rot_stats.enospc_gz_deleted << "\n";
+        std::cerr << "  Raw log files deleted: " << rot_stats.enospc_raw_deleted << "\n";
+        std::cerr << "  Total bytes freed: " << rot_stats.enospc_bytes_freed << "\n";
+        
+        std::cerr << "Error Conditions:\n";
+        std::cerr << "  Zero-gap fallbacks: " << rot_stats.zero_gap_fallbacks << "\n";
+        std::cerr << "  Compression failures: " << rot_stats.compression_failures << "\n";
+        std::cerr << "  Prepare FD failures: " << rot_stats.prepare_fd_failures << "\n";
+        std::cerr << "  Fsync failures: " << rot_stats.fsync_failures << "\n";
+        
+        std::cerr << "===========================================\n";
+    }
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
     // Print summary line with key metrics
