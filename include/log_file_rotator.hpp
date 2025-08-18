@@ -262,7 +262,7 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
 
     bool should_rotate_size(size_t next_write_size) const
     {
-        return (bytes_written_.load() + next_write_size) > policy_.max_bytes;
+        return (bytes_written_.load() + next_write_size) >= policy_.max_bytes;
     }
 
   public:
@@ -390,7 +390,7 @@ class file_rotation_service
     void initialize_cache(rotation_handle *handle);
     void update_cache_entry(const std::string &old_name, const std::string &new_name);
 
-    void compress_file_async(const std::string &filename);
+    void compress_file_sync(const std::string &filename);
     void cleanup_expired_handles();
 
   public:

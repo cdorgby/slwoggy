@@ -443,6 +443,93 @@ void demo_enospc_handling()
     print_metrics();
 }
 
+// Demo 7: Compression
+void demo_compression()
+{
+    print_header("Demo 7: Gzip Compression");
+
+    std::string log_dir = "/tmp/rotation_demo";
+    fs::create_directories(log_dir);
+    std::string log_file = log_dir + "/compress.log";
+
+    // Clean up old compressed files for clear demo
+    for (const auto &entry : fs::directory_iterator(log_dir))
+    {
+        if (entry.path().filename().string().find("compress-") == 0) { fs::remove(entry.path()); }
+    }
+
+    // Configure rotation with compression enabled
+    rotate_policy policy;
+    policy.mode       = rotate_policy::kind::size;
+    policy.max_bytes  = 50 * 1024; // 50KB files
+    policy.keep_files = 5;
+    policy.compress   = true; // Enable gzip compression
+
+    // Create rotating sink
+    auto sink = std::make_shared<log_sink>(raw_formatter{true, true}, file_writer(log_file, policy));
+
+    // Replace default sink with our rotating sink
+    log_line_dispatcher::instance().set_sink(0, sink);
+
+    std::cout << "Configuration:\n";
+    std::cout << "  Max file size: 50 KB\n";
+    std::cout << "  Keep files: 5\n";
+    std::cout << "  Compression: ENABLED (gzip)\n";
+    std::cout << "  Log directory: " << log_dir << "\n\n";
+
+    // Generate logs to trigger rotation and compression
+    std::cout << "Generating logs to trigger rotation with compression...\n";
+    for (int i = 0; i < 2000; ++i)
+    {
+        // Use repetitive text for good compression ratio
+        LOG(info) << "Compression test message " << i << " - "
+                  << "The quick brown fox jumps over the lazy dog. "
+                  << "The quick brown fox jumps over the lazy dog. "
+                  << "The quick brown fox jumps over the lazy dog.";
+
+        if (i % 500 == 0 && i > 0) { std::cout << "  Generated " << i << " messages\n"; }
+    }
+
+    log_line_dispatcher::instance().flush();
+    std::this_thread::sleep_for(1s); // Give compression time to complete
+
+    // Show compression results
+    std::cout << "\nCompression Results:\n";
+    size_t uncompressed_total = 0;
+    size_t compressed_total   = 0;
+    int compressed_count      = 0;
+
+    for (const auto &entry : fs::directory_iterator(log_dir))
+    {
+        std::string filename = entry.path().filename().string();
+        if (filename.starts_with("compress-"))
+        {
+            if (filename.ends_with(".gz"))
+            {
+                compressed_total += entry.file_size();
+                compressed_count++;
+                std::cout << "  " << filename << ": " << (entry.file_size() / 1024) << " KB (compressed)\n";
+            }
+            else if (filename.ends_with(".log"))
+            {
+                uncompressed_total += entry.file_size();
+                std::cout << "  " << filename << ": " << (entry.file_size() / 1024) << " KB\n";
+            }
+        }
+    }
+
+    if (compressed_count > 0)
+    {
+        // Estimate original size based on current log file size
+        size_t estimated_original = compressed_count * 50 * 1024; // Each was ~50KB before compression
+        float ratio               = 100.0f - (compressed_total * 100.0f / estimated_original);
+        std::cout << "\n  Compression ratio: ~" << std::fixed << std::setprecision(1) << ratio << "% reduction\n";
+        std::cout << "  " << compressed_count << " files compressed\n";
+    }
+
+    print_metrics();
+}
+
 int main(int argc, char *argv[])
 {
     std::cout << "slwoggy File Rotation Demo\n";
@@ -458,6 +545,7 @@ int main(int argc, char *argv[])
         else if (demo == "4" || demo == "retention") { demo_retention_policies(); }
         else if (demo == "5" || demo == "multithread") { demo_multithreaded(); }
         else if (demo == "6" || demo == "enospc") { demo_enospc_handling(); }
+        else if (demo == "7" || demo == "compress") { demo_compression(); }
         else
         {
             std::cout << "\nUsage: " << argv[0] << " [demo_number|demo_name]\n";
@@ -467,6 +555,7 @@ int main(int argc, char *argv[])
             std::cout << "  4 or retention - Retention policies\n";
             std::cout << "  5 or multithread - Multi-threaded stress test\n";
             std::cout << "  6 or enospc    - ENOSPC handling\n";
+            std::cout << "  7 or compress  - Gzip compression\n";
         }
     }
     else
@@ -478,6 +567,7 @@ int main(int argc, char *argv[])
         demo_retention_policies();
         demo_multithreaded();
         demo_enospc_handling();
+        demo_compression();
 
         print_header("Final Summary");
         print_metrics();
