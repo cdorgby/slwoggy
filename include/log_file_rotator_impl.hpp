@@ -7,10 +7,19 @@
 #include <algorithm>
 #include <string.h>
 
-// macOS doesn't have fdatasync, use fsync instead
+// Platform-specific sync implementation
+// macOS doesn't have fdatasync, but F_FULLFSYNC is more reliable than fsync
+inline int log_fdatasync(int fd) {
 #ifdef __APPLE__
-    #define fdatasync fsync
+    // On macOS, fsync doesn't guarantee durability to disk
+    // F_FULLFSYNC forces all buffered data to permanent storage
+    return ::fcntl(fd, F_FULLFSYNC);
+#else
+    // On Linux and other POSIX systems, use fdatasync for better performance
+    // fdatasync omits metadata sync (like timestamps) which we don't need
+    return ::fdatasync(fd);
 #endif
+}
 
 namespace slwoggy
 {
@@ -107,7 +116,7 @@ inline file_rotation_service::~file_rotation_service()
             metrics.dropped_bytes_total.fetch_add(handle->dropped_bytes_.load());
 
             int fd = handle->current_fd_.load();
-            if (fd >= 0) { fdatasync(fd); }
+            if (fd >= 0) { log_fdatasync(fd); }
 
             // Clean up any prepared temp file
             int next_fd = handle->next_fd_.load();
@@ -239,7 +248,7 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     // Step 1: Durability - fdatasync before rotation if configured
     if (msg.handle->policy_.sync_on_rotate && msg.old_fd >= 0)
     {
-        if (fdatasync(msg.old_fd) != 0) 
+        if (log_fdatasync(msg.old_fd) != 0) 
         { 
             rotation_metrics::instance().fsync_failures.fetch_add(1); 
         }
@@ -624,7 +633,7 @@ inline void file_rotation_service::handle_close(const rotation_message &msg)
     // Sync data to disk before closing
     if (msg.old_fd >= 0)
     {
-        fdatasync(msg.old_fd);
+        log_fdatasync(msg.old_fd);
         close(msg.old_fd);
     }
 
@@ -655,7 +664,7 @@ inline void file_rotation_service::drain_queue()
     {
         if (msg.msg_type == rotation_message::CLOSE && msg.old_fd >= 0)
         {
-            fdatasync(msg.old_fd);
+            log_fdatasync(msg.old_fd);
             close(msg.old_fd);
         }
     }
