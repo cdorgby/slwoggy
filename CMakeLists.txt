@@ -263,6 +263,6 @@ add_custom_target(amalgamation
 )
 
 # Install amalgamation header if it exists
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/slwoggy.hpp)
-    install(FILES slwoggy.hpp DESTINATION include)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/slwoggy.hpp)
+    install(FILES amalgamation/slwoggy.hpp DESTINATION include)
 endif()
