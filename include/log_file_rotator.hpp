@@ -40,13 +40,13 @@ struct rotate_policy
     uint64_t max_bytes = 0; // e.g. 256_MB
 
     // Time policy
-    std::chrono::minutes every{0}; // e.g. 24h for daily
-    std::chrono::minutes at{0};    // cutover time for daily
+    std::chrono::seconds every{0}; // e.g. 24h for daily, but allows seconds for testing
+    std::chrono::seconds at{0};    // cutover time for daily, in seconds since midnight
 
     // Retention (NOT GUARANTEED - violated on ENOSPC!)
     // Precedence: 1. keep_files, 2. max_total_bytes, 3. max_age
     int keep_files = 5;
-    std::chrono::hours max_age{0};
+    std::chrono::seconds max_age{0}; // Use seconds for flexibility (can still set hours/days)
     uint64_t max_total_bytes = 0;
 
     // Post-rotate
@@ -185,10 +185,10 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
         {
 
             // Daily rotation at specified time (or 00:00 UTC if not set)
-            if (policy_.every == std::chrono::hours{24})
+            if (policy_.every == std::chrono::seconds(std::chrono::hours{24}))
             {
                 auto dp      = std::chrono::floor<std::chrono::days>(now);
-                auto cutover = dp + policy_.at;
+                auto cutover = dp + std::chrono::duration_cast<std::chrono::system_clock::duration>(policy_.at);
 
                 // If we're past today's cutover, move to tomorrow
                 if (now >= cutover) { next_rotation_time_ = cutover + std::chrono::days{1}; }
