@@ -13,14 +13,14 @@
 #include <memory>
 
 #ifndef _WIN32
-#include <unistd.h> // For write() and STDOUT_FILENO
-#include <fcntl.h>
-#include <sys/uio.h> // For writev
-#include <errno.h>
-#include <limits.h> // For IOV_MAX on some systems
+    #include <unistd.h> // For write() and STDOUT_FILENO
+    #include <fcntl.h>
+    #include <sys/uio.h> // For writev
+    #include <errno.h>
+    #include <limits.h> // For IOV_MAX on some systems
 #else
-#include <io.h>
-#include <windows.h>
+    #include <io.h>
+    #include <windows.h>
 #endif
 
 #include "log_buffer.hpp"
@@ -32,29 +32,35 @@ namespace slwoggy
 class file_writer
 {
   public:
-    file_writer(const std::string &filename, rotate_policy policy = rotate_policy{}) 
-        : filename_(filename), policy_(policy), fd_(-1), close_fd_(true)
+    file_writer(const std::string &filename, rotate_policy policy = rotate_policy{})
+    : filename_(filename),
+      policy_(policy),
+      fd_(-1),
+      close_fd_(true)
     {
-        if (policy_.mode != rotate_policy::kind::none) {
-            auto& rotator = file_rotation_service::instance();
+        if (policy_.mode != rotate_policy::kind::none)
+        {
+            auto &rotator    = file_rotation_service::instance();
             rotation_handle_ = rotator.open(filename, policy);
-            close_fd_ = false;
-        } else {
+            close_fd_        = false;
+        }
+        else
+        {
             fd_ = open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
             if (fd_ < 0) { throw std::runtime_error("Failed to open log file: " + filename); }
         }
     }
-    
-    
+
     file_writer(int fd, bool close_fd = false) : filename_(""), fd_(fd), close_fd_(close_fd) {}
 
-    file_writer(const file_writer &other) 
-        : filename_(other.filename_), fd_(-1), close_fd_(other.close_fd_),
-          policy_(other.policy_), rotation_handle_(other.rotation_handle_)
+    file_writer(const file_writer &other)
+    : filename_(other.filename_),
+      fd_(-1),
+      close_fd_(other.close_fd_),
+      policy_(other.policy_),
+      rotation_handle_(other.rotation_handle_)
     {
-        if (rotation_handle_) {
-            close_fd_ = false;
-        }
+        if (rotation_handle_) { close_fd_ = false; }
         else if (other.fd_ >= 0 && other.close_fd_)
         {
             fd_ = dup(other.fd_);
@@ -73,18 +79,17 @@ class file_writer
         {
             // Only close our own non-shared FD
             // Don't close rotation handles - they're shared!
-            if (!rotation_handle_ && close_fd_ && fd_ >= 0) { 
-                close(fd_); 
-            }
+            if (!rotation_handle_ && close_fd_ && fd_ >= 0) { close(fd_); }
 
-            filename_ = other.filename_;
-            close_fd_ = other.close_fd_;
-            policy_ = other.policy_;
-            rotation_handle_ = other.rotation_handle_;  // Just share the handle
+            filename_        = other.filename_;
+            close_fd_        = other.close_fd_;
+            policy_          = other.policy_;
+            rotation_handle_ = other.rotation_handle_; // Just share the handle
 
-            if (rotation_handle_) {
+            if (rotation_handle_)
+            {
                 close_fd_ = false;
-                fd_ = -1;  // Clear fd_ since we're using rotation_handle_
+                fd_       = -1; // Clear fd_ since we're using rotation_handle_
             }
             else if (other.fd_ >= 0 && other.close_fd_)
             {
@@ -102,7 +107,8 @@ class file_writer
 
     ~file_writer()
     {
-        if (close_fd_ && fd_ >= 0) {
+        if (close_fd_ && fd_ >= 0)
+        {
             close(fd_);
             fd_ = -1;
         }
@@ -111,51 +117,52 @@ class file_writer
     ssize_t write(const char *data, size_t len) const
     {
         int write_fd = fd_;
-        
-        if (rotation_handle_) {
+
+        if (rotation_handle_)
+        {
             write_fd = rotation_handle_->get_current_fd();
-            
-            if (rotation_handle_->should_rotate(len)) {
-                int new_fd = rotation_handle_->get_next_fd();
-                if (new_fd == -1) {
-                    // Use public methods instead of direct member access
-                    rotation_handle_->increment_dropped_records();
-                    rotation_handle_->increment_dropped_bytes(len);
-                    return len;
-                }
-                write_fd = new_fd;
-            }
+
+            // Don't rotate BEFORE write - let the data go to current file first
+            // We'll check after write if rotation is needed for NEXT write
         }
-        
+
         if (write_fd < 0) { return -1; }
-        
+
         // Capture FD once to ensure atomic write to single file
         const int captured_fd = write_fd;
-        
+
         size_t total_written = 0;
-        while (total_written < len) {
+        while (total_written < len)
+        {
             ssize_t written = ::write(captured_fd, data + total_written, len - total_written);
-            if (written < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
+            if (written < 0)
+            {
+                if (errno == EINTR) { continue; }
                 perror("Failed to write to log file");
                 return -1;
             }
             total_written += written;
         }
-        
-        if (rotation_handle_ && total_written > 0) {
+
+        if (rotation_handle_ && total_written > 0)
+        {
             rotation_handle_->add_bytes_written(total_written);
+
+            // Check if rotation needed after this write
+            if (rotation_handle_->should_rotate(0))
+            {
+                int new_fd = rotation_handle_->get_next_fd();
+                // new_fd will be used for the NEXT write
+            }
         }
         return total_written;
     }
 
   protected:
-    std::string filename_; ///< File name for logging
-    mutable int fd_{-1};   ///< File descriptor for logging (mutable for rotation)
-    bool close_fd_{false}; ///< Whether to close fd on destruction
-    rotate_policy policy_; ///< Rotation policy
+    std::string filename_;                             ///< File name for logging
+    mutable int fd_{-1};                               ///< File descriptor for logging (mutable for rotation)
+    bool close_fd_{false};                             ///< Whether to close fd on destruction
+    rotate_policy policy_;                             ///< Rotation policy
     std::shared_ptr<rotation_handle> rotation_handle_; ///< Rotation handle
 };
 
@@ -166,7 +173,7 @@ static constexpr size_t WRITER_MAX_IOV = static_cast<size_t>(UIO_MAXIOV);
 #elif defined(IOV_MAX)
 static constexpr size_t WRITER_MAX_IOV = static_cast<size_t>(IOV_MAX);
 #else
-static constexpr size_t WRITER_MAX_IOV = 1024;  // Conservative default
+static constexpr size_t WRITER_MAX_IOV = 1024; // Conservative default
 #endif
 
 // High-performance writer using writev for zero-copy bulk writes
@@ -180,32 +187,23 @@ class writev_file_writer : public file_writer
     size_t bulk_write(log_buffer_base **buffers, size_t count, const Formatter &formatter) const
     {
         // Determine which FD to use (with rotation support)
-        int write_fd = fd_;
+        int write_fd      = fd_;
         size_t total_size = 0;
-        
-        // If rotation is enabled, check if we need to rotate
-        if (rotation_handle_) {
+
+        // If rotation is enabled, get current FD but don't rotate yet
+        if (rotation_handle_)
+        {
             // Calculate total size first
-            for (size_t i = 0; i < count; ++i) {
-                if (!buffers[i]->filtered_ && buffers[i]->len() > 0) {
-                    total_size += buffers[i]->len();
-                }
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (!buffers[i]->filtered_ && buffers[i]->len() > 0) { total_size += buffers[i]->len(); }
             }
-            
+
             write_fd = rotation_handle_->get_current_fd();
-            
-            if (rotation_handle_->should_rotate(total_size)) {
-                int new_fd = rotation_handle_->get_next_fd();
-                if (new_fd == -1) {
-                    // In error state - drop the batch
-                    rotation_handle_->increment_dropped_records();
-                    rotation_handle_->increment_dropped_bytes(total_size);
-                    return count; // Pretend we processed them
-                }
-                write_fd = new_fd;
-            }
+
+            // Don't rotate BEFORE write - data should go to current file
         }
-        
+
         if (write_fd < 0 || count == 0) return 0;
 
         // Build iovec array
@@ -223,7 +221,7 @@ class writev_file_writer : public file_writer
 
             // Skip filtered buffers
             if (buf->filtered_) continue;
-            
+
             // Skip empty buffers
             if (buf->len() == 0) continue;
 
@@ -239,7 +237,8 @@ class writev_file_writer : public file_writer
         }
 
         // Single syscall to write everything
-        if (iov_count > 0) {
+        if (iov_count > 0)
+        {
             ssize_t written = writev(write_fd, iov, iov_count);
             if (written < 0)
             {
@@ -248,10 +247,18 @@ class writev_file_writer : public file_writer
                 // This maintains consistency with dispatcher expectations
                 return processed;
             }
-            
+
             // Update bytes written for rotation tracking
-            if (rotation_handle_ && written > 0) {
+            if (rotation_handle_ && written > 0)
+            {
                 rotation_handle_->add_bytes_written(written);
+
+                // Check if rotation needed after this batch
+                if (rotation_handle_->should_rotate(0))
+                {
+                    int new_fd = rotation_handle_->get_next_fd();
+                    // new_fd will be used for the NEXT write
+                }
             }
         }
 

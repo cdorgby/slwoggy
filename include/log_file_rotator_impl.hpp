@@ -1,6 +1,7 @@
 #pragma once
 
 #include "log_file_rotator.hpp"
+#include "log_gzip.hpp"
 #include "log.hpp"
 #include <sstream>
 #include <iomanip>
@@ -324,7 +325,8 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     // Step 6: Compress if needed
     if (msg.handle->policy_.compress) 
     { 
-        compress_file_async(rotated_name); 
+        // Note: compress_file_sync is thread-safe and designed to be called from the rotator thread
+        compress_file_sync(rotated_name); 
     }
 
     // Step 7: Update next rotation time for time-based policies
@@ -696,11 +698,54 @@ inline void file_rotation_service::drain_queue()
     }
 }
 
-inline void file_rotation_service::compress_file_async(const std::string &filename)
+inline void file_rotation_service::compress_file_sync(const std::string &filename)
 {
-    // TODO: Implement compression with .pending files
-    // For now, just log
-    LOG(debug) << "Compression requested for " << filename << " (not implemented)";
+    // Write to .gz.pending in same directory, then atomic rename to .gz
+    std::string gz_pending = filename + ".gz.pending";
+    std::string gz_final = filename + ".gz";
+    
+    // Clean up any leftover .pending file from previous failed attempt
+    ::unlink(gz_pending.c_str());
+
+    // Check if source file exists before compression
+    struct stat st;
+    if (::stat(filename.c_str(), &st) != 0) {
+        return;
+    }
+    
+    
+    // Compress the file
+    bool ok = slwoggy::gzip::file_to_gzip(filename, gz_pending, MZ_DEFAULT_COMPRESSION);
+    if (!ok) {
+        rotation_metrics::instance().compression_failures.fetch_add(1, std::memory_order_relaxed);
+        ::unlink(gz_pending.c_str());
+        return;
+    }
+    
+
+    // Atomic rename from .pending to final .gz
+    if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0) {
+        // If rename failed, try to clean up existing .gz and retry
+        ::unlink(gz_final.c_str());
+        if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0) {
+            // Still failed - clean up pending file and report error
+            ::unlink(gz_pending.c_str());
+            rotation_metrics::instance().compression_failures.fetch_add(1, std::memory_order_relaxed);
+            LOG(warn) << "Failed to rename compressed file from " << gz_pending << " to " << gz_final;
+            return;
+        }
+    }
+    
+    // Sync directory for durability (optional, but good practice)
+    auto dir_path = std::filesystem::path(filename).parent_path();
+    sync_directory(dir_path);
+    
+    // Successfully compressed - delete the original uncompressed file
+    if (::unlink(filename.c_str()) != 0) {
+        LOG(warn) << "Failed to delete original file after compression: " << filename;
+    }
+    
+    LOG(debug) << "Successfully compressed " << filename << " to " << gz_final;
 }
 
 inline void file_rotation_service::update_cache_entry(const std::string &old_name, const std::string &new_name)
