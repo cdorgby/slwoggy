@@ -19,17 +19,10 @@
 #include <chrono>
 #include <vector>
 #include <filesystem>
-#include <iomanip>
-#include <sstream>
 #include <atomic>
 #include <random>
 
-#include "log.hpp"
-#include "log_sink.hpp"
-#include "log_formatters.hpp"
-#include "log_writers.hpp"
-#include "log_file_rotator.hpp"
-#include "log_file_rotator_impl.hpp"
+#include "slwoggy.hpp"
 
 using namespace slwoggy;
 using namespace std::chrono_literals;
@@ -165,20 +158,20 @@ void demo_size_rotation()
     print_metrics();
 }
 
-// Demo 2: Time-based rotation
+// Demo 2: Time-based rotation with second-level precision
 void demo_time_rotation()
 {
-    print_header("Demo 2: Time-Based Rotation");
+    print_header("Demo 2: Time-Based Rotation (Second-Level Precision)");
 
     std::string log_dir  = "/tmp/rotation_demo";
     std::string log_file = log_dir + "/time_rotation.log";
 
     // Note: Not removing old files to demonstrate retention policy
 
-    // Configure rotation: rotate every minute (smallest supported time unit)
+    // Configure rotation: rotate every 10 seconds
     rotate_policy policy;
     policy.mode       = rotate_policy::kind::time;
-    policy.every      = std::chrono::minutes(1); // Rotate every minute
+    policy.every      = std::chrono::seconds(10); // 10 second rotation for demo
     policy.keep_files = 10;
 
     // Create rotating sink
@@ -188,25 +181,34 @@ void demo_time_rotation()
     log_line_dispatcher::instance().set_sink(0, sink);
 
     std::cout << "Configuration:\n";
-    std::cout << "  Rotation interval: 1 minute\n";
+    std::cout << "  Rotation interval: 10 seconds\n";
     std::cout << "  Keep files: 10\n";
     std::cout << "  Log directory: " << log_dir << "\n\n";
 
-    std::cout << "Note: Time-based rotation uses minutes as the smallest unit.\n";
-    std::cout << "Logging for 15 seconds (won't trigger time rotation)...\n";
+    std::cout << "Logging for 25 seconds to trigger 2 time-based rotations...\n";
 
     auto start    = std::chrono::steady_clock::now();
     int msg_count = 0;
 
-    while (std::chrono::steady_clock::now() - start < 15s)
+    while (std::chrono::steady_clock::now() - start < 25s)
     {
-        LOG(info) << "Time rotation test message " << msg_count++;
+        LOG(info) << "Time rotation test message " << msg_count++ 
+                  << " at " << std::chrono::duration_cast<std::chrono::seconds>(
+                      std::chrono::steady_clock::now() - start).count() << "s";
         std::this_thread::sleep_for(100ms);
 
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count();
         if (elapsed > 0 && elapsed % 5 == 0 && msg_count % 10 == 0)
         {
-            std::cout << "  Elapsed: " << elapsed << "s, Messages: " << msg_count << "\n";
+            std::cout << "  Elapsed: " << elapsed << "s, Messages: " << msg_count;
+            
+            // Check if rotation happened
+            auto &metrics = rotation_metrics::instance();
+            auto rotations = metrics.rotations_total.load();
+            if (rotations > 0) {
+                std::cout << " (Rotations: " << rotations << ")";
+            }
+            std::cout << "\n";
         }
     }
 
@@ -227,11 +229,11 @@ void demo_combined_rotation()
 
     // Note: Not removing old files to demonstrate retention policy
 
-    // Configure rotation: rotate at 50KB OR every 2 minutes
+    // Configure rotation: rotate at 50KB OR every 15 seconds
     rotate_policy policy;
     policy.mode       = rotate_policy::kind::size_or_time;
     policy.max_bytes  = 50 * 1024;               // 50KB
-    policy.every      = std::chrono::minutes(2); // Rotate every 2 minutes
+    policy.every      = std::chrono::seconds(15); // 15 second rotation
     policy.keep_files = 8;
 
     // Create rotating sink
@@ -242,7 +244,7 @@ void demo_combined_rotation()
 
     std::cout << "Configuration:\n";
     std::cout << "  Max file size: 50 KB\n";
-    std::cout << "  Max time: 2 minutes\n";
+    std::cout << "  Max time: 15 seconds\n";
     std::cout << "  Keep files: 8\n";
     std::cout << "  Log directory: " << log_dir << "\n\n";
 
@@ -283,10 +285,10 @@ void demo_retention_policies()
     policy.max_bytes       = 20 * 1024;             // 20KB files
     policy.keep_files      = 3;                     // Keep only 3 files
     policy.max_total_bytes = 80 * 1024;             // Max 80KB total
-    policy.max_age         = std::chrono::hours(1); // Files older than 1 hour deleted
+    policy.max_age         = std::chrono::seconds(3600); // Files older than 1 hour (3600s)
 
     // Create rotating sink
-    auto sink = std::make_shared<log_sink>(raw_formatter{}, file_writer(log_file, policy));
+    auto sink = std::make_shared<log_sink>(raw_formatter{.add_newline = true}, file_writer(log_file, policy));
 
     // Replace default sink with our rotating sink
     log_line_dispatcher::instance().set_sink(0, sink);

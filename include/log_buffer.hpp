@@ -629,8 +629,12 @@ class buffer_pool
             buffers_in_use_.fetch_sub(1, std::memory_order_relaxed);
 #endif
             // Use thread-local producer token for better performance
-            thread_local moodycamel::ProducerToken producer_token(available_buffers_);
-            available_buffers_.enqueue(producer_token, buffer);
+            // But check if we're in shutdown to avoid segfault
+            static thread_local moodycamel::ProducerToken* producer_token = nullptr;
+            if (!producer_token) {
+                producer_token = new moodycamel::ProducerToken(available_buffers_);
+            }
+            available_buffers_.enqueue(*producer_token, buffer);
         }
     }
 

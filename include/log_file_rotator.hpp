@@ -89,6 +89,60 @@ struct rotation_metrics
         return metrics;
     }
 
+    // Statistics structure for consistent reporting
+    struct stats
+    {
+        // Rotation activity
+        uint64_t total_rotations;
+        uint64_t avg_rotation_time_us;
+        uint64_t total_rotation_time_us;
+        
+        // Data loss tracking
+        uint64_t dropped_records;
+        uint64_t dropped_bytes;
+        
+        // ENOSPC handling
+        uint64_t enospc_pending_deleted;
+        uint64_t enospc_gz_deleted;
+        uint64_t enospc_raw_deleted;
+        uint64_t enospc_bytes_freed;
+        
+        // Error tracking
+        uint64_t zero_gap_fallbacks;
+        uint64_t compression_failures;
+        uint64_t prepare_fd_failures;
+        uint64_t fsync_failures;
+    };
+    
+    stats get_stats() const
+    {
+        stats s;
+        
+        // Rotation activity
+        s.total_rotations = rotations_total.load();
+        auto count = rotation_duration_us_count.load();
+        s.total_rotation_time_us = rotation_duration_us_sum.load();
+        s.avg_rotation_time_us = (count > 0) ? s.total_rotation_time_us / count : 0;
+        
+        // Data loss tracking
+        s.dropped_records = dropped_records_total.load();
+        s.dropped_bytes = dropped_bytes_total.load();
+        
+        // ENOSPC handling
+        s.enospc_pending_deleted = enospc_deletions_pending.load();
+        s.enospc_gz_deleted = enospc_deletions_gz.load();
+        s.enospc_raw_deleted = enospc_deletions_raw.load();
+        s.enospc_bytes_freed = enospc_deleted_bytes.load();
+        
+        // Error tracking
+        s.zero_gap_fallbacks = zero_gap_fallback_total.load();
+        s.compression_failures = compression_failures.load();
+        s.prepare_fd_failures = prepare_fd_failures.load();
+        s.fsync_failures = fsync_failures.load();
+        
+        return s;
+    }
+
     void dump_metrics() const; // Implementation in .cpp file
 };
 

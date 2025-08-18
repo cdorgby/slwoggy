@@ -289,10 +289,17 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
         compress_file_async(rotated_name); 
     }
 
-    // Step 7: Prepare next fd for future rotation
+    // Step 7: Update next rotation time for time-based policies
+    if (msg.handle->policy_.mode == rotate_policy::kind::time || 
+        msg.handle->policy_.mode == rotate_policy::kind::size_or_time)
+    {
+        msg.handle->compute_next_rotation_time();
+    }
+
+    // Step 8: Prepare next fd for future rotation
     prepare_next_fd_with_retry(msg.handle.get());
 
-    // Step 8: Track metrics
+    // Step 9: Track metrics
     auto rotation_end = std::chrono::steady_clock::now();
     auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
         rotation_end - rotation_start).count();
@@ -680,6 +687,12 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
     int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (fd < 0) { throw std::runtime_error("Failed to open: " + filename + " - " + strerror(errno)); }
     handle->current_fd_.store(fd);
+    
+    // Get the current file size to properly handle existing files
+    struct stat st;
+    if (fstat(fd, &st) == 0) {
+        handle->bytes_written_.store(st.st_size);
+    }
 
     // Initialize file cache with one-time directory scan
     initialize_cache(handle.get());

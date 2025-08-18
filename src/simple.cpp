@@ -1,9 +1,8 @@
 #include <iostream>
 #include <cstring>
 #include <memory>
-#include "log.hpp"
-#include "log_dispatcher.hpp"
-#include "log_sinks.hpp"
+#include "slwoggy.hpp"
+
 #include "log_filters.hpp"
 
 using namespace slwoggy;
