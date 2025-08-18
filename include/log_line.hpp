@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <string_view>
 #include <chrono>
-#include <fmt/format.h>
+#include "fmt_config.hpp"
 #include <utility>
 #include <memory>
 #include <span>
