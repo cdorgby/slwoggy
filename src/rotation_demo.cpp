@@ -502,7 +502,7 @@ void demo_compression()
     for (const auto &entry : fs::directory_iterator(log_dir))
     {
         std::string filename = entry.path().filename().string();
-        if (filename.find("compress-") == 0)
+        if (filename.starts_with("compress-"))
         {
             if (filename.ends_with(".gz"))
             {
