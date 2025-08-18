@@ -715,6 +715,7 @@ inline void file_rotation_service::compress_file_sync(const std::string &filenam
     // Check if source file exists before compression
     struct stat st;
     if (::stat(filename.c_str(), &st) != 0) {
+        LOG(debug) << "Skipping compression: source file does not exist or cannot be accessed: " << filename;
         return;
     }
     
