@@ -10,12 +10,13 @@ A header-only C++20 logging library featuring asynchronous processing, structure
 - **Compile-Time Filtering**: Log calls below `GLOBAL_MIN_LOG_LEVEL` are eliminated at compile time
 - **Module System**: Runtime log level control per module with wildcard pattern matching
 - **Asynchronous Processing**: Dedicated worker thread processes log messages
+- **File Rotation**: Size/time-based rotation with zero-gap guarantees and retention policies
+- **Gzip Compression**: Automatic compression of rotated files using embedded miniz
+- **Filter Chains**: RCU-based filter system for deduplication and rate limiting
+- **ENOSPC Handling**: Automatic cleanup when disk space is exhausted
 - **Type-Erased Sinks**: Output handling using type erasure with small buffer optimization
 - **Platform-Specific Timestamps**: Uses platform APIs for timestamp generation
 - **Adaptive Batching**: Three-phase batching algorithm that adapts to workload patterns
-- **File Rotation**: Comprehensive rotation with size/time policies, compression, and retention management
-- **Zero-Gap Rotation**: Atomic operations ensure no log loss during rotation
-- **ENOSPC Handling**: Automatic cleanup when disk space is exhausted
 
 ## Quick Start
 
@@ -621,13 +622,23 @@ This creates `include/slwoggy.hpp` which includes the moodycamel library and all
                                                               └───────┬───────┘
                                                                       │
                           ┌───────────────────────────────────────────▼─────────┐
-                          │                 Worker Thread                       │
-                          │            (batch processing)                       │
+                          │              Dispatcher Worker Thread               │
+                          │         (batch dequeue + filter chains)             │
                           └───────────────────────────────────────────┬─────────┘
                                                                       │
                     ┌───────────────┬─────────────────────┬───────────▼────────┐
-                    │ Console Sink  │    File Sink        │   Custom Sink      │
-                    └───────────────┴─────────────────────┴────────────────────┘
+                    │ Console Sink  │  Rotating File Sink │   Custom Sink      │
+                    │               │  (with compression) │                    │
+                    └───────────────┴──────────┬──────────┴────────────────────┘
+                                               │
+                                               ▼
+                                    ┌─────────────────────┐
+                                    │  Rotation Service   │
+                                    │  (background thread)│
+                                    │  - Apply retention  │
+                                    │  - Gzip compression │
+                                    │  - ENOSPC handling  │
+                                    └─────────────────────┘
 ```
 
 ## Versioning
