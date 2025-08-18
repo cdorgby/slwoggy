@@ -15,12 +15,14 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
    - Bidirectional growth: text forward, metadata backward
    - Cache-line aligned to prevent false sharing
    - Automatic padding for multi-line logs
+   - Thread-local ProducerToken using unique_ptr for proper cleanup
 
 2. **buffer_pool** (`log_buffer.hpp`)
    - Pre-allocated pool of 32K buffers
    - Lock-free acquire/release using ConcurrentQueue
    - Singleton pattern with lazy initialization
    - Metrics tracking (optional)
+   - Thread-local ProducerToken to avoid memory leaks
 
 3. **log_line_dispatcher** (`log.hpp`)
    - Singleton managing async log processing
@@ -59,6 +61,16 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
    - Ultra-fast path for internal key lookups
    - Thread-local caching for user keys
    - Lock-free fast path, shared lock medium path
+
+9. **File Rotation Service** (`log_file_rotator.hpp`, `log_file_rotator_impl.hpp`)
+   - Singleton service with background thread for rotation operations
+   - Zero-gap rotation using atomic link+rename operations
+   - Comprehensive policies: size, time, or combined triggers
+   - Automatic ENOSPC handling with cleanup priority (.pending → .gz → raw)
+   - Retention management by count, age, and total size
+   - Optional gzip compression for rotated files
+   - Platform-specific sync (fdatasync/F_FULLFSYNC/_commit)
+   - Thread-safe rotation metrics with structured stats interface
 
 ## Key Design Decisions
 
@@ -161,6 +173,106 @@ The asynchronous nature requires careful test design:
    - Optimal memory barriers
    - Native I/O operations
 
+## File Rotation System
+
+### Architecture Overview
+
+The file rotation system consists of three main components:
+
+1. **rotation_handle**: Thread-safe handle managing file descriptors and rotation state
+2. **file_rotation_service**: Singleton service running background rotation thread
+3. **rotation_metrics**: Global metrics tracking rotation behavior
+
+### Key Implementation Details
+
+#### Zero-Gap Rotation
+The system achieves zero-gap rotation (no log loss) using:
+1. Pre-prepared next file descriptor before rotation
+2. Atomic FD swap in writer thread
+3. Link+rename for atomic file movement
+4. Fallback to simple rename if link fails
+
+#### ENOSPC Handling
+When disk space is exhausted, automatic cleanup occurs in priority order:
+1. Delete `.pending` files (incomplete compressions)
+2. Delete `.gz` files (compressed logs) 
+3. Delete oldest raw log files
+4. Track all deletions in metrics
+
+#### Time-Based Rotation
+Correctly handles:
+- Daily rotation at specified UTC time
+- Arbitrary intervals (seconds precision)
+- Next rotation time computation after each rotation
+- Clock adjustments and timezone considerations
+
+#### Thread Safety
+- Rotation handle uses atomics for all shared state
+- Service uses blocking queue for message passing
+- Metrics use relaxed atomics for counters
+- No locks in write path
+
+### Platform Compatibility
+
+#### File Sync Operations
+```cpp
+// Platform-specific implementation in log_file_rotator_impl.hpp
+#ifdef __APPLE__
+    fcntl(fd, F_FULLFSYNC);  // macOS full sync
+#elif defined(_WIN32)
+    _commit(fd);             // Windows commit
+#else
+    fdatasync(fd);           // Linux/POSIX data sync
+#endif
+```
+
+#### Error String Handling
+```cpp
+// GNU vs POSIX strerror_r compatibility
+#ifdef _GNU_SOURCE
+    // GNU version returns char*
+    return strerror_r(errno_val, buffer, sizeof(buffer));  
+#else
+    // POSIX version returns int
+    strerror_r(errno_val, buffer, sizeof(buffer));
+    return buffer;
+#endif
+```
+
+#### iovec Limits
+```cpp
+// Platform-specific limits for writev operations
+#ifdef UIO_MAXIOV
+    static constexpr size_t WRITER_MAX_IOV = UIO_MAXIOV;
+#elif defined(IOV_MAX)  
+    static constexpr size_t WRITER_MAX_IOV = IOV_MAX;
+#else
+    static constexpr size_t WRITER_MAX_IOV = 1024;
+#endif
+```
+
+### Testing Rotation Features
+
+```cpp
+// Example test for ENOSPC handling
+TEST_CASE("ENOSPC emergency cleanup") {
+    // Requires TEST_TMPFS_DIR environment variable
+    // pointing to a small tmpfs mount
+    const char* tmpfs = std::getenv("TEST_TMPFS_DIR");
+    if (!tmpfs) {
+        SKIP("TEST_TMPFS_DIR not set");
+    }
+    
+    rotate_policy policy;
+    policy.mode = rotate_policy::kind::size;
+    policy.max_bytes = 50 * 1024;  // 50KB files
+    policy.keep_files = 100;  // Try to keep many
+    
+    auto sink = make_raw_file_sink(tmpfs + "/test.log"s, policy);
+    // Write until ENOSPC triggers cleanup...
+}
+```
+
 ## Common Tasks
 
 ### Adding a New Formatter
@@ -213,6 +325,26 @@ log_line_dispatcher::instance().add_sink(
 );
 ```
 
+### Creating a Rotating File Sink
+
+```cpp
+using namespace slwoggy;
+
+// Configure rotation policy
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size_or_time;
+policy.max_bytes = 100 * 1024 * 1024;  // 100MB
+policy.every = std::chrono::hours(24);  // Daily
+policy.at = std::chrono::hours(3);      // At 3 AM UTC
+policy.keep_files = 30;                 // Keep 30 files
+policy.compress = true;                 // Gzip old files
+policy.sync_on_rotate = true;           // Ensure durability
+
+// Create sink with rotation
+auto sink = make_writev_file_sink("/var/log/app.log", policy);
+log_line_dispatcher::instance().add_sink(sink);
+```
+
 ## Build System
 
 ### Build Modes
@@ -225,10 +357,17 @@ log_line_dispatcher::instance().add_sink(
 ### Metric Flags
 
 Enable in Debug/Profile builds:
-- `LOG_COLLECT_BUFFER_POOL_METRICS`
-- `LOG_COLLECT_DISPATCHER_METRICS`
-- `LOG_COLLECT_STRUCTURED_METRICS`
-- `LOG_COLLECT_DISPATCHER_MSG_RATE`
+- `LOG_COLLECT_BUFFER_POOL_METRICS` - Buffer pool statistics
+- `LOG_COLLECT_DISPATCHER_METRICS` - Dispatcher batch/timing metrics
+- `LOG_COLLECT_STRUCTURED_METRICS` - Structured key registry metrics
+- `LOG_COLLECT_DISPATCHER_MSG_RATE` - Message rate tracking (1s/10s/60s)
+
+Rotation metrics are always collected (no compile flag needed):
+```cpp
+auto stats = rotation_metrics::instance().get_stats();
+std::cout << "Rotations: " << stats.total_rotations << "\n";
+std::cout << "ENOSPC cleanups: " << stats.enospc_raw_deleted << "\n";
+```
 
 ### Testing
 
@@ -242,9 +381,69 @@ cd build && make tests
 # Run specific test
 ./tests/test_log "[buffer_pool]"
 
+# Run rotation tests
+./tests/test_rotation
+
+# Test ENOSPC handling (requires tmpfs)
+# Create a 1MB tmpfs for testing:
+# Linux: sudo mount -t tmpfs -o size=1M tmpfs /tmp/test_tmpfs
+# macOS: diskutil erasevolume HFS+ 'test_tmpfs' `hdiutil attach -nomount ram://2048`
+TEST_TMPFS_DIR=/tmp/test_tmpfs ./tests/test_rotation "[enospc]"
+
 # With sanitizers
 ASAN_OPTIONS=detect_leaks=1 ./tests/test_log
 ```
+
+### Ubuntu Testing Checklist
+
+When testing on Ubuntu (or other Linux distributions):
+
+1. **Compiler Compatibility**
+   ```bash
+   # Ensure C++20 support
+   g++ --version  # Should be >= 10
+   clang++ --version  # Should be >= 12
+   ```
+
+2. **Build All Configurations**
+   ```bash
+   for config in Release Debug MemCheck Profile; do
+       cmake -B build-$config -DCMAKE_BUILD_TYPE=$config
+       cmake --build build-$config -j$(nproc)
+   done
+   ```
+
+3. **Run Test Suite**
+   ```bash
+   cd build-Release && ctest --verbose
+   cd ../build-Debug && ctest --verbose
+   ```
+
+4. **Platform-Specific Tests**
+   ```bash
+   # Test fdatasync availability
+   ./tests/test_rotation "[sync]"
+   
+   # Test iovec limits
+   ./tests/test_log "[writev]"
+   
+   # Test GNU strerror_r
+   ./tests/test_rotation "[error_handling]"
+   ```
+
+5. **Sanitizer Runs**
+   ```bash
+   cd build-MemCheck
+   ASAN_OPTIONS=detect_leaks=1:check_initialization_order=1 ./tests/all_tests
+   UBSAN_OPTIONS=print_stacktrace=1 ./tests/all_tests
+   ```
+
+6. **Performance Testing**
+   ```bash
+   cd build-Profile
+   ./bin/slwoggy -b  # Benchmark mode
+   ./bin/rotation_demo  # Should show 2 rotations, not 4000+
+   ```
 
 ## Debugging Tips
 
@@ -286,19 +485,26 @@ ASAN_OPTIONS=detect_leaks=1 ./tests/test_log
 - Sequential consistency for flush sync
 
 ### Platform Differences
-- macOS: `mach_absolute_time()`
-- Linux: `CLOCK_MONOTONIC_COARSE`
-- Windows: `GetTickCount64()`
+- macOS: `mach_absolute_time()`, F_FULLFSYNC for file sync
+- Linux: `CLOCK_MONOTONIC_COARSE`, fdatasync for file sync
+- Windows: `GetTickCount64()`, _commit for file sync
+- iovec limits: UIO_MAXIOV (Linux/macOS), IOV_MAX fallback, 1024 default
+- strerror_r: GNU vs POSIX variants handled via _GNU_SOURCE check
+
+## Recently Completed Features
+
+- **File Rotation**: Complete implementation with size/time policies
+- **Compression**: Automatic gzip compression for rotated files
+- **Filter Chains**: RCU-based filter system with examples
+- **Sampling/Rate Limiting**: Implemented as example filters
 
 ## Future Enhancements
 
 Potential areas for extension:
-- Log rotation in file sink
 - Network sinks (syslog, TCP)
-- Compression support
-- Filter chains
-- Sampling/rate limiting
 - Coroutine support
+- Remote configuration
+- Structured output formats (CBOR, MessagePack)
 
 ## Important Warnings
 
@@ -307,6 +513,9 @@ Potential areas for extension:
 3. **Sink Lifetime**: Sinks must outlive the dispatcher
 4. **Key Registry Limits**: Maximum 256 unique structured keys
 5. **Module Names**: Case-sensitive, no deduplication
+6. **Rotation Handle Lifetime**: Rotation handles must be properly closed
+7. **ENOSPC Handling**: Retention policies may be violated during disk exhaustion
+8. **Thread-Local Storage**: ProducerTokens use unique_ptr to prevent leaks
 
 ## Performance Characteristics
 

@@ -1,9 +1,11 @@
 {
-    "target": "../include/slwoggy.hpp",
+    "target": "../amalgamation/slwoggy.hpp",
     "sources": [
         "include/log.hpp"
     ],
     "include_paths": [
-        "include"
+        "include",
+        "third_party/fmt/include",
+        "third_party/taocpp-json/include"
     ]
 }
