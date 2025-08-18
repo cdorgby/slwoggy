@@ -405,6 +405,9 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
             if (exchanged)
             {
                 // Successfully claimed the slot - store metadata
+                // IMPORTANT: Set temp filename BEFORE setting ready flag
+                // The release-acquire synchronization with next_fd_ready_ ensures
+                // that readers will see both next_fd_ and next_temp_filename_
                 handle->next_temp_filename_ = temp_name;
                 handle->next_fd_ready_.store(true, std::memory_order_release);
                 handle->consecutive_failures_.store(0);
