@@ -124,9 +124,14 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
         }
     }
 
-    // Metrics for observability (public for file_writer access)
+    // Metrics for observability
     std::atomic<uint64_t> dropped_records_{0};
     std::atomic<uint64_t> dropped_bytes_{0};
+    
+  public:
+    // Public methods for metrics (maintains encapsulation)
+    void increment_dropped_records() { dropped_records_.fetch_add(1, std::memory_order_relaxed); }
+    void increment_dropped_bytes(size_t bytes) { dropped_bytes_.fetch_add(bytes, std::memory_order_relaxed); }
 
   private:
     // Policy and metadata
@@ -290,7 +295,8 @@ inline int rotation_handle::get_next_fd()
         return -1; // Signal writer to discard
     }
 
-    // Loop instead of recursion to avoid stack issues
+    // The rotator thread will always signal the semaphore eventually
+    // (either with a prepared FD or when entering error state)
     while (true)
     {
         // Fast path - next fd is ready

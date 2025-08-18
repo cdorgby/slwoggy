@@ -827,7 +827,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
 // Performance test (not run by default)
 TEST_CASE_METHOD(rotation_test_fixture, "Throughput with rotation", "[.][rotation][performance]")
 {
-    SECTION("2M msg/sec target")
+    SECTION("2M msg/sec target with variable message sizes")
     {
         rotate_policy policy;
         policy.mode      = rotate_policy::kind::size;
@@ -836,18 +836,41 @@ TEST_CASE_METHOD(rotation_test_fixture, "Throughput with rotation", "[.][rotatio
         file_writer writer(base_filename, policy);
 
         const size_t msg_count = 100'000;
-        const std::string msg(100, 'X'); // 100 byte messages
+        
+        // Realistic message size distribution
+        // Small (50%), medium (30%), large (20%)
+        const std::string small_msg(50, 'S');   // 50 bytes - debug/info logs
+        const std::string medium_msg(200, 'M'); // 200 bytes - typical logs with context
+        const std::string large_msg(500, 'L');  // 500 bytes - stack traces, errors
 
         auto start = std::chrono::steady_clock::now();
 
-        for (size_t i = 0; i < msg_count; ++i) { writer.write(msg.c_str(), msg.size()); }
+        for (size_t i = 0; i < msg_count; ++i) { 
+            // Simulate realistic message distribution
+            if (i % 10 < 5) {
+                // 50% small messages
+                writer.write(small_msg.c_str(), small_msg.size());
+            } else if (i % 10 < 8) {
+                // 30% medium messages
+                writer.write(medium_msg.c_str(), medium_msg.size());
+            } else {
+                // 20% large messages
+                writer.write(large_msg.c_str(), large_msg.size());
+            }
+        }
 
         auto end      = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
         double msgs_per_sec = (msg_count * 1'000'000.0) / duration.count();
+        
+        // Calculate average message size for reporting
+        size_t total_bytes = (msg_count * 0.5 * 50) + (msg_count * 0.3 * 200) + (msg_count * 0.2 * 500);
+        double avg_msg_size = total_bytes / static_cast<double>(msg_count);
 
         INFO("Throughput: " << msgs_per_sec << " msg/sec");
+        INFO("Average message size: " << avg_msg_size << " bytes");
+        INFO("Total data written: " << total_bytes / (1024.0 * 1024.0) << " MB");
 
         // Should maintain reasonable throughput even with rotation
         // Note: 2M msg/sec may not be achievable in test environment

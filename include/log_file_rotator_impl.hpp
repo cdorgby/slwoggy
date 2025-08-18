@@ -20,6 +20,7 @@ static constexpr int ROTATION_MAX_RETRIES = 10;
 static constexpr auto ROTATION_INITIAL_BACKOFF = std::chrono::milliseconds(1);
 static constexpr auto ROTATION_MAX_BACKOFF = std::chrono::seconds(1);
 static constexpr int ROTATION_LINK_ATTEMPTS = 3;
+static constexpr size_t MIN_TIMESTAMP_LENGTH = 19; // YYYYMMDD-HHMMSS-NNN minimum length
 
 // Helper function to convert filesystem time to system clock time
 // This is more robust than trying to calculate epoch differences
@@ -380,8 +381,14 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
         {
             // Use compare-and-swap to atomically check and set the FD
             // This prevents race conditions where multiple threads might prepare FDs
+            // Use weak version in case of spurious failures on some architectures
             int expected = -1;
-            if (handle->next_fd_.compare_exchange_strong(expected, new_fd, std::memory_order_acq_rel))
+            bool exchanged = false;
+            while (expected == -1 && !(exchanged = handle->next_fd_.compare_exchange_weak(expected, new_fd, std::memory_order_acq_rel))) {
+                // Retry on spurious failure (expected still -1)
+                // If expected changed, another thread set it, exit loop
+            }
+            if (exchanged)
             {
                 // Successfully claimed the slot - store metadata
                 handle->next_temp_filename_ = temp_name;
@@ -565,7 +572,7 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
                 std::string filename = entry.path().filename().string();
 
                 // Check if it matches our pattern
-                if (filename.starts_with(prefix) && filename.size() > prefix.size() + 19)
+                if (filename.starts_with(prefix) && filename.size() > prefix.size() + MIN_TIMESTAMP_LENGTH)
                 {
                     size_t date_pos = prefix.size();
                     size_t time_pos = date_pos + 9;

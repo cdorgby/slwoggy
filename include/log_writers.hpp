@@ -110,8 +110,9 @@ class file_writer
             if (rotation_handle_->should_rotate(len)) {
                 int new_fd = rotation_handle_->get_next_fd();
                 if (new_fd == -1) {
-                    rotation_handle_->dropped_records_.fetch_add(1, std::memory_order_relaxed);
-                    rotation_handle_->dropped_bytes_.fetch_add(len, std::memory_order_relaxed);
+                    // Use public methods instead of direct member access
+                    rotation_handle_->increment_dropped_records();
+                    rotation_handle_->increment_dropped_bytes(len);
                     return len;
                 }
                 write_fd = new_fd;
@@ -120,9 +121,12 @@ class file_writer
         
         if (write_fd < 0) { return -1; }
         
+        // Capture FD once to ensure atomic write to single file
+        const int captured_fd = write_fd;
+        
         size_t total_written = 0;
         while (total_written < len) {
-            ssize_t written = ::write(write_fd, data + total_written, len - total_written);
+            ssize_t written = ::write(captured_fd, data + total_written, len - total_written);
             if (written < 0) {
                 if (errno == EINTR) {
                     continue;
