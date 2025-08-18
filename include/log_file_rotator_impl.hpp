@@ -34,8 +34,20 @@ static constexpr size_t MIN_TIMESTAMP_LENGTH = 19; // YYYYMMDD-HHMMSS-NNN minimu
 // Thread-safe error string helper
 inline std::string get_error_string(int err) {
     char errbuf[256];
-    strerror_r(err, errbuf, sizeof(errbuf));
+    
+#ifdef _GNU_SOURCE
+    // GNU version returns char* which may or may not use the buffer
+    const char* msg = strerror_r(err, errbuf, sizeof(errbuf));
+    return std::string(msg);
+#else
+    // POSIX version returns int and always uses the buffer
+    int ret = strerror_r(err, errbuf, sizeof(errbuf));
+    if (ret != 0) {
+        // strerror_r failed, return a generic message
+        return "Unknown error " + std::to_string(err);
+    }
     return std::string(errbuf);
+#endif
 }
 
 // Helper function to convert filesystem time to system clock time
