@@ -12,7 +12,7 @@
 #include <array>
 #include <chrono>
 #include <atomic>
-#include <fmt/format.h>
+#include "fmt_config.hpp"
 #include <memory>
 #include <cassert>
 

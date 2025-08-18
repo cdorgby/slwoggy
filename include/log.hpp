@@ -313,7 +313,7 @@
 
 #include <cstring>
 #include <cstdlib>
-#include <fmt/format.h>
+#include "fmt_config.hpp"
 #include <memory>
 #include <sys/types.h>
 #include <unistd.h>

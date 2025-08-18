@@ -11,7 +11,7 @@
 #include <string>
 #include <algorithm>
 #include <chrono>
-#include <fmt/format.h>
+#include "fmt_config.hpp"
 
 namespace slwoggy
 {
