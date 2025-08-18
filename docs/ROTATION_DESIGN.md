@@ -66,7 +66,7 @@ struct rotate_policy {
     kind mode = kind::none;
 
     // size policy
-    uint64_t max_bytes = 0;        // e.g. 256_MB
+    uint64_t max_bytes = 0;        // e.g. 256 * 1024 * 1024 (256 MB)
 
     // time policy
     std::chrono::minutes every = std::chrono::minutes{0}; // 24h for daily
