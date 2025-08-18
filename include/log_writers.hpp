@@ -164,7 +164,34 @@ class writev_file_writer : public file_writer
     template <typename Formatter>
     size_t bulk_write(log_buffer_base **buffers, size_t count, const Formatter &formatter) const
     {
-        if (fd_ < 0 || count == 0) return 0;
+        // Determine which FD to use (with rotation support)
+        int write_fd = fd_;
+        size_t total_size = 0;
+        
+        // If rotation is enabled, check if we need to rotate
+        if (rotation_handle_) {
+            // Calculate total size first
+            for (size_t i = 0; i < count; ++i) {
+                if (!buffers[i]->filtered_ && buffers[i]->len() > 0) {
+                    total_size += buffers[i]->len();
+                }
+            }
+            
+            write_fd = rotation_handle_->get_current_fd();
+            
+            if (rotation_handle_->should_rotate(total_size)) {
+                int new_fd = rotation_handle_->get_next_fd();
+                if (new_fd == -1) {
+                    // In error state - drop the batch
+                    rotation_handle_->increment_dropped_records();
+                    rotation_handle_->increment_dropped_bytes(total_size);
+                    return count; // Pretend we processed them
+                }
+                write_fd = new_fd;
+            }
+        }
+        
+        if (write_fd < 0 || count == 0) return 0;
 
         // Build iovec array
         struct iovec iov[WRITER_MAX_IOV];
@@ -198,11 +225,16 @@ class writev_file_writer : public file_writer
 
         // Single syscall to write everything
         if (iov_count > 0) {
-            ssize_t written = writev(fd_, iov, iov_count);
+            ssize_t written = writev(write_fd, iov, iov_count);
             if (written < 0)
             {
                 perror("writev failed");
                 return 0;
+            }
+            
+            // Update bytes written for rotation tracking
+            if (rotation_handle_ && written > 0) {
+                rotation_handle_->add_bytes_written(written);
             }
         }
 
