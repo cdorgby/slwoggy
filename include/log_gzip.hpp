@@ -198,7 +198,7 @@ inline std::array<unsigned char, 10> create_gzip_header(uint32_t mtime)
          static_cast<unsigned char>((mtime >> 16) & 0xff),
          static_cast<unsigned char>((mtime >> 24) & 0xff),
          0x00, // Extra flags (0 for normal compression)
-            0xff  // OS (255 = unknown)
+            0x03  // OS (3 = Unix)
         }
     };
 }

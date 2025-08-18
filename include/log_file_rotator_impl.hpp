@@ -309,14 +309,14 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     sync_directory(base_path);
 
     // Step 4: Update cache with rotated file
-    try
+    struct stat st;
+    if (::stat(rotated_name.c_str(), &st) == 0)
     {
-        size_t file_size = fs::file_size(rotated_path);
-        add_to_cache(msg.handle.get(), rotated_name, file_size);
+        add_to_cache(msg.handle.get(), rotated_name, st.st_size);
     }
-    catch (const fs::filesystem_error &e)
+    else
     {
-        LOG(error) << "Failed to get file size for cache: " << e.what();
+        LOG(error) << "Failed to get file size for cache: " << get_error_string(errno);
     }
 
     // Step 5: Apply retention policies
@@ -638,8 +638,13 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
                         auto ftime = fs::last_write_time(entry);
                         auto sctp = filesystem_time_to_system_time(ftime);
 
-                        handle->rotated_files_cache_.push_back(
-                            {entry.path().string(), sctp, static_cast<size_t>(entry.file_size())});
+                        // Use stat to get file size to avoid exceptions
+                        struct stat st;
+                        if (::stat(entry.path().c_str(), &st) == 0)
+                        {
+                            handle->rotated_files_cache_.push_back(
+                                {entry.path().string(), sctp, static_cast<size_t>(st.st_size)});
+                        }
                     }
                 }
             }
@@ -736,21 +741,52 @@ inline void file_rotation_service::compress_file_sync(const std::string &filenam
         }
     }
     
-    // Sync directory for durability (optional, but good practice)
-    auto dir_path = std::filesystem::path(filename).parent_path();
-    sync_directory(dir_path);
+    // Sync directory for durability after rename
+    sync_directory(filename);
     
     // Successfully compressed - delete the original uncompressed file
     if (::unlink(filename.c_str()) != 0) {
         LOG(warn) << "Failed to delete original file after compression: " << filename;
     }
     
+    // Sync directory again after unlink to ensure deletion is durable
+    sync_directory(filename);
+    
+    // Update cache entry to reflect the compressed file
+    update_cache_entry(filename, gz_final);
+    
     LOG(debug) << "Successfully compressed " << filename << " to " << gz_final;
 }
 
 inline void file_rotation_service::update_cache_entry(const std::string &old_name, const std::string &new_name)
 {
-    // TODO: Implement cache update during compression
+    // Find the handle that owns this file
+    std::lock_guard<std::mutex> lock(handles_mutex_);
+    for (auto &weak_handle : handles_)
+    {
+        if (auto handle = weak_handle.lock())
+        {
+            std::lock_guard<std::mutex> cache_lock(handle->cache_mutex_);
+            auto &files = handle->rotated_files_cache_;
+            
+            // Find and update the cache entry
+            for (auto &entry : files)
+            {
+                if (entry.filename == old_name)
+                {
+                    // Get the new file size
+                    struct stat st;
+                    if (::stat(new_name.c_str(), &st) == 0)
+                    {
+                        entry.filename = new_name;
+                        entry.size = st.st_size;
+                        // Keep the same timestamp (it's the logical rotation time, not file mtime)
+                    }
+                    return;
+                }
+            }
+        }
+    }
 }
 
 inline void file_rotation_service::cleanup_expired_handles()

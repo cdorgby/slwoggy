@@ -262,7 +262,7 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
 
     bool should_rotate_size(size_t next_write_size) const
     {
-        return (bytes_written_.load() + next_write_size) > policy_.max_bytes;
+        return (bytes_written_.load() + next_write_size) >= policy_.max_bytes;
     }
 
   public:
