@@ -230,7 +230,9 @@ class writev_file_writer : public file_writer
             if (written < 0)
             {
                 perror("writev failed");
-                return 0;
+                // Still return processed count - we "handled" them even if write failed
+                // This maintains consistency with dispatcher expectations
+                return processed;
             }
             
             // Update bytes written for rotation tracking
@@ -240,6 +242,7 @@ class writev_file_writer : public file_writer
         }
 
         // Return count of non-filtered buffers we processed
+        // (includes both successfully written and failed-to-write)
         return processed;
     }
 };
