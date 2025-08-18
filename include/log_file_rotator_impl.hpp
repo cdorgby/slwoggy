@@ -22,6 +22,13 @@ static constexpr auto ROTATION_MAX_BACKOFF = std::chrono::seconds(1);
 static constexpr int ROTATION_LINK_ATTEMPTS = 3;
 static constexpr size_t MIN_TIMESTAMP_LENGTH = 19; // YYYYMMDD-HHMMSS-NNN minimum length
 
+// Thread-safe error string helper
+inline std::string get_error_string(int err) {
+    char errbuf[256];
+    strerror_r(err, errbuf, sizeof(errbuf));
+    return std::string(errbuf);
+}
+
 // Helper function to convert filesystem time to system clock time
 // This is more robust than trying to calculate epoch differences
 inline std::chrono::system_clock::time_point 
@@ -153,7 +160,7 @@ inline bool file_rotation_service::perform_zero_gap_rotation(
             // Atomically replace current with temp (NO GAP!)
             if (rename(temp_filename.c_str(), base_path.c_str()) != 0)
             {
-                LOG(error) << "Failed to rename temp to base: " << strerror(errno);
+                LOG(error) << "Failed to rename temp to base: " << get_error_string(errno);
             }
             return true;
         }
@@ -176,7 +183,7 @@ inline bool file_rotation_service::perform_zero_gap_rotation(
     
     // Fall back to two-rename sequence
     rotation_metrics::instance().zero_gap_fallback_total.fetch_add(1);
-    LOG(warn) << "Hard link failed, using fallback rotation with gap: " << strerror(errno);
+    LOG(warn) << "Hard link failed, using fallback rotation with gap: " << get_error_string(errno);
     
     if (rename(base_path.c_str(), rotated_path.c_str()) == 0)
     {
@@ -428,7 +435,7 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
         }
 
         // Failed - log and retry with backoff
-        LOG(error) << "Failed to open rotation file " << temp_name << ": " << strerror(errno) << " (retry "
+        LOG(error) << "Failed to open rotation file " << temp_name << ": " << get_error_string(errno) << " (retry "
                    << retry_count + 1 << "/" << ROTATION_MAX_RETRIES << ")";
 
         retry_count++;
@@ -685,7 +692,9 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
 
     // Open initial fd
     int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
-    if (fd < 0) { throw std::runtime_error("Failed to open: " + filename + " - " + strerror(errno)); }
+    if (fd < 0) { 
+        throw std::runtime_error("Failed to open: " + filename + " - " + get_error_string(errno)); 
+    }
     handle->current_fd_.store(fd);
     
     // Get the current file size to properly handle existing files
