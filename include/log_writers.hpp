@@ -64,19 +64,20 @@ class file_writer
     {
         if (this != &other)
         {
-            if (rotation_handle_) {
-                rotation_handle_->close();
-            } else if (close_fd_ && fd_ >= 0) { 
+            // Only close our own non-shared FD
+            // Don't close rotation handles - they're shared!
+            if (!rotation_handle_ && close_fd_ && fd_ >= 0) { 
                 close(fd_); 
             }
 
             filename_ = other.filename_;
             close_fd_ = other.close_fd_;
             policy_ = other.policy_;
-            rotation_handle_ = other.rotation_handle_;
+            rotation_handle_ = other.rotation_handle_;  // Just share the handle
 
             if (rotation_handle_) {
                 close_fd_ = false;
+                fd_ = -1;  // Clear fd_ since we're using rotation_handle_
             }
             else if (other.fd_ >= 0 && other.close_fd_)
             {
