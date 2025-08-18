@@ -13,6 +13,9 @@ A header-only C++20 logging library featuring asynchronous processing, structure
 - **Type-Erased Sinks**: Output handling using type erasure with small buffer optimization
 - **Platform-Specific Timestamps**: Uses platform APIs for timestamp generation
 - **Adaptive Batching**: Three-phase batching algorithm that adapts to workload patterns
+- **File Rotation**: Comprehensive rotation with size/time policies, compression, and retention management
+- **Zero-Gap Rotation**: Atomic operations ensure no log loss during rotation
+- **ENOSPC Handling**: Automatic cleanup when disk space is exhausted
 
 ## Quick Start
 
@@ -293,6 +296,139 @@ auto file_sink = log_sink{
 // Add sinks
 auto& dispatcher = log_line_dispatcher::instance();
 dispatcher.add_sink(std::make_shared<log_sink>(std::move(json_sink)));
+```
+
+## File Rotation
+
+slwoggy provides comprehensive file rotation support with size-based, time-based, and combined rotation policies.
+
+### Basic Rotation
+
+```cpp
+#include "log.hpp"
+#include "log_file_rotator.hpp"
+
+using namespace slwoggy;
+
+// Size-based rotation: rotate when file reaches 100MB
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size;
+policy.max_bytes = 100 * 1024 * 1024;  // 100MB
+policy.keep_files = 10;  // Keep last 10 rotated files
+
+auto sink = make_raw_file_sink("/var/log/app.log", policy);
+log_line_dispatcher::instance().add_sink(sink);
+```
+
+### Time-Based Rotation
+
+```cpp
+// Daily rotation at midnight
+rotate_policy policy;
+policy.mode = rotate_policy::kind::time;
+policy.every = std::chrono::hours(24);  // Rotate daily
+policy.at = std::chrono::hours(0);      // At midnight UTC
+policy.keep_files = 30;                 // Keep 30 days of logs
+```
+
+### Combined Rotation
+
+```cpp
+// Rotate on size OR time, whichever comes first
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size_or_time;
+policy.max_bytes = 50 * 1024 * 1024;    // 50MB
+policy.every = std::chrono::hours(24);   // Or daily
+policy.keep_files = 14;                  // Keep 2 weeks
+```
+
+### Rotation Policy Options
+
+```cpp
+struct rotate_policy {
+    enum class kind {
+        none,           // No rotation (default)
+        size,           // Rotate by size only
+        time,           // Rotate by time only
+        size_or_time    // Rotate on size OR time
+    };
+    
+    kind mode = kind::none;
+    
+    // Size policy
+    uint64_t max_bytes = 0;              // Max file size before rotation
+    
+    // Time policy (using std::chrono::seconds for flexibility)
+    std::chrono::seconds every{0};       // Rotation interval
+    std::chrono::seconds at{0};          // Time of day for daily rotation
+    
+    // Retention policies (applied in order of precedence)
+    int keep_files = 5;                  // Number of files to keep
+    std::chrono::seconds max_age{0};     // Delete files older than this
+    uint64_t max_total_bytes = 0;        // Total size limit for all logs
+    
+    // Post-rotation actions
+    bool compress = false;                // Compress rotated files (.gz)
+    bool sync_on_rotate = false;         // fsync before rotation
+    
+    // Error handling
+    int max_retries = 10;                // Retry attempts on failure
+};
+```
+
+### Advanced Features
+
+#### Zero-Gap Rotation
+The rotation system uses atomic link+rename operations to ensure no log messages are lost during rotation, even under high load.
+
+#### ENOSPC Handling
+When disk space is exhausted, the system automatically:
+1. Deletes `.pending` files first (incomplete compressions)
+2. Then deletes `.gz` files (compressed logs)
+3. Finally deletes oldest raw log files
+4. Tracks all deletions in metrics for monitoring
+
+#### Compression
+Rotated files can be automatically compressed using gzip:
+```cpp
+policy.compress = true;  // Creates .gz files after rotation
+```
+
+#### Retention Management
+Multiple retention strategies can be combined:
+```cpp
+policy.keep_files = 10;                          // Keep max 10 files
+policy.max_total_bytes = 1024 * 1024 * 1024;    // Max 1GB total
+policy.max_age = std::chrono::hours(24 * 30);   // Delete after 30 days
+```
+
+### Rotation Metrics
+
+Monitor rotation behavior with built-in metrics:
+```cpp
+auto stats = rotation_metrics::instance().get_stats();
+std::cout << "Total rotations: " << stats.total_rotations << "\n";
+std::cout << "Avg rotation time: " << stats.avg_rotation_time_us << " μs\n";
+std::cout << "ENOSPC cleanups: " << stats.enospc_raw_deleted << " files\n";
+```
+
+### Example: Production Configuration
+
+```cpp
+// Production setup with comprehensive policies
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size_or_time;
+policy.max_bytes = 256 * 1024 * 1024;           // 256MB per file
+policy.every = std::chrono::hours(24);          // Daily rotation
+policy.at = std::chrono::hours(3);              // At 3 AM UTC
+policy.keep_files = 30;                         // Keep 30 files
+policy.max_total_bytes = 10L * 1024 * 1024 * 1024; // Max 10GB total
+policy.max_age = std::chrono::hours(24 * 90);   // Delete after 90 days
+policy.compress = true;                         // Compress old files
+policy.sync_on_rotate = true;                   // Ensure durability
+
+auto sink = make_writev_file_sink("/var/log/production.log", policy);
+log_line_dispatcher::instance().add_sink(sink);
 ```
 
 ## Performance Tuning
