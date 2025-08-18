@@ -8,9 +8,11 @@
 #include <string.h>
 
 // Platform-specific sync implementation
-// macOS doesn't have fdatasync, but F_FULLFSYNC is more reliable than fsync
 inline int log_fdatasync(int fd) {
-#ifdef __APPLE__
+#ifdef _WIN32
+    // Windows: use _commit to flush file buffers
+    return ::_commit(fd);
+#elif defined(__APPLE__)
     // On macOS, fsync doesn't guarantee durability to disk
     // F_FULLFSYNC forces all buffered data to permanent storage
     return ::fcntl(fd, F_FULLFSYNC);
@@ -23,6 +25,11 @@ inline int log_fdatasync(int fd) {
 
 namespace slwoggy
 {
+
+#ifdef _WIN32
+// Windows doesn't support file rotation yet
+#warning "File rotation is not supported on Windows"
+#endif
 
 // Constants for rotation service
 static constexpr int ROTATION_MAX_RETRIES = 10;
@@ -87,9 +94,12 @@ inline void rotation_metrics::dump_metrics() const
     LOG(info) << "Rotation Metrics:";
     LOG(info) << "  Dropped: " << dropped_records_total.load() << " records, " << dropped_bytes_total.load() << " bytes";
     LOG(info) << "  Rotations: " << rotations_total.load() << " total";
-    if (rotation_duration_us_count > 0)
+    
+    auto count = rotation_duration_us_count.load();
+    if (count > 0)
     {
-        auto avg_us = rotation_duration_us_sum / rotation_duration_us_count;
+        auto sum = rotation_duration_us_sum.load();
+        auto avg_us = sum / count;
         LOG(info) << "  Avg rotation time: " << avg_us << " us";
     }
     LOG(info) << "  ENOSPC deletions: pending=" << enospc_deletions_pending.load() << " gz=" << enospc_deletions_gz.load()
@@ -536,7 +546,9 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     // Try deleting .pending files first
     for (size_t i = 0; i < files.size(); ++i)
     {
-        if (files[i].filename.find(".pending") != std::string::npos)
+        // Check for proper suffix to avoid false positives
+        const auto& fname = files[i].filename;
+        if (fname.size() >= 8 && fname.substr(fname.size() - 8) == ".pending")
         {
             LOG(info) << "ENOSPC: Deleting pending file: " << files[i].filename;
             metrics.enospc_deletions_pending.fetch_add(1);
@@ -550,7 +562,9 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     // Then try .gz files
     for (size_t i = 0; i < files.size(); ++i)
     {
-        if (files[i].filename.find(".gz") != std::string::npos)
+        // Check for proper suffix to avoid false positives
+        const auto& fname = files[i].filename;
+        if (fname.size() >= 3 && fname.substr(fname.size() - 3) == ".gz")
         {
             LOG(info) << "ENOSPC: Deleting compressed file: " << files[i].filename;
             metrics.enospc_deletions_gz.fetch_add(1);

@@ -11,10 +11,17 @@
 #include <cstring>
 #include <stdexcept>
 #include <memory>
+
+#ifndef _WIN32
 #include <unistd.h> // For write() and STDOUT_FILENO
 #include <fcntl.h>
 #include <sys/uio.h> // For writev
 #include <errno.h>
+#include <limits.h> // For IOV_MAX on some systems
+#else
+#include <io.h>
+#include <windows.h>
+#endif
 
 #include "log_buffer.hpp"
 #include "log_file_rotator.hpp"
@@ -153,7 +160,14 @@ class file_writer
 };
 
 // Constants for writer configuration
-static constexpr size_t WRITER_MAX_IOV = 1024;  // Maximum iovec entries for writev
+// Use platform-specific limit for iovec count to avoid EINVAL
+#ifdef UIO_MAXIOV
+static constexpr size_t WRITER_MAX_IOV = static_cast<size_t>(UIO_MAXIOV);
+#elif defined(IOV_MAX)
+static constexpr size_t WRITER_MAX_IOV = static_cast<size_t>(IOV_MAX);
+#else
+static constexpr size_t WRITER_MAX_IOV = 1024;  // Conservative default
+#endif
 
 // High-performance writer using writev for zero-copy bulk writes
 class writev_file_writer : public file_writer

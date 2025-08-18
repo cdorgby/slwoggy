@@ -8,10 +8,16 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#else
+#include <io.h>
+#include <windows.h>
+#endif
 
 #include "moodycamel/concurrentqueue.h"
 #include "moodycamel/blockingconcurrentqueue.h"
