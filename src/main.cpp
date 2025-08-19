@@ -284,14 +284,14 @@ int main(int argc, char *argv[])
             std::cerr << "  Total buffer usage:\n";
             std::cerr << "    Min: " << pool_stats.total_usage.min_bytes << " bytes ("
                       << std::fixed << std::setprecision(1) 
-                      << (pool_stats.total_usage.min_bytes * 100.0 / buffer_pool::BUFFER_SIZE) << "%)\n";
+                      << (pool_stats.total_usage.min_bytes * 100.0 / LOG_BUFFER_SIZE) << "%)\n";
             std::cerr << "    Max: " << pool_stats.total_usage.max_bytes << " bytes ("
                       << std::fixed << std::setprecision(1) 
-                      << (pool_stats.total_usage.max_bytes * 100.0 / buffer_pool::BUFFER_SIZE) << "%)\n";
+                      << (pool_stats.total_usage.max_bytes * 100.0 / LOG_BUFFER_SIZE) << "%)\n";
             std::cerr << "    Avg: " << std::fixed << std::setprecision(1) 
                       << pool_stats.total_usage.avg_bytes << " bytes ("
                       << std::fixed << std::setprecision(1) 
-                      << (pool_stats.total_usage.avg_bytes * 100.0 / buffer_pool::BUFFER_SIZE) << "%)\n";
+                      << (pool_stats.total_usage.avg_bytes * 100.0 / LOG_BUFFER_SIZE) << "%)\n";
             std::cerr << "    Samples: " << pool_stats.total_usage.sample_count << "\n";
         }
         std::cerr << "=========================================\n";

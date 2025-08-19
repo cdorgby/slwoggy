@@ -12,7 +12,7 @@
 #include <array>
 #include <chrono>
 #include <atomic>
-#include "fmt_config.hpp"
+#include "fmt_config.hpp" // IWYU pragma: keep
 #include <memory>
 #include <cassert>
 
@@ -489,9 +489,10 @@ struct alignas(CACHE_LINE_SIZE) log_buffer final
 // Buffer pool singleton class
 class buffer_pool
 {
+    friend class log_buffer_base; // Allow log_buffer_base to call private release()
+
   public:
     // Public constant for buffer size so tests can reference it
-    static constexpr size_t BUFFER_SIZE = 2048;
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
     /**
      * @brief Buffer pool statistics for monitoring and diagnostics
@@ -524,40 +525,6 @@ class buffer_pool
 #endif
 
   private:
-    using buffer_type = log_buffer<BUFFER_SIZE>;
-    
-    std::unique_ptr<buffer_type[]> buffer_storage_;
-#ifdef LOG_RELIABLE_DELIVERY
-    moodycamel::BlockingConcurrentQueue<log_buffer_base *> available_buffers_;
-#else
-    moodycamel::ConcurrentQueue<log_buffer_base *> available_buffers_;
-#endif
-
-    std::atomic<uint64_t> pending_failure_report_{0}; // For dispatcher notification
-#ifdef LOG_COLLECT_BUFFER_POOL_METRICS
-    std::atomic<uint64_t> acquire_failures_{0}; // For statistics
-    // Statistics tracking
-    std::atomic<uint64_t> total_acquires_{0};
-    std::atomic<uint64_t> total_releases_{0};
-    std::atomic<uint64_t> buffers_in_use_{0};
-    std::atomic<uint64_t> high_water_mark_{0};
-
-    // Area usage tracking - using atomics for lock-free updates
-    std::atomic<uint64_t> metadata_total_bytes_{0};
-    std::atomic<uint64_t> metadata_min_bytes_{UINT64_MAX};
-    std::atomic<uint64_t> metadata_max_bytes_{0};
-
-    std::atomic<uint64_t> text_total_bytes_{0};
-    std::atomic<uint64_t> text_min_bytes_{UINT64_MAX};
-    std::atomic<uint64_t> text_max_bytes_{0};
-
-    std::atomic<uint64_t> total_bytes_used_{0};
-    std::atomic<uint64_t> total_min_bytes_{UINT64_MAX};
-    std::atomic<uint64_t> total_max_bytes_{0};
-
-    std::atomic<uint64_t> usage_samples_{0};
-#endif
-
     buffer_pool()
     {
         buffer_storage_ = std::make_unique<buffer_type[]>(BUFFER_POOL_SIZE);
@@ -583,7 +550,7 @@ class buffer_pool
 
         // Use thread-local consumer token for better performance
         thread_local moodycamel::ConsumerToken consumer_token(available_buffers_);
-        
+
         log_buffer_base *buffer = nullptr;
 #ifdef LOG_RELIABLE_DELIVERY
         available_buffers_.wait_dequeue(consumer_token, buffer);
@@ -620,44 +587,19 @@ class buffer_pool
         return buffer;
     }
 
-    void release(log_buffer_base *buffer)
-    {
-        if (buffer)
-        {
-#ifdef LOG_COLLECT_BUFFER_POOL_METRICS
-            total_releases_.fetch_add(1, std::memory_order_relaxed);
-            buffers_in_use_.fetch_sub(1, std::memory_order_relaxed);
-#endif
-            // Thread-local producer token for better performance
-            // Using unique_ptr ensures proper cleanup when threads terminate
-            thread_local std::unique_ptr<moodycamel::ProducerToken> producer_token;
-            if (!producer_token) {
-                producer_token = std::make_unique<moodycamel::ProducerToken>(available_buffers_);
-            }
-            available_buffers_.enqueue(*producer_token, buffer);
-        }
-    }
-
     /**
      * @brief Get count of pending failures to report
      * @return Current count of unreported acquire failures
      */
-    uint64_t get_pending_failures() const
-    {
-        return pending_failure_report_.load(std::memory_order_relaxed);
-    }
+    uint64_t get_pending_failures() const { return pending_failure_report_.load(std::memory_order_relaxed); }
 
     /**
      * @brief Reset pending failure count after successful reporting
      */
-    void reset_pending_failures()
-    {
-        pending_failure_report_.store(0, std::memory_order_relaxed);
-    }
+    void reset_pending_failures() { pending_failure_report_.store(0, std::memory_order_relaxed); }
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
 
-  public:
     /**
      * @brief Track buffer usage statistics
      * @param buffer Buffer being released back to pool
@@ -720,7 +662,6 @@ class buffer_pool
         }
     }
 
-  public:
     /**
      * @brief Get current buffer pool statistics
      * @return Statistics snapshot
@@ -735,7 +676,7 @@ class buffer_pool
         s.acquire_failures  = acquire_failures_.load(std::memory_order_relaxed);
         s.total_releases    = total_releases_.load(std::memory_order_relaxed);
         s.usage_percent     = (s.in_use_buffers * 100.0f) / s.total_buffers;
-        s.pool_memory_kb    = (s.total_buffers * BUFFER_SIZE) / 1024;
+        s.pool_memory_kb    = (s.total_buffers * LOG_BUFFER_SIZE) / 1024;
         s.high_water_mark   = high_water_mark_.load(std::memory_order_relaxed);
 
         // Populate area usage stats
@@ -797,6 +738,64 @@ class buffer_pool
         usage_samples_.store(0, std::memory_order_relaxed);
     }
 #endif
+
+  private:
+    using buffer_type = log_buffer<LOG_BUFFER_SIZE>;
+
+    std::unique_ptr<buffer_type[]> buffer_storage_;
+#ifdef LOG_RELIABLE_DELIVERY
+    moodycamel::BlockingConcurrentQueue<log_buffer_base *> available_buffers_;
+#else
+    moodycamel::ConcurrentQueue<log_buffer_base *> available_buffers_;
+#endif
+
+    std::atomic<uint64_t> pending_failure_report_{0}; // For dispatcher notification
+#ifdef LOG_COLLECT_BUFFER_POOL_METRICS
+    std::atomic<uint64_t> acquire_failures_{0}; // For statistics
+    // Statistics tracking
+    std::atomic<uint64_t> total_acquires_{0};
+    std::atomic<uint64_t> total_releases_{0};
+    std::atomic<uint64_t> buffers_in_use_{0};
+    std::atomic<uint64_t> high_water_mark_{0};
+
+    // Area usage tracking - using atomics for lock-free updates
+    std::atomic<uint64_t> metadata_total_bytes_{0};
+    std::atomic<uint64_t> metadata_min_bytes_{UINT64_MAX};
+    std::atomic<uint64_t> metadata_max_bytes_{0};
+
+    std::atomic<uint64_t> text_total_bytes_{0};
+    std::atomic<uint64_t> text_min_bytes_{UINT64_MAX};
+    std::atomic<uint64_t> text_max_bytes_{0};
+
+    std::atomic<uint64_t> total_bytes_used_{0};
+    std::atomic<uint64_t> total_min_bytes_{UINT64_MAX};
+    std::atomic<uint64_t> total_max_bytes_{0};
+
+    std::atomic<uint64_t> usage_samples_{0};
+#endif
+
+    /**
+     * @brief Return a buffer to the pool.
+     *
+     * This method is private and intended for internal use by buffer_pool only.
+     * External callers should not call this directly; instead, use buffer->release().
+     * This ensures proper reference counting and buffer lifecycle management.
+     */
+    void release(log_buffer_base *buffer)
+    {
+        if (buffer)
+        {
+#ifdef LOG_COLLECT_BUFFER_POOL_METRICS
+            total_releases_.fetch_add(1, std::memory_order_relaxed);
+            buffers_in_use_.fetch_sub(1, std::memory_order_relaxed);
+#endif
+            // Thread-local producer token for better performance
+            // Using unique_ptr ensures proper cleanup when threads terminate
+            thread_local std::unique_ptr<moodycamel::ProducerToken> producer_token;
+            if (!producer_token) { producer_token = std::make_unique<moodycamel::ProducerToken>(available_buffers_); }
+            available_buffers_.enqueue(*producer_token, buffer);
+        }
+    }
 };
 
 inline void log_buffer_base::release()

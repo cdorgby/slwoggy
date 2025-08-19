@@ -36,10 +36,6 @@ public:
         size_t format(const log_buffer_base* buffer, char* output, size_t size) const {
             if (!buffer) return 0;
 
-            fprintf(stderr, "Captured log: %s\n", buffer->get_text().data());
-
-            const_cast<log_buffer_base*>(buffer)->add_ref();
-
             captured_log entry;
             entry.level = buffer->level_;
             entry.file = std::string(buffer->file_);
@@ -61,11 +57,9 @@ public:
             {
                 std::lock_guard<std::mutex> lock(parent_->mutex);
                 parent_->logs.push_back(std::move(entry));
-                fprintf(stderr, "Added log entry, count now: %zu\n", parent_->logs.size());
             }
             parent_->cv.notify_all();
 
-            const_cast<log_buffer_base*>(buffer)->release();
             return 0;
         }
     };
@@ -261,7 +255,7 @@ TEST_CASE("Metadata adapter", "[structured]") {
     SECTION("Metadata size limits") {
         // Try to add data that would collide with text area
         // Fill text area to leave minimal space
-        std::string text(buffer_pool::BUFFER_SIZE - 100, 'x');
+        std::string text(LOG_BUFFER_SIZE - 100, 'x');
         buffer->write_raw(text);
         
         // Now try to add metadata that won't fit

@@ -32,12 +32,8 @@ namespace slwoggy
 #warning "File rotation is not supported on Windows"
 #endif
 
-// Constants for rotation service
-static constexpr int ROTATION_MAX_RETRIES = 10;
-static constexpr auto ROTATION_INITIAL_BACKOFF = std::chrono::milliseconds(1);
-static constexpr auto ROTATION_MAX_BACKOFF = std::chrono::seconds(1);
-static constexpr int ROTATION_LINK_ATTEMPTS = 3;
-static constexpr size_t MIN_TIMESTAMP_LENGTH = 19; // YYYYMMDD-HHMMSS-NNN minimum length
+// Internal constants (not user-tunable)
+static constexpr size_t MIN_TIMESTAMP_LENGTH = 19; // YYYYMMDD-HHMMSS-NNN minimum length for parsing
 
 // Thread-safe error string helper
 inline std::string get_error_string(int err) {

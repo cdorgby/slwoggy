@@ -16,7 +16,7 @@ namespace slwoggy
 // Stack-allocated buffer for critical messages when pool is exhausted
 struct stack_buffer : public log_buffer_base
 {
-    alignas(CACHE_LINE_SIZE) char storage[buffer_pool::BUFFER_SIZE];
+    alignas(CACHE_LINE_SIZE) char storage[LOG_BUFFER_SIZE];
     stack_buffer(bool human_readable) : log_buffer_base(storage, sizeof(storage))
     {
         reset();

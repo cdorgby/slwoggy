@@ -9,10 +9,11 @@
 #include <cstdint>
 #include <string_view>
 #include <chrono>
-#include "fmt_config.hpp"
 #include <utility>
 #include <memory>
 #include <span>
+
+#include "fmt_config.hpp" // IWYU pragma: keep
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
