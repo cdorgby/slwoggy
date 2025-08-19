@@ -388,9 +388,9 @@ class file_rotation_service
     void apply_retention_timestamped(rotation_handle *handle);
     void add_to_cache(rotation_handle *handle, const std::string &filename, size_t size);
     void initialize_cache(rotation_handle *handle);
-    void update_cache_entry(const std::string &old_name, const std::string &new_name);
+    void update_cache_entry(const std::string &old_name, const std::string &new_name, rotation_handle* handle);
 
-    void compress_file_sync(const std::string &filename);
+    void compress_file_sync(const std::string &filename, rotation_handle* handle);
     void cleanup_expired_handles();
 
   public:

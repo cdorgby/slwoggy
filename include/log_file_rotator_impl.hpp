@@ -322,7 +322,7 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     if (msg.handle->policy_.compress) 
     { 
         // Note: compress_file_sync is thread-safe and designed to be called from the rotator thread
-        compress_file_sync(rotated_name); 
+        compress_file_sync(rotated_name, msg.handle.get()); 
     }
 
     // Step 7: Update next rotation time for time-based policies
@@ -352,24 +352,33 @@ inline std::string file_rotation_service::generate_rotated_filename(const std::s
     struct tm tm_utc;
     gmtime_r(&time_t, &tm_utc);
 
-    // Format: base-YYYYMMDD-HHMMSS-NNN.log
+    // Format: base-YYYYMMDD-HHMMSS-NNN.ext
     std::ostringstream timestamp;
     timestamp << std::setfill('0') << "-" << std::setw(4) << (tm_utc.tm_year + 1900) << std::setw(2)
               << (tm_utc.tm_mon + 1) << std::setw(2) << tm_utc.tm_mday << "-" << std::setw(2) << tm_utc.tm_hour
               << std::setw(2) << tm_utc.tm_min << std::setw(2) << tm_utc.tm_sec;
 
-    // Remove .log extension if present
-    std::string base_no_ext = base;
-    if (base_no_ext.size() > 4 && base_no_ext.substr(base_no_ext.size() - 4) == ".log")
-    {
-        base_no_ext = base_no_ext.substr(0, base_no_ext.size() - 4);
+    // Split base into directory, stem and extension
+    namespace fs = std::filesystem;
+    fs::path base_path(base);
+    fs::path dir = base_path.parent_path();
+    std::string stem = base_path.stem().string();
+    std::string ext = base_path.extension().string();
+    
+    // If no extension or extension is not a typical log extension, use .log
+    if (ext.empty() || (ext != ".log" && ext != ".txt")) {
+        ext = ".log";
     }
 
     // Retry on filename collision
     for (int seq = 1; seq < 10000; ++seq)
     {
         std::ostringstream final_name;
-        final_name << base_no_ext << timestamp.str() << "-" << std::setfill('0') << std::setw(3) << seq << ".log";
+        if (!dir.empty()) {
+            final_name << dir.string() << "/" << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(3) << seq << ext;
+        } else {
+            final_name << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(3) << seq << ext;
+        }
 
         struct stat st;
         if (stat(final_name.str().c_str(), &st) != 0 && errno == ENOENT)
@@ -382,7 +391,11 @@ inline std::string file_rotation_service::generate_rotated_filename(const std::s
     // Fallback: add microseconds for uniqueness
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count() % 1000000;
     std::ostringstream final_name;
-    final_name << base_no_ext << timestamp.str() << "-" << std::setfill('0') << std::setw(6) << us << ".log";
+    if (!dir.empty()) {
+        final_name << dir.string() << "/" << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(6) << us << ext;
+    } else {
+        final_name << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(6) << us << ext;
+    }
     return final_name.str();
 }
 
@@ -609,8 +622,9 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
     fs::path dir = base_path.parent_path();
     if (dir.empty()) dir = ".";
     std::string base_stem = base_path.stem().string();
+    std::string ext = base_path.extension().string();
 
-    // Format: base_stem-YYYYMMDD-HHMMSS-NNN.log[.gz|.pending]
+    // Format: base_stem-YYYYMMDD-HHMMSS-NNN.ext[.gz|.pending]
     std::string prefix = base_stem + "-";
 
     try
@@ -627,8 +641,21 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
                     size_t date_pos = prefix.size();
                     size_t time_pos = date_pos + 9;
 
-                    if (filename.size() > time_pos + 6 && filename[date_pos + 8] == '-' && filename[time_pos + 6] == '-' &&
-                        (filename.ends_with(".log") || filename.ends_with(".log.gz") || filename.ends_with(".log.pending")))
+                    // Check for the expected extensions
+                    bool matches = false;
+                    if (!ext.empty()) {
+                        // If original file had extension, look for that extension
+                        matches = filename.ends_with(ext) || 
+                                 filename.ends_with(ext + ".gz") || 
+                                 filename.ends_with(ext + ".pending");
+                    } else {
+                        // If no extension, default to .log
+                        matches = filename.ends_with(".log") || 
+                                 filename.ends_with(".log.gz") || 
+                                 filename.ends_with(".log.pending");
+                    }
+
+                    if (filename.size() > time_pos + 6 && filename[date_pos + 8] == '-' && filename[time_pos + 6] == '-' && matches)
                     {
 
                         auto ftime = fs::last_write_time(entry);
@@ -699,7 +726,7 @@ inline void file_rotation_service::drain_queue()
     }
 }
 
-inline void file_rotation_service::compress_file_sync(const std::string &filename)
+inline void file_rotation_service::compress_file_sync(const std::string &filename, rotation_handle* handle)
 {
     // Write to .gz.pending in same directory, then atomic rename to .gz
     std::string gz_pending = filename + ".gz.pending";
@@ -750,40 +777,33 @@ inline void file_rotation_service::compress_file_sync(const std::string &filenam
     sync_directory(filename);
     
     // Update cache entry to reflect the compressed file
-    update_cache_entry(filename, gz_final);
+    update_cache_entry(filename, gz_final, handle);
     
     LOG(debug) << "Successfully compressed " << filename << " to " << gz_final;
 }
 
-inline void file_rotation_service::update_cache_entry(const std::string &old_name, const std::string &new_name)
+inline void file_rotation_service::update_cache_entry(const std::string &old_name, const std::string &new_name, rotation_handle* handle)
 {
-    // Find the handle that owns this file
-    std::lock_guard<std::mutex> lock(handles_mutex_);
-    for (auto &weak_handle : handles_)
+    std::lock_guard<std::mutex> cache_lock(handle->cache_mutex_);
+    auto &files = handle->rotated_files_cache_;
+    
+    // Find and update the cache entry
+    for (auto &entry : files)
     {
-        if (auto handle = weak_handle.lock())
+        if (entry.filename == old_name)
         {
-            std::lock_guard<std::mutex> cache_lock(handle->cache_mutex_);
-            auto &files = handle->rotated_files_cache_;
-            
-            // Find and update the cache entry
-            for (auto &entry : files)
+            // Get the new file size
+            struct stat st;
+            if (::stat(new_name.c_str(), &st) == 0)
             {
-                if (entry.filename == old_name)
-                {
-                    // Get the new file size
-                    struct stat st;
-                    if (::stat(new_name.c_str(), &st) == 0)
-                    {
-                        entry.filename = new_name;
-                        entry.size = st.st_size;
-                        // Keep the same timestamp (it's the logical rotation time, not file mtime)
-                    }
-                    return;
-                }
+                entry.filename = new_name;
+                entry.size = st.st_size;
+                // Keep the same timestamp (it's the logical rotation time, not file mtime)
             }
+            return;
         }
     }
+    
 }
 
 inline void file_rotation_service::cleanup_expired_handles()
@@ -821,6 +841,9 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
 
     // Initialize file cache with one-time directory scan
     initialize_cache(handle.get());
+    
+    // Apply retention policy to pre-existing files immediately
+    apply_retention_timestamped(handle.get());
 
     // Compute initial rotation time for time-based policies
     if (policy.mode == rotate_policy::kind::time || policy.mode == rotate_policy::kind::size_or_time)

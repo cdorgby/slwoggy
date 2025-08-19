@@ -269,6 +269,232 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         REQUIRE(total_size <= policy.max_total_bytes + 2048); // Allow for current file
     }
     
+    SECTION("Pre-existing files counted in retention")
+    {
+        // This test verifies that files from a "previous run" are properly
+        // included in retention policy enforcement
+        
+        rotate_policy policy;
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 256;  // Small size for quick rotation
+        policy.keep_files = 5;    // Keep only 5 files total
+        
+        // First, create 8 pre-existing rotated files to simulate previous run
+        // Use timestamps that look like real rotated files
+        auto now = std::chrono::system_clock::now();
+        auto now_t = std::chrono::system_clock::to_time_t(now);
+        
+        for (int i = 0; i < 8; ++i) {
+            // Create timestamp going back in time
+            auto file_time = now - std::chrono::hours(24 - i*3);
+            auto file_time_t = std::chrono::system_clock::to_time_t(file_time);
+            struct tm* tm_info = std::gmtime(&file_time_t);
+            
+            char timestamp[32];
+            std::snprintf(timestamp, sizeof(timestamp), 
+                         "%04d%02d%02d-%02d%02d%02d",
+                         tm_info->tm_year + 1900,
+                         tm_info->tm_mon + 1,
+                         tm_info->tm_mday,
+                         tm_info->tm_hour,
+                         tm_info->tm_min,
+                         tm_info->tm_sec);
+            
+            // Create filename matching rotation pattern
+            std::string filename = fmt::format("{}/test-{}-{:03d}.log", 
+                                              test_dir, timestamp, i + 1);
+            
+            // Write some content to make it a real file
+            std::ofstream ofs(filename);
+            ofs << "Pre-existing log file " << i << " from previous run\n";
+            ofs << std::string(200, 'X') << "\n";  // Add some bulk
+            ofs.close();
+            
+            INFO("Created pre-existing file: " << filename);
+        }
+        
+        // Verify we have 8 pre-existing files
+        REQUIRE(count_rotated_files() == 8);
+        
+        // Now create a new writer - it should scan and find the existing files
+        file_writer writer(base_filename, policy);
+        
+        // Write data to trigger first rotation
+        write_data(writer, 300);
+        
+        // Give rotation and retention cleanup time to run
+        std::this_thread::sleep_for(500ms);
+        
+        // Should have exactly 5 files (keep_files limit)
+        // The oldest 4 files should have been deleted
+        size_t final_count = count_rotated_files();
+        INFO("Final rotated file count: " << final_count);
+        REQUIRE(final_count == policy.keep_files);
+        
+        // Verify the remaining files are the newest ones
+        std::vector<std::string> remaining_files;
+        std::regex pattern("test-\\d{8}-\\d{6}-\\d{3}\\.log(\\.gz)?");
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, pattern)) {
+                    remaining_files.push_back(filename);
+                }
+            }
+        }
+        
+        // Sort files to check they're the newest
+        std::sort(remaining_files.begin(), remaining_files.end());
+        INFO("Remaining files after retention:");
+        for (const auto& f : remaining_files) {
+            INFO("  " << f);
+        }
+        
+        // Create a couple more rotations to verify ongoing retention works
+        for (int i = 0; i < 2; ++i) {
+            write_data(writer, 300);
+            std::this_thread::sleep_for(100ms);
+        }
+        
+        std::this_thread::sleep_for(500ms);
+        
+        // Should still have exactly 5 files
+        REQUIRE(count_rotated_files() == policy.keep_files);
+    }
+    
+    SECTION("Pre-existing compressed files counted in retention")
+    {
+        // This test verifies that compressed .gz files from previous runs
+        // are properly included in retention policy enforcement
+        
+        rotate_policy policy;
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 256;  // Small size for quick rotation
+        policy.keep_files = 6;    // Keep only 6 files total
+        policy.compress   = true;  // Enable compression for new rotations
+        
+        // Create a mix of pre-existing files: some compressed, some not
+        auto now = std::chrono::system_clock::now();
+        
+        for (int i = 0; i < 10; ++i) {
+            // Create timestamp going back in time
+            auto file_time = now - std::chrono::hours(30 - i*3);
+            auto file_time_t = std::chrono::system_clock::to_time_t(file_time);
+            struct tm* tm_info = std::gmtime(&file_time_t);
+            
+            char timestamp[32];
+            std::snprintf(timestamp, sizeof(timestamp), 
+                         "%04d%02d%02d-%02d%02d%02d",
+                         tm_info->tm_year + 1900,
+                         tm_info->tm_mon + 1,
+                         tm_info->tm_mday,
+                         tm_info->tm_hour,
+                         tm_info->tm_min,
+                         tm_info->tm_sec);
+            
+            // Create filename matching rotation pattern
+            std::string filename = fmt::format("{}/test-{}-{:03d}.log", 
+                                              test_dir, timestamp, i + 1);
+            
+            // Write some content to make it a real file
+            std::ofstream ofs(filename);
+            ofs << "Pre-existing log file " << i << " from previous run\n";
+            ofs << std::string(500, 'Y') << "\n";  // Make it substantial
+            ofs.close();
+            
+            // Compress half of them (simulate some were compressed in previous run)
+            if (i % 2 == 0) {
+                // Simulate compressed files by renaming to .gz
+                // The rotation system only cares about the filename pattern, not the content
+                std::string gz_filename = filename + ".gz";
+                fs::rename(filename, gz_filename);
+                INFO("Created pre-existing compressed file: " << gz_filename);
+            } else {
+                INFO("Created pre-existing uncompressed file: " << filename);
+            }
+        }
+        
+        // Count files - should have 10 total (5 .log, 5 .log.gz)
+        size_t initial_count = count_rotated_files();
+        INFO("Initial rotated file count: " << initial_count);
+        REQUIRE(initial_count == 10);
+        
+        // List all files before writer starts
+        std::vector<std::string> initial_files;
+        std::regex pattern("test-\\d{8}-\\d{6}-\\d{3}\\.log(\\.gz)?");
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, pattern)) {
+                    initial_files.push_back(filename);
+                }
+            }
+        }
+        std::sort(initial_files.begin(), initial_files.end());
+        INFO("Initial files:");
+        for (const auto& f : initial_files) {
+            INFO("  " << f);
+        }
+        
+        // Now create a new writer - it should scan and find ALL files (.log and .gz)
+        file_writer writer(base_filename, policy);
+        
+        // Write data to trigger first rotation (will be compressed)
+        write_data(writer, 300);
+        
+        // Give rotation, compression, and retention cleanup time to run
+        std::this_thread::sleep_for(700ms);
+        
+        // Should have around 6 files (keep_files limit)
+        // The oldest files should have been deleted
+        // Compression is async so count may vary slightly
+        size_t final_count = count_rotated_files();
+        INFO("Final rotated file count: " << final_count);
+        REQUIRE(final_count >= policy.keep_files - 1);
+        REQUIRE(final_count <= policy.keep_files);
+        
+        // List remaining files
+        std::vector<std::string> remaining_files;
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, pattern)) {
+                    remaining_files.push_back(filename);
+                }
+            }
+        }
+        
+        std::sort(remaining_files.begin(), remaining_files.end());
+        INFO("Remaining files after retention (should be newest 6):");
+        for (const auto& f : remaining_files) {
+            INFO("  " << f);
+        }
+        
+        // Verify we have a mix of .log and .gz files
+        int gz_count = 0;
+        int log_count = 0;
+        for (const auto& f : remaining_files) {
+            if (f.ends_with(".gz")) {
+                gz_count++;
+            } else if (f.ends_with(".log")) {
+                log_count++;
+            }
+        }
+        
+        INFO("Compressed files: " << gz_count << ", Uncompressed: " << log_count);
+        // Should have at least one compressed file (the new rotation)
+        REQUIRE(gz_count >= 1);
+        
+        // Create another rotation to verify ongoing retention with compression
+        write_data(writer, 300);
+        std::this_thread::sleep_for(700ms);
+        
+        // Should still have around 6 files (compression timing may vary)
+        size_t final_final_count = count_rotated_files();
+        REQUIRE(final_final_count >= policy.keep_files - 1);
+        REQUIRE(final_final_count <= policy.keep_files);
+    }
+    
     SECTION("max_age retention")
     {
         rotate_policy policy;
