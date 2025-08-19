@@ -313,12 +313,12 @@
 
 #include <cstring>
 #include <cstdlib>
-#include "fmt_config.hpp"
 #include <memory>
 #include <sys/types.h>
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "fmt_config.hpp"     // IWYU pragma: keep
 #include "log_types.hpp"      // IWYU pragma: keep
 #include "log_site.hpp"       // IWYU pragma: keep
 #include "log_module.hpp"     // IWYU pragma: keep

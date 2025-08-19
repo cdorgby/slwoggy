@@ -2,26 +2,11 @@
 
 A header-only C++20 logging library featuring asynchronous processing, structured logging, and compile-time filtering.
 
-## Key Features
-
-- **Pre-allocated Buffer Pool**: Uses a fixed-size buffer pool with reference counting
-- **Lock-Free Queue**: Uses moodycamel::ConcurrentQueue for thread communication
-- **Structured Logging**: Key-value metadata support with binary storage
-- **Compile-Time Filtering**: Log calls below `GLOBAL_MIN_LOG_LEVEL` are eliminated at compile time
-- **Module System**: Runtime log level control per module with wildcard pattern matching
-- **Asynchronous Processing**: Dedicated worker thread processes log messages
-- **File Rotation**: Size/time-based rotation with zero-gap guarantees and retention policies
-- **Gzip Compression**: Automatic compression of rotated files using embedded miniz
-- **Filter Chains**: RCU-based filter system for deduplication and rate limiting
-- **ENOSPC Handling**: Automatic cleanup when disk space is exhausted
-- **Type-Erased Sinks**: Output handling using type erasure with small buffer optimization
-- **Platform-Specific Timestamps**: Uses platform APIs for timestamp generation
-- **Adaptive Batching**: Three-phase batching algorithm that adapts to workload patterns
 
 ## Quick Start
 
 ```cpp
-#include "log.hpp"
+#include "slwoggy.hpp"
 
 using namespace slwoggy;
 
@@ -55,9 +40,51 @@ int main() {
 }
 ```
 
+## Formatting Methods
+
+slwoggy provides multiple ways to format log messages:
+
+### Stream Style (operator<<)
+```cpp
+LOG(info) << "User " << username << " logged in at " << timestamp;
+```
+
+### Format Style (format method)
+```cpp
+LOG(info).format("User {} logged in at {}", username, timestamp);
+// Uses fmt library for type-safe formatting
+```
+
+### Printf Style
+```cpp
+LOG(info).printf("User %s logged in at %ld", username, timestamp);
+// C-style formatting for compatibility
+LOG(info).printfmt("Count: %d", count); // Returns *this for chaining
+```
+
+### Immediate Flush and Reusable Log Lines
+```cpp
+// Use endl to force immediate flush
+LOG(error) << "Critical error: " << error_msg << endl;
+
+// Or call flush() explicitly  
+LOG(warn).format("Warning: {}", msg).flush();
+
+// Important: flush/endl makes log_line reusable for incremental logging
+auto logger = LOG(info);
+logger << "Starting process...";
+logger.flush();  // Sends log, but logger remains valid
+
+// Do some work...
+process_data();
+
+logger << "Process completed";  // Reuses same log line
+// Destructor will flush automatically
+```
+
 ## Log Output Formats
 
-slwoggy supports two output formats that can be selected at the call site:
+slwoggy supports two built-in output formats that can be selected at the call site, plus you can create custom formats (see [Custom Log Line Classes](#custom-log-line-classes) in Advanced Features):
 
 ### Traditional Text Format (LOG_TEXT)
 Human-readable format with timestamp, level, module, and location information:
@@ -128,24 +155,57 @@ This design provides a zero-configuration experience while allowing full customi
 
 ## Module System
 
-Control logging verbosity by subsystem:
+Modules allow you to control logging verbosity by subsystem. Each compilation unit can belong to a named module, and log levels can be controlled per-module at runtime.
+
+### Module Configuration
 
 ```cpp
 using namespace slwoggy;
 
-// In network code
+// At file scope - declare module name for this compilation unit
 LOG_MODULE_NAME("network");
+
+// Optional: Set initial log level for this module
 LOG_MODULE_LEVEL(log_level::debug);
 
-// In database code  
+// In another file
 LOG_MODULE_NAME("database");
 LOG_MODULE_LEVEL(log_level::warn);
 
-// Runtime control
-auto& registry = log_module_registry::instance();
-registry.set_module_level("network", log_level::info);
-registry.configure_from_string("warn,network=debug,database=error");
+// Files without LOG_MODULE_NAME use the "generic" module
 ```
+
+### Runtime Control
+
+```cpp
+// Get the module registry
+auto& registry = log_module_registry::instance();
+
+// Set level for specific module
+registry.set_module_level("network", log_level::info);
+
+// Set level for all modules
+registry.set_all_modules_level(log_level::warn);
+
+// Configure from string (format: default_level,module=level,...)
+registry.configure_from_string("warn,network=debug,database=error");
+
+// Query current level
+log_level current = registry.get_module_level("network");
+
+// List all modules
+auto modules = registry.get_all_modules();
+for (const auto& [name, level] : modules) {
+    std::cout << name << ": " << log_level_names[static_cast<int>(level)] << "\n";
+}
+```
+
+### Module Name Patterns
+
+- Module names are case-sensitive
+- Use consistent naming: "network", "database", "auth", etc.
+- Avoid spaces and special characters
+- The "generic" module is the default for files without LOG_MODULE_NAME
 
 ## Structured Logging
 
@@ -174,14 +234,14 @@ LOG_STRUCTURED(info).add("user_id", user.id)
 
 ### Internal Metadata Keys
 
-The system pre-registers five internal metadata keys with guaranteed IDs for optimal performance:
+The system pre-registers five internal metadata keys with guaranteed IDs:
 - `ts` (ID 0) - Timestamp (automatically added by LOG_STRUCTURED)
 - `level` (ID 1) - Log level (automatically added by LOG_STRUCTURED)
 - `module` (ID 2) - Module name (automatically added by LOG_STRUCTURED)
 - `file` (ID 3) - Source file (automatically added by LOG_STRUCTURED)
 - `line` (ID 4) - Source line number (automatically added by LOG_STRUCTURED)
 
-These internal keys use ultra-fast lookup paths that bypass all caching layers, making them essentially free to use. When using `LOG_STRUCTURED()`, these fields are automatically populated. When using `LOG()` or `LOG_TEXT()`, this metadata is still available internally but formatted differently in the output.
+These internal keys use fast lookup paths that bypass all caching layers, making them essentially free to use. When using `LOG_STRUCTURED()`, these fields are automatically populated. When using `LOG()` or `LOG_TEXT()`, this metadata is still available internally but formatted differently in the output.
 
 ## Binary Data and Hex Dumps
 
@@ -275,29 +335,79 @@ log_line_dispatcher::instance().add_filter(sampler);
 
 Filters use the same RCU pattern as sinks for lock-free updates. The provided filters are examples for testing - production use should implement proper metrics and configuration.
 
-## Custom Sinks
+## Sinks, Formatters and Writers
 
-Create custom output handlers:
+### Available Formatters
+
+**raw_formatter** - Traditional text format with timestamps and levels
+```cpp
+raw_formatter{
+    .use_color = true,      // ANSI color codes (default: true)
+    .add_newline = true     // Auto-append newlines (default: true)
+}
+```
+
+**taocpp_json_formatter** - JSON output for structured logging (requires TAO JSON)
+```cpp
+taocpp_json_formatter{
+    .pretty_print = false,  // Pretty formatting (default: false)  
+    .add_newline = true     // Newline after each JSON object (default: true)
+}
+```
+
+**nop_formatter** - Pass-through formatter (no formatting)
+```cpp
+nop_formatter{}  // Returns buffer content as-is
+```
+
+### Available Writers
+
+**file_writer** - Standard file output
+```cpp
+file_writer("/var/log/app.log")                    // Write to file
+file_writer("/var/log/app.log", rotation_policy)   // With rotation support
+file_writer(STDOUT_FILENO)                         // Write to stdout
+file_writer(STDERR_FILENO)                         // Write to stderr
+```
+
+**writev_file_writer** - Vectored I/O (inherits from file_writer)
+```cpp
+writev_file_writer("/var/log/app.log")             // Batches multiple buffers per syscall
+writev_file_writer("/var/log/app.log", rotation_policy)  // With rotation support
+```
+
+**discard_writer** - Null sink
+```cpp
+discard_writer{}  // Discards all output (for testing/benchmarking)
+```
+
+### Creating Sinks
 
 ```cpp
-using namespace slwoggy;
-
-// JSON output to stdout
-auto json_sink = log_sink{
-    json_formatter{.pretty_print = false, .add_newline = true},
+// Console output with colors
+auto console_sink = std::make_shared<log_sink>(
+    raw_formatter{.use_color = true, .add_newline = true},
     file_writer{STDOUT_FILENO}
-};
+);
 
-// File output with color
-auto file_sink = log_sink{
+// File output without colors, with rotation
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size;
+policy.max_bytes = 100 * 1024 * 1024;  // 100MB
+
+auto file_sink = std::make_shared<log_sink>(
     raw_formatter{.use_color = false, .add_newline = true},
-    file_writer{"/var/log/myapp.log"}
-};
+    file_writer{"/var/log/app.log", policy}
+);
 
-// Add sinks
+// Add sinks to dispatcher
 auto& dispatcher = log_line_dispatcher::instance();
-dispatcher.add_sink(std::make_shared<log_sink>(std::move(json_sink)));
+dispatcher.add_sink(console_sink);
+dispatcher.add_sink(file_sink);
+
 ```
+
+**NOTE**: Never write multiple sinks to the same file path! This causes undefined behavior due to concurrent writes.
 
 ## File Rotation
 
@@ -306,8 +416,7 @@ slwoggy provides comprehensive file rotation support with size-based, time-based
 ### Basic Rotation
 
 ```cpp
-#include "log.hpp"
-#include "log_file_rotator.hpp"
+#include "slwoggy.hpp"
 
 using namespace slwoggy;
 
@@ -436,22 +545,149 @@ log_line_dispatcher::instance().add_sink(sink);
 
 ### Compile-Time Optimization
 
-Set minimum log level to eliminate code at compile time:
+Set `GLOBAL_MIN_LOG_LEVEL` to completely eliminate lower-priority logs from the binary:
 
 ```cpp
-// In log_types.hpp or compile flags
+// In log_types.hpp (default is trace - all logs enabled)
 namespace slwoggy {
     inline constexpr log_level GLOBAL_MIN_LOG_LEVEL = log_level::info;
 }
 ```
 
-### Buffer Pool Configuration
+**Impact of GLOBAL_MIN_LOG_LEVEL**:
+- Logs below this level are completely removed at compile time
+- Zero runtime overhead (not even a level check)
+- No binary size impact
+- No site registration
+- Cannot be enabled at runtime
+
+```cpp
+// With GLOBAL_MIN_LOG_LEVEL = info:
+LOG(trace) << "This code is completely eliminated";  // Not compiled
+LOG(debug) << "This too";                           // Not compiled  
+LOG(info) << "This is included";                    // Compiled
+LOG(warn) << "This is included";                    // Compiled
+```
+
+Choose based on deployment target:
+- `trace`: Development builds with maximum debugging
+- `debug`: Testing/staging builds
+- `info`: Production builds with operational logging
+- `warn`: Production builds with minimal logging
+- `error`: Production builds with only error reporting
+
+### Configuration and Tuning
+
+slwoggy's behavior can be adjusted through compile-time constants defined in `log_types.hpp`. These values control memory usage, performance characteristics, and system limits.
+
+#### Memory Configuration
+
+The buffer pool is pre-allocated at startup to avoid runtime allocations:
+
+- **BUFFER_POOL_SIZE**: Number of pre-allocated buffers (default: 128 buffers)
+  - Note: Current default is intentionally small for testing
+  - For production, see performance tuning guidelines below
+
+- **LOG_BUFFER_SIZE**: Size of each log buffer (default: 2048 bytes)
+  - With default settings: 128 buffers × 2KB = ~256KB total pool memory
+  - Larger buffers handle longer log messages but use more memory
+  - Smaller buffers reduce memory but may truncate long messages
+
+- **LOG_SINK_BUFFER_SIZE**: Intermediate buffer for batching writes (default: 64KB)
+  - Used by sinks to collect formatted output before writing
+  - Larger values reduce syscalls but increase memory usage
+
+#### Performance Tuning
+
+The relationship between pool size, batch size, and queue size is critical for performance:
+
+**For maximum throughput (full blast mode):**
+- **BUFFER_POOL_SIZE** = 512 × number of logging threads
+- **MAX_BATCH_SIZE** = 0.5 × BUFFER_POOL_SIZE  
+- **MAX_DISPATCH_QUEUE_SIZE** = 0.25 × BUFFER_POOL_SIZE
+
+Example for 4 threads at maximum throughput:
+```cpp
+inline constexpr size_t BUFFER_POOL_SIZE = 2048;        // 512 × 4 threads
+inline constexpr size_t MAX_BATCH_SIZE = 1024;          // 0.5 × pool size
+inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 512;  // 0.25 × pool size
+```
+
+**For balanced performance (default):**
+- Current defaults (128/128/128) work well for light to moderate logging
+- Suitable for applications with occasional bursts
+
+**For low-latency logging:**
+- Reduce MAX_BATCH_SIZE to minimize batching delay
+- Keep BUFFER_POOL_SIZE high to avoid blocking
+- Reduce BATCH_COLLECT_TIMEOUT for faster dispatch
+
+**Batching timeouts:**
+
+- **BATCH_COLLECT_TIMEOUT**: Maximum time collecting a batch (default: 10μs)
+  - Balances between latency and batching efficiency
+  - Longer timeouts reduce I/O operations and increase throughput
+  - In reliable mode: Longer collection times improve throughput, benefits plateau around 1 second
+  - In unreliable mode: Longer collection periods increase message loss rate during bursts
+  - Sweet spot for most applications: 100μs to 10ms
+
+- **BATCH_POLL_INTERVAL**: Polling interval during batch collection (default: 1μs)
+  - Fine-tunes the responsiveness during batch collection
+
+#### Structured Logging Limits
+
+- **MAX_STRUCTURED_KEYS**: Maximum unique keys per log buffer (default: 255)
+  - Hard limit due to metadata format using uint8_t
+  - Most applications use far fewer keys per log entry
+
+- **MAX_FORMATTED_SIZE**: Maximum size for structured values (default: 512 bytes)
+  - Values exceeding this are truncated
+  - Prevents runaway memory usage from large values
+
+#### File Rotation Behavior
+
+Control how aggressively the rotation service retries operations:
+
+- **ROTATION_MAX_RETRIES**: Attempts before giving up (default: 10)
+- **ROTATION_INITIAL_BACKOFF**: Starting retry delay (default: 1ms)
+- **ROTATION_MAX_BACKOFF**: Maximum retry delay (default: 1s)
+- **ROTATION_LINK_ATTEMPTS**: Attempts for atomic link operation (default: 3)
+
+These control resilience against transient filesystem issues like ENOSPC or permission errors.
+
+### Reliable Delivery vs Performance
+
+slwoggy offers two modes for handling buffer pool exhaustion:
 
 ```cpp
 // In log_types.hpp
-namespace slwoggy {
-    inline constexpr size_t BUFFER_POOL_SIZE = 32 * 1024;   // Number of buffers
+#define LOG_RELIABLE_DELIVERY 1  // Default: enabled
+```
+
+**With LOG_RELIABLE_DELIVERY enabled (default)**:
+- Guarantees no log loss under high load
+- Blocks when buffer pool is exhausted
+- Writers wait until buffers become available
+- Best for: Critical logging, debugging, audit trails
+
+**With LOG_RELIABLE_DELIVERY disabled**:
+- Drops logs when buffer pool is exhausted  
+- Never blocks the application
+- Operations silently no-op when buffer unavailable
+- Best for: High-performance production systems
+
+```cpp
+// When LOG_RELIABLE_DELIVERY is disabled:
+LOG(info) << "This silently fails if buffer pool exhausted";
+// No exception, no blocking, just silent drop
+
+// Monitor drops via metrics (if enabled)
+#ifdef LOG_COLLECT_BUFFER_POOL_METRICS
+auto stats = buffer_pool::instance().get_stats();
+if (stats.acquire_failures > 0) {
+    // Handle buffer pool exhaustion
 }
+#endif
 ```
 
 ### Batching Configuration
@@ -516,16 +752,189 @@ The structured logging system includes several optimizations:
 
 ## Advanced Features
 
+### Custom Log Line Classes
+
+You can create custom log_line classes with custom header writers to add custom prefix text to your logs:
+
+```cpp
+#include "slwoggy.hpp"
+#include <cstring>
+
+using namespace slwoggy;
+
+// Custom log_line that adds a session ID prefix
+class session_log_line : public log_line_base {
+private:
+    const char* session_id_;
+    
+public:
+    // Constructor that takes session ID
+    session_log_line(log_level level, log_module_info& mod, 
+                     std::string_view file, uint32_t line,
+                     const char* session_id) 
+        : log_line_base(level, mod, file, line, true, true), // needs_header=true, human_readable=true
+          session_id_(session_id) {}
+    
+protected:
+    // Override write_header to add custom prefix
+    size_t write_header() override {
+        // Check if buffer is available
+        if (!buffer_) return 0;
+        
+        // Remember starting position
+        size_t text_len_before = buffer_->len();
+        
+        // Write session ID prefix using buffer's write_raw method
+        buffer_->write_raw("[Session:");
+        buffer_->write_raw(session_id_);
+        buffer_->write_raw("] ");
+        
+        // You can also write timestamp if desired
+        auto& dispatcher = log_line_dispatcher::instance();
+        int64_t diff_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            timestamp_ - dispatcher.start_time()).count();
+        int64_t ms = diff_us / 1000;
+        
+        buffer_->format_to_buffer_with_padding("{:08}.{:03} ", ms, diff_us % 1000);
+        
+        // Calculate and store header width for padding
+        buffer_->header_width_ = buffer_->len() - text_len_before;
+        return buffer_->header_width_;
+    }
+};
+
+// Define custom macro using LOG_BASE
+#define SESSION_LOG(level, session_id) \
+    LOG_BASE(level, session_log_line, session_id)
+
+// Usage
+void handle_request(const char* session_id) {
+    SESSION_LOG(info, session_id) << "Processing request";
+    // Output: [Session:abc123] 00001234.567 Processing request
+    
+    SESSION_LOG(debug, session_id) << "Request details: " << request_info;
+    // Output: [Session:abc123] 00001234.568 Request details: ...
+}
+
+// Or use LOG_BASE directly if you prefer
+void alternative_usage() {
+    const char* my_session = "xyz789";
+    LOG_BASE(warn, session_log_line, my_session) 
+        << "Connection timeout";
+}
+```
+
+Another example - adding thread ID to logs:
+
+```cpp
+class thread_log_line : public log_line_base {
+public:
+    thread_log_line(log_level level, log_module_info& mod, 
+                    std::string_view file, uint32_t line) 
+        : log_line_base(level, mod, file, line, true, true) {}
+    
+protected:
+    size_t write_header() override {
+        if (!buffer_) return 0;
+        
+        size_t text_len_before = buffer_->len();
+        
+        // Write thread ID
+        auto tid = std::this_thread::get_id();
+        buffer_->format_to_buffer_with_padding("[T:{}] ", tid);
+        
+        // Add standard timestamp and level
+        auto& dispatcher = log_line_dispatcher::instance();
+        int64_t diff_us = std::chrono::duration_cast<std::chrono::microseconds>(
+            timestamp_ - dispatcher.start_time()).count();
+        
+        buffer_->format_to_buffer_with_padding("{:08}.{:03} [{:<5}] ",
+            diff_us / 1000, diff_us % 1000,
+            log_level_names[static_cast<int>(level_)]);
+        
+        buffer_->header_width_ = buffer_->len() - text_len_before;
+        return buffer_->header_width_;
+    }
+};
+
+#define THREAD_LOG(level) LOG_BASE(level, thread_log_line)
+
+// Usage
+THREAD_LOG(info) << "Worker thread started";
+// Output: [T:140735123456789] 00001234.567 [INFO ] Worker thread started
+```
+
+The pattern for custom header writers is:
+1. Check if buffer is available (`if (!buffer_) return 0;`)
+2. Remember starting position (`size_t text_len_before = buffer_->len();`)
+3. Write your custom data using:
+   - `buffer_->write_raw()` for raw strings
+   - `buffer_->format_to_buffer_with_padding()` for formatted output
+4. Update `buffer_->header_width_` with total bytes written
+5. Return the header width
+
+This allows you to add any custom prefix like session IDs, thread IDs, request IDs, or any other contextual information to your log lines.
+
 ### Per-Site Control
 
-Control individual log locations:
+Every LOG() macro invocation in your code is automatically registered as a "site" when first executed. You can control and inspect these sites at runtime:
+
+#### Site Control APIs
 
 ```cpp
 using namespace slwoggy;
 
-// Runtime control of specific log sites
+// Set level for a specific LOG() location
 log_site_registry::set_site_level("network.cpp", 42, log_level::trace);
+
+// Get level for a specific site
+log_level current = log_site_registry::get_site_level("network.cpp", 42);
+
+// Set level for all sites in file(s) - supports wildcards
 log_site_registry::set_file_level("database/*.cpp", log_level::error);
+log_site_registry::set_file_level("src/net/*", log_level::debug);
+
+// Set level for all sites globally
+log_site_registry::set_all_sites_level(log_level::warn);
+
+// Find a specific site
+auto* site = log_site_registry::find_site("main.cpp", 100);
+if (site) {
+    std::cout << "Found site in function: " << site->function << "\n";
+}
+```
+
+#### Site Introspection
+
+```cpp
+// Get count of registered sites (cheap O(1) operation)
+size_t count = log_site_registry::get_site_count();
+std::cout << "Total log sites: " << count << "\n";
+
+// Get all sites and their settings (WARNING: expensive for large codebases)
+// Each LOG() that survives compile-time filtering creates one entry
+// A large codebase might have thousands of sites
+auto all_sites = log_site_registry::get_all_sites();
+for (const auto& site : all_sites) {
+    std::cout << site.file << ":" << site.line 
+              << " level=" << log_level_names[static_cast<int>(site.min_level)]
+              << " function=" << site.function << "\n";
+}
+```
+
+**Performance Note**: `get_all_sites()` creates a full copy of all site descriptors. In a large codebase with thousands of LOG() statements, this can allocate significant memory and take time. Use `get_site_count()` if you only need the count, or query specific sites instead of enumerating all.
+
+#### Practical Use Cases
+
+```cpp
+// Debugging: Enable trace logging for specific problem area
+log_site_registry::set_file_level("src/problem_module.cpp", log_level::trace);
+
+// Production: Selectively enable debug for one component
+log_site_registry::set_file_level("auth/*", log_level::debug);
+
+// Testing: Count active log sites
+std::cout << "Active sites: " << log_site_registry::get_site_count() << "\n";
 ```
 
 ### Multi-line Support
