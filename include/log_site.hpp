@@ -209,6 +209,42 @@ struct log_site_registry
         for (auto &site : sites()) { site.min_level = level; }
     }
 
+    /**
+     * @brief Get all registered log sites and their current settings
+     * @return Vector copy of all log site descriptors
+     * @warning This creates a full copy of all site descriptors. In large codebases
+     *          with thousands of LOG() statements, this can be expensive.
+     *          Each LOG() statement that survives compile-time filtering creates one entry.
+     * @note Thread-safe: returns a snapshot at the time of the call
+     * 
+     * Example:
+     * @code
+     * auto all_sites = log_site_registry::get_all_sites();
+     * std::cout << "Total sites: " << all_sites.size() << "\n";
+     * for (const auto& site : all_sites) {
+     *     std::cout << site.file << ":" << site.line 
+     *               << " level=" << log_level_names[static_cast<int>(site.min_level)]
+     *               << " function=" << site.function << "\n";
+     * }
+     * @endcode
+     */
+    static std::vector<log_site_descriptor> get_all_sites()
+    {
+        std::lock_guard<std::mutex> lock(registry_mutex());
+        return std::vector<log_site_descriptor>(sites().begin(), sites().end());
+    }
+
+    /**
+     * @brief Get count of registered log sites
+     * @return Number of registered LOG() call sites
+     * @note This is O(1) and much cheaper than get_all_sites().size()
+     */
+    static size_t get_site_count()
+    {
+        std::lock_guard<std::mutex> lock(registry_mutex());
+        return sites().size();
+    }
+
   private:
     // Add a mutex to protect all shared static data
     static std::mutex &registry_mutex()

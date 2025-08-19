@@ -11,7 +11,8 @@
 #include <string>
 #include <algorithm>
 #include <chrono>
-#include "fmt_config.hpp"
+
+#include "fmt_config.hpp"  // IWYU pragma: keep
 
 namespace slwoggy
 {
@@ -33,10 +34,15 @@ inline constexpr size_t CACHE_LINE_SIZE = 64; // Common cache line size
 // #endif
 
 // Buffer pool constants
-inline constexpr size_t BUFFER_POOL_SIZE        = 4 * 1024; // Number of pre-allocated buffers
+inline constexpr size_t BUFFER_POOL_SIZE        = 512;        // Number of buffers in the pool
+inline constexpr size_t MAX_BATCH_SIZE          = 256;        // Max buffers to dequeue in one batch (half of pool)
+inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 512;        // Max queue size before blocking (same as pool size)
 inline constexpr size_t LOG_SINK_BUFFER_SIZE    = 64 * 1024; // Intermediate buffer for batching buffers for writes
-inline constexpr size_t MAX_BATCH_SIZE          = 2 * 1024;  // Number of buffer pulled from the queue during dispatch
-inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 1 * 1024;  // Max # buffers waiting to be processed by the dispatcher
+
+// Log buffer size
+// This is the size of each individual log buffer. It should be large enough to hold
+// typical log messages, including structured data.
+static constexpr size_t LOG_BUFFER_SIZE = 2048;
 
 // Batching configuration constants
 inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(10); // Max time to collect a batch
@@ -51,12 +57,18 @@ inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(1);  // 
 inline constexpr uint32_t MAX_STRUCTURED_KEYS = 255; // Maximum structured keys per buffer
 inline constexpr size_t MAX_FORMATTED_SIZE    = 512; // max size of values when allowed in the metadata
 
+// File rotation constants
+inline constexpr int ROTATION_MAX_RETRIES      = 10;                           // Max retries for file operations
+inline constexpr auto ROTATION_INITIAL_BACKOFF = std::chrono::milliseconds(1); // Initial backoff for retries
+inline constexpr auto ROTATION_MAX_BACKOFF     = std::chrono::seconds(1);      // Maximum backoff for retries
+inline constexpr int ROTATION_LINK_ATTEMPTS    = 3;                            // Attempts for atomic link operation
+
 // Metrics collection configuration
 // Define these before including log.hpp to enable metrics collection:
 // #define LOG_COLLECT_BUFFER_POOL_METRICS 1 // Enable buffer pool statistics
-// #define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
+#define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
 // #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
-// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
+#define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
 // LOG_COLLECT_DISPATCHER_METRICS)
 
 /**

@@ -28,6 +28,7 @@ namespace slwoggy
 {
 namespace gzip
 {
+constexpr size_t BUFFER_SIZE = 64 * 1024;
 
 /**
  * @brief RAII wrapper for file descriptors
@@ -190,15 +191,15 @@ inline std::array<unsigned char, 10> create_gzip_header(uint32_t mtime)
 {
     return {
         {
-         0x1f, 0x8b,                                     // Magic number
-            0x08,                                     // Compression method (deflate)
-            0x00,                                     // Flags (no name, no comment, no extra fields)
-            static_cast<unsigned char>(mtime & 0xff), // Modification time (little-endian)
-            static_cast<unsigned char>((mtime >> 8) & 0xff),
-         static_cast<unsigned char>((mtime >> 16) & 0xff),
-         static_cast<unsigned char>((mtime >> 24) & 0xff),
-         0x00, // Extra flags (0 for normal compression)
-            0x03  // OS (3 = Unix)
+         0x1f, 0x8b,                                             // Magic number
+            0x08,                                             // Compression method (deflate)
+            0x00,                                             // Flags (no name, no comment, no extra fields)
+            static_cast<unsigned char>(mtime & 0xff),         // Modification time (little-endian)
+            static_cast<unsigned char>((mtime >> 8) & 0xff),  // Modification time (little-endian)
+            static_cast<unsigned char>((mtime >> 16) & 0xff), // Modification time (little-endian)
+            static_cast<unsigned char>((mtime >> 24) & 0xff), // Modification time (little-endian)
+            0x00,                                             // Extra flags (0 for normal compression)
+            0x03                                              // OS (3 = Unix)
         }
     };
 }
@@ -265,7 +266,6 @@ inline bool file_to_gzip(const std::string &src, const std::string &dst, int lev
     if (!compressor.init(level)) { return false; }
 
     // Compression buffers
-    constexpr size_t BUFFER_SIZE = 64 * 1024;
     std::vector<unsigned char> in_buf(BUFFER_SIZE);
     std::vector<unsigned char> out_buf(BUFFER_SIZE);
 
