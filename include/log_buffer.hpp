@@ -774,6 +774,13 @@ class buffer_pool
     std::atomic<uint64_t> usage_samples_{0};
 #endif
 
+    /**
+     * @brief Return a buffer to the pool.
+     *
+     * This method is private and intended for internal use by buffer_pool only.
+     * External callers should not call this directly; instead, use buffer->release().
+     * This ensures proper reference counting and buffer lifecycle management.
+     */
     void release(log_buffer_base *buffer)
     {
         if (buffer)
