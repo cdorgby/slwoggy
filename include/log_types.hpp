@@ -42,7 +42,7 @@ inline constexpr size_t LOG_SINK_BUFFER_SIZE    = 64 * 1024; // Intermediate buf
 // Log buffer size
 // This is the size of each individual log buffer. It should be large enough to hold
 // typical log messages, including structured data.
-static constexpr size_t LOG_BUFFER_SIZE = 2048;
+inline constexpr size_t LOG_BUFFER_SIZE = 2048;
 
 // Batching configuration constants
 inline constexpr auto BATCH_COLLECT_TIMEOUT = std::chrono::microseconds(10); // Max time to collect a batch
