@@ -66,9 +66,9 @@ inline constexpr int ROTATION_LINK_ATTEMPTS    = 3;                            /
 // Metrics collection configuration
 // Define these before including log.hpp to enable metrics collection:
 // #define LOG_COLLECT_BUFFER_POOL_METRICS 1 // Enable buffer pool statistics
-#define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
+// #define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
 // #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
-#define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
+// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
 // LOG_COLLECT_DISPATCHER_METRICS)
 
 /**
