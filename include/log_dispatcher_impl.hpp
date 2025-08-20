@@ -313,23 +313,14 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
             if (config->sinks[i])
             {
                 size_t sink_processed = config->sinks[i]->process_batch(&buffers[start_idx], processable_count);
-
-    #ifndef NDEBUG
+                
+                // Use the first sink's processed count for metrics
+                // Different sinks may process different counts if they have filters
                 if (first_sink)
                 {
                     processed = sink_processed;
                     first_sink = false;
                 }
-                else
-                {
-                    // All sinks must process the same number of buffers
-                    assert(sink_processed == processed);
-                }
-                // Verify sink processed the expected number
-                assert(sink_processed == expected_processed);
-    #else
-                processed = sink_processed;
-    #endif
             }
         }
     }

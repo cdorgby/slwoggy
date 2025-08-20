@@ -10,6 +10,8 @@
 #include <cstring>
 #include <cassert>
 #include <concepts>
+#include <variant>
+#include <type_traits>
 #include "log_buffer.hpp"
 #include "log_types.hpp"
 #include "type_erased.hpp"
@@ -40,20 +42,33 @@ struct sink_concept
 };
 
 /**
- * @brief Concrete sink model that holds formatter and writer
+ * @brief Concrete sink model that holds formatter, writer, and optional filter
  *
  * This template class implements the sink_concept interface for a specific
- * combination of Formatter and Writer types. It handles the actual log
- * processing logic and provides the type erasure support operations.
+ * combination of Formatter, Writer, and Filter types. It handles the actual log
+ * processing logic with optional per-sink filtering.
  */
-template <typename Formatter, typename Writer>
+template <typename Formatter, typename Writer, typename Filter = void>
 struct sink_model final : sink_concept
 {
     Formatter formatter_;
     Writer writer_;
     
+    // Only include filter member if Filter is not void
+    [[no_unique_address]] std::conditional_t<std::is_void_v<Filter>, 
+                                              std::monostate, Filter> filter_;
+    
+    // Constructor for formatter and writer only (no filter or void filter)
+    template<typename F = Filter>
     sink_model(Formatter f, Writer w) 
+        requires std::is_void_v<F>
         : formatter_(std::move(f)), writer_(std::move(w)) {}
+    
+    // Constructor with filter
+    template<typename F = Filter>
+    sink_model(Formatter f, Writer w, F flt) 
+        requires (!std::is_void_v<F> && std::is_same_v<F, Filter>)
+        : formatter_(std::move(f)), writer_(std::move(w)), filter_(std::move(flt)) {}
     
     // Helper to detect if writer has bulk_write method
     template <typename T>
@@ -81,17 +96,38 @@ struct sink_model final : sink_concept
     // Type erasure support
     sink_concept* clone_in_place(void* buffer) const override
     {
-        return new (buffer) sink_model(formatter_, writer_);
+        if constexpr (std::is_void_v<Filter>)
+        {
+            return new (buffer) sink_model(formatter_, writer_);
+        }
+        else
+        {
+            return new (buffer) sink_model(formatter_, writer_, filter_);
+        }
     }
     
     sink_concept* move_in_place(void* buffer) noexcept override
     {
-        return new (buffer) sink_model(std::move(formatter_), std::move(writer_));
+        if constexpr (std::is_void_v<Filter>)
+        {
+            return new (buffer) sink_model(std::move(formatter_), std::move(writer_));
+        }
+        else
+        {
+            return new (buffer) sink_model(std::move(formatter_), std::move(writer_), std::move(filter_));
+        }
     }
     
     sink_concept* heap_clone() const override
     {
-        return new sink_model(formatter_, writer_);
+        if constexpr (std::is_void_v<Filter>)
+        {
+            return new sink_model(formatter_, writer_);
+        }
+        else
+        {
+            return new sink_model(formatter_, writer_, filter_);
+        }
     }
     
     size_t object_size() const override
@@ -116,10 +152,19 @@ private:
         
         for (size_t i = 0; i < count; ++i)
         {
-            // Skip filtered buffers
+            // Skip filtered buffers (global filters)
             if (buffers[i]->filtered_)
             {
                 continue;
+            }
+            
+            // Apply sink-specific filter if present
+            if constexpr (!std::is_void_v<Filter>)
+            {
+                if (!filter_.should_process(buffers[i]))
+                {
+                    continue;
+                }
             }
             
             // This is a non-filtered buffer we need to format
@@ -184,21 +229,35 @@ class log_sink_impl
     mutable char write_buffer_[LOG_SINK_BUFFER_SIZE]; // Temporary buffer for formatting output
 
 public:
-    // Constructor from formatter and writer
+    // Constructor from formatter and writer (no filter)
     template <typename Formatter, typename Writer> 
     log_sink_impl(Formatter f, Writer w)
         : impl_(sink_model<Formatter, Writer>{std::move(f), std::move(w)})
+    {
+    }
+    
+    // Constructor from formatter, writer, and filter
+    template <typename Formatter, typename Writer, typename Filter> 
+    log_sink_impl(Formatter f, Writer w, Filter flt)
+        : impl_(sink_model<Formatter, Writer, Filter>{std::move(f), std::move(w), std::move(flt)})
     {
     }
 
     // Default constructor
     log_sink_impl() = default;
 
-    // Emplace construction
+    // Emplace construction without filter
     template <typename Formatter, typename Writer>
     void emplace(Formatter f, Writer w)
     {
         impl_.template emplace<sink_model<Formatter, Writer>>(std::move(f), std::move(w));
+    }
+    
+    // Emplace construction with filter
+    template <typename Formatter, typename Writer, typename Filter>
+    void emplace(Formatter f, Writer w, Filter flt)
+    {
+        impl_.template emplace<sink_model<Formatter, Writer, Filter>>(std::move(f), std::move(w), std::move(flt));
     }
 
     // Process a batch of log buffers

@@ -166,6 +166,20 @@ target_link_libraries(log_mods PRIVATE taocppjson fmt::fmt)
 # Set per-file compile definitions for log_mods
 set_source_file_compile_definitions(log_mods "src/log_mods.cpp")
 
+# Add sink_filter_demo executable
+add_executable(sink_filter_demo src/sink_filter_demo.cpp)
+
+# Add include directories for sink_filter_demo
+target_include_directories(sink_filter_demo PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+# Link with taocpp/json and fmt
+target_link_libraries(sink_filter_demo PRIVATE taocppjson fmt::fmt)
+
+# Set per-file compile definitions for sink_filter_demo
+set_source_file_compile_definitions(sink_filter_demo "src/sink_filter_demo.cpp")
+
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -193,6 +207,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR 
         LOG_COLLECT_COMPRESSION_METRICS
     )
     target_compile_definitions(log_mods PRIVATE
+        LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_DISPATCHER_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_DISPATCHER_MSG_RATE
+        LOG_COLLECT_ROTATION_METRICS
+        LOG_COLLECT_COMPRESSION_METRICS
+    )
+    target_compile_definitions(sink_filter_demo PRIVATE
         LOG_COLLECT_BUFFER_POOL_METRICS
         LOG_COLLECT_DISPATCHER_METRICS
         LOG_COLLECT_STRUCTURED_METRICS
