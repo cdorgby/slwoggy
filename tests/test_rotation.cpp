@@ -1198,6 +1198,117 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
         
     }
     
+    SECTION("Non-regular file rotation disabled")
+    {
+        // Test that rotation is automatically disabled for non-regular files
+        std::string pipe_path = test_dir + "/test.pipe";
+        
+        // Create a named pipe
+        REQUIRE(mkfifo(pipe_path.c_str(), 0666) == 0);
+        
+        // Start a reader thread for the pipe
+        std::atomic<bool> reader_running{true};
+        std::atomic<size_t> bytes_read{0};
+        std::thread reader([&]() {
+            int fd = ::open(pipe_path.c_str(), O_RDONLY | O_NONBLOCK);
+            if (fd < 0) return;
+            
+            char buffer[1024];
+            while (reader_running.load()) {
+                fd_set read_fds;
+                FD_ZERO(&read_fds);
+                FD_SET(fd, &read_fds);
+                
+                struct timeval timeout;
+                timeout.tv_sec = 0;
+                timeout.tv_usec = 100000; // 100ms
+                
+                if (select(fd + 1, &read_fds, nullptr, nullptr, &timeout) > 0) {
+                    ssize_t n = ::read(fd, buffer, sizeof(buffer));
+                    if (n > 0) {
+                        bytes_read.fetch_add(n);
+                    } else if (n == 0) {
+                        break; // EOF
+                    }
+                }
+            }
+            ::close(fd);
+        });
+        
+        // RAII cleanup for thread
+        struct ThreadCleanup {
+            std::atomic<bool>& running;
+            std::thread& t;
+            ~ThreadCleanup() {
+                running = false;
+                if (t.joinable()) t.join();
+            }
+        } cleanup{reader_running, reader};
+        
+        // Let reader open the pipe first
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        
+        // Configure rotation policy (should be ignored for pipe)
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 100;  // Small size to trigger rotation
+        policy.keep_files = 5;
+        policy.compress = true;
+        
+        // Get initial rotation metrics
+        auto initial_stats = rotation_metrics::instance().get_stats();
+        
+        // Open the pipe for logging
+        auto sink = make_raw_file_sink(pipe_path, policy);
+        log_line_dispatcher::instance().add_sink(sink);
+        
+        // Write enough data to normally trigger multiple rotations
+        for (int i = 0; i < 1000; ++i) {
+            LOG(info) << "Test message " << i << " to pipe" << endl;
+        }
+        
+        // Flush and wait for data to be read
+        log_line_dispatcher::instance().flush();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // Verify data was received by reader
+        REQUIRE(bytes_read.load() > 0);
+        
+        // Get final rotation metrics
+        auto final_stats = rotation_metrics::instance().get_stats();
+        
+        // Verify no rotations occurred
+        REQUIRE(final_stats.total_rotations == initial_stats.total_rotations);
+        
+        // Verify only the pipe exists, no rotated files
+        size_t file_count = 0;
+        bool pipe_found = false;
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            file_count++;
+            if (entry.path().filename().string() == "test.pipe") {
+                pipe_found = true;
+            }
+        }
+        
+        // The base log file may also exist
+        if (file_count == 2) {
+            // Check if the other file is the base log
+            bool has_base = false;
+            for (const auto& entry : fs::directory_iterator(test_dir)) {
+                std::string name = entry.path().filename().string();
+                if (name == "test.log" || name == "test.pipe") {
+                    has_base = true;
+                }
+            }
+            REQUIRE(has_base);
+        } else {
+            REQUIRE(file_count == 1);
+        }
+        REQUIRE(pipe_found);
+        
+        ::unlink(pipe_path.c_str());
+    }
+    
     SECTION("Compression state transitions")
     {
         // This test verifies internal state transitions

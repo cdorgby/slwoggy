@@ -1006,6 +1006,18 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
     }
     handle->current_fd_.store(fd);
     
+    // Check if file is a regular file when rotation/compression is requested
+    if (policy.mode != rotate_policy::kind::none || policy.compress) {
+        struct stat st;
+        if (fstat(fd, &st) == 0 && !S_ISREG(st.st_mode)) {
+            // This is a special file (device, pipe, socket, etc.)
+            // Disable rotation and compression for special files
+            LOG(warn) << "File '" << filename << "' is not a regular file, disabling rotation and compression";
+            handle->policy_.mode = rotate_policy::kind::none;
+            handle->policy_.compress = false;
+        }
+    }
+    
     // Get the current file size to properly handle existing files
     struct stat st;
     if (fstat(fd, &st) == 0) {
