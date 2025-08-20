@@ -314,6 +314,7 @@ int main(int argc, char *argv[])
     // Display rotation metrics if file rotation is being used
     if (show_detailed_stats && (sink_type == "raw" || sink_type == "writev" || sink_type == "json"))
     {
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto rot_stats = rotation_metrics::instance().get_stats();
         
         std::cerr << "========== FILE ROTATION METRICS ==========\n";
@@ -342,6 +343,7 @@ int main(int argc, char *argv[])
         std::cerr << "  Fsync failures: " << rot_stats.fsync_failures << "\n";
         
         std::cerr << "===========================================\n";
+#endif
     }
 
 #ifdef LOG_COLLECT_DISPATCHER_METRICS

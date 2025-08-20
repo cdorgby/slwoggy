@@ -41,6 +41,7 @@ void print_header(const std::string &title)
 
 void print_metrics()
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
 
     std::cout << "\nRotation Metrics:\n";
@@ -66,6 +67,9 @@ void print_metrics()
     }
 
     std::cout << std::flush;
+#else
+    std::cout << "\nRotation metrics not collected (Release build)\n";
+#endif
 }
 
 void count_rotated_files(const std::string &base_path)
@@ -203,8 +207,12 @@ void demo_time_rotation()
             std::cout << "  Elapsed: " << elapsed << "s, Messages: " << msg_count;
             
             // Check if rotation happened
+#ifdef LOG_COLLECT_ROTATION_METRICS
             auto &metrics = rotation_metrics::instance();
             auto rotations = metrics.rotations_total.load();
+#else
+            auto rotations = 0;
+#endif
             if (rotations > 0) {
                 std::cout << " (Rotations: " << rotations << ")";
             }
@@ -427,8 +435,12 @@ void demo_enospc_handling()
             std::cout << "  Generated " << i << " messages\n";
 
             // Check if ENOSPC cleanup happened
+#ifdef LOG_COLLECT_ROTATION_METRICS
             auto &metrics = rotation_metrics::instance();
             if (metrics.enospc_deletions_raw > 0 || metrics.enospc_deletions_gz > 0)
+#else
+            if (false)
+#endif
             {
                 std::cout << "  ENOSPC cleanup triggered!\n";
                 break;
@@ -573,7 +585,9 @@ int main(int argc, char *argv[])
         print_metrics();
 
         // Dump detailed metrics to log
+#ifdef LOG_COLLECT_ROTATION_METRICS
         rotation_metrics::instance().dump_metrics();
+#endif
         log_line_dispatcher::instance().flush();
     }
 

@@ -100,6 +100,7 @@ filesystem_time_to_system_time(const std::filesystem::file_time_type& ftime)
         std::chrono::duration_cast<std::chrono::system_clock::duration>(result_ns));
 }
 
+#ifdef LOG_COLLECT_ROTATION_METRICS
 // rotation_metrics implementation
 inline void rotation_metrics::dump_metrics() const
 {
@@ -120,6 +121,7 @@ inline void rotation_metrics::dump_metrics() const
     LOG(info) << "  Failures: compression=" << compression_failures.load()
               << " prepare_fd=" << prepare_fd_failures.load() << " fsync=" << fsync_failures.load();
 }
+#endif
 
 // file_rotation_service implementation
 inline file_rotation_service::file_rotation_service() : running_(true)
@@ -145,14 +147,18 @@ inline file_rotation_service::~file_rotation_service()
 
     // Final fdatasync for all open handles and cleanup temp files
     std::lock_guard<std::mutex> lock(handles_mutex_);
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
+#endif
     for (auto &weak_handle : handles_)
     {
         if (auto handle = weak_handle.lock())
         {
+#ifdef LOG_COLLECT_ROTATION_METRICS
             // Aggregate dropped metrics before shutdown
             metrics.dropped_records_total.fetch_add(handle->dropped_records_.load());
             metrics.dropped_bytes_total.fetch_add(handle->dropped_bytes_.load());
+#endif
 
             int fd = handle->current_fd_.load();
             if (fd >= 0) { log_fdatasync(fd); }
@@ -230,7 +236,9 @@ inline bool file_rotation_service::perform_zero_gap_rotation(
     }
     
     // Fall back to two-rename sequence
+#ifdef LOG_COLLECT_ROTATION_METRICS
     rotation_metrics::instance().zero_gap_fallback_total.fetch_add(1);
+#endif
     LOG(warn) << "Hard link failed, using fallback rotation with gap: " << get_error_string(errno);
     
     if (rename(base_path.c_str(), rotated_path.c_str()) == 0)
@@ -289,7 +297,9 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     {
         if (log_fdatasync(msg.old_fd) != 0) 
         { 
-            rotation_metrics::instance().fsync_failures.fetch_add(1); 
+#ifdef LOG_COLLECT_ROTATION_METRICS
+            rotation_metrics::instance().fsync_failures.fetch_add(1);
+#endif 
         }
     }
 
@@ -347,7 +357,9 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
             // Queue for async compression
             if (!enqueue_for_compression(entry)) {
                 // Queue was full, compression skipped
+#ifdef LOG_COLLECT_ROTATION_METRICS
                 rotation_metrics::instance().compression_queue_overflows.fetch_add(1, std::memory_order_relaxed);
+#endif
                 LOG(warn) << "Compression queue full, skipping compression for: " << entry->filename;
             }
         } else {
@@ -370,9 +382,11 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     auto rotation_end = std::chrono::steady_clock::now();
     auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
         rotation_end - rotation_start).count();
+#ifdef LOG_COLLECT_ROTATION_METRICS
     rotation_metrics::instance().rotations_total.fetch_add(1);
     rotation_metrics::instance().rotation_duration_us_sum.fetch_add(duration_us);
     rotation_metrics::instance().rotation_duration_us_count.fetch_add(1);
+#endif
 }
 
 inline std::string file_rotation_service::generate_rotated_filename(const std::string &base)
@@ -528,7 +542,9 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
     LOG(error) << "Failed to prepare next fd after " << ROTATION_MAX_RETRIES << " attempts for " << handle->base_filename_
                << " - entering error state";
 
+#ifdef LOG_COLLECT_ROTATION_METRICS
     rotation_metrics::instance().prepare_fd_failures.fetch_add(1);
+#endif
     handle->in_error_state_.store(true, std::memory_order_release);
 
     // Signal semaphore to unblock any waiting writers
@@ -571,11 +587,15 @@ inline void file_rotation_service::apply_retention_timestamped(rotation_handle *
             // Mark as cancelled if compression is queued or in progress
             compression_state expected = compression_state::queued;
             if (files[i]->comp_state.compare_exchange_strong(expected, compression_state::cancelled)) {
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
                 compression_files_cancelled_.fetch_add(1);
+#endif
             } else {
                 expected = compression_state::compressing;
                 if (files[i]->comp_state.compare_exchange_strong(expected, compression_state::cancelled)) {
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
                     compression_files_cancelled_.fetch_add(1);
+#endif
                 }
             }
 
@@ -595,7 +615,9 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     // ENOSPC last-resort cleanup - VIOLATES retention policies!
     std::lock_guard<std::mutex> lock(handle->cache_mutex_);
     auto &files   = handle->rotated_files_cache_;
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
+#endif
 
     if (files.empty()) { return false; }
 
@@ -607,8 +629,10 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
         if (fname.size() >= 8 && fname.substr(fname.size() - 8) == ".pending")
         {
             LOG(info) << "ENOSPC: Deleting pending file: " << files[i]->filename;
+#ifdef LOG_COLLECT_ROTATION_METRICS
             metrics.enospc_deletions_pending.fetch_add(1);
             metrics.enospc_deleted_bytes.fetch_add(files[i]->size);
+#endif
             unlink(files[i]->filename.c_str());
             files.erase(files.begin() + i);
             return true;
@@ -623,8 +647,10 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
         if (fname.size() >= 3 && fname.substr(fname.size() - 3) == ".gz")
         {
             LOG(info) << "ENOSPC: Deleting compressed file: " << files[i]->filename;
+#ifdef LOG_COLLECT_ROTATION_METRICS
             metrics.enospc_deletions_gz.fetch_add(1);
             metrics.enospc_deleted_bytes.fetch_add(files[i]->size);
+#endif
             unlink(files[i]->filename.c_str());
             files.erase(files.begin() + i);
             return true;
@@ -635,8 +661,10 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     if (!files.empty())
     {
         LOG(warn) << "ENOSPC: Deleting log (violates retention): " << files[0]->filename;
+#ifdef LOG_COLLECT_ROTATION_METRICS
         metrics.enospc_deletions_raw.fetch_add(1);
         metrics.enospc_deleted_bytes.fetch_add(files[0]->size);
+#endif
         unlink(files[0]->filename.c_str());
         files.erase(files.begin());
         return true;
@@ -759,9 +787,11 @@ inline void file_rotation_service::handle_close(const rotation_message &msg)
     // Aggregate handle metrics to global metrics before removing
     if (msg.handle)
     {
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto &metrics = rotation_metrics::instance();
         metrics.dropped_records_total.fetch_add(msg.handle->dropped_records_.load());
         metrics.dropped_bytes_total.fetch_add(msg.handle->dropped_bytes_.load());
+#endif
     }
 
     // Remove from active handles
@@ -800,7 +830,9 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
 
     // Check if cancelled before starting
     if (entry->comp_state == compression_state::cancelled) {
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
         compression_files_cancelled_.fetch_add(1);
+#endif
         return false;
     }
 
@@ -823,9 +855,13 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
     
     if (!ok || entry->comp_state == compression_state::cancelled) {
         if (entry->comp_state == compression_state::cancelled) {
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
             compression_files_cancelled_.fetch_add(1);
+#endif
         } else {
+#ifdef LOG_COLLECT_ROTATION_METRICS
             rotation_metrics::instance().compression_failures.fetch_add(1, std::memory_order_relaxed);
+#endif
         }
         ::unlink(gz_pending.c_str());
         return false;
@@ -838,7 +874,9 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
         if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0) {
             // Still failed - clean up pending file and report error
             ::unlink(gz_pending.c_str());
+#ifdef LOG_COLLECT_ROTATION_METRICS
             rotation_metrics::instance().compression_failures.fetch_add(1, std::memory_order_relaxed);
+#endif
             entry->comp_state = compression_state::done;
             return false;
         }
@@ -863,7 +901,9 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
     }
     
     entry->comp_state = compression_state::done;
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
     compression_files_compressed_.fetch_add(1);
+#endif
     return true;
 }
 
@@ -934,7 +974,9 @@ inline bool file_rotation_service::enqueue_for_compression(std::shared_ptr<rotat
     
     compression_queue_.enqueue(entry);
     size_t new_size = compression_queue_size_.fetch_add(1) + 1;
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
     compression_files_queued_.fetch_add(1);
+#endif
     
     // Update high water mark
     size_t prev_high = compression_queue_high_water_.load();
@@ -954,7 +996,9 @@ inline void file_rotation_service::drain_compression_queue()
         // Mark as cancelled so it won't be processed if picked up
         if (entry) {
             entry->comp_state = compression_state::cancelled;
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
             compression_files_cancelled_.fetch_add(1);
+#endif
         }
     }
 }

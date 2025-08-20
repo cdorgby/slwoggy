@@ -27,9 +27,12 @@ struct stack_buffer : public log_buffer_base
 inline log_line_dispatcher::log_line_dispatcher()
 : start_time_(log_fast_timestamp()),
   start_time_us_(std::chrono::duration_cast<std::chrono::microseconds>(start_time_.time_since_epoch()).count()),
-  queue_(MAX_DISPATCH_QUEUE_SIZE), // Initial capacity
-  worker_thread_(&log_line_dispatcher::worker_thread_func, this)
+  queue_(MAX_DISPATCH_QUEUE_SIZE) // Initial capacity
 {
+    // Ensure structured_log_key_registry is initialized before starting worker thread
+    // This prevents static destruction order issues
+    (void)structured_log_key_registry::instance();
+    
 #ifdef LOG_COLLECT_DISPATCHER_MSG_RATE
     // Initialize last_rate_sample_time_ to current time to avoid huge initial delta
     last_rate_sample_time_ = log_fast_timestamp();
@@ -43,6 +46,9 @@ inline log_line_dispatcher::log_line_dispatcher()
     // Initialize empty filter config
     auto initial_filter_config = std::make_unique<filter_config>();
     current_filters_.store(initial_filter_config.release(), std::memory_order_release);
+    
+    // Start worker thread AFTER ensuring dependencies are initialized
+    worker_thread_ = std::thread(&log_line_dispatcher::worker_thread_func, this);
 }
 
 inline void log_line_dispatcher::shutdown(bool wait_for_completion)
