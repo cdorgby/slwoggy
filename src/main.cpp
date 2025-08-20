@@ -81,9 +81,9 @@ int main(int argc, char *argv[])
 
     rotate_policy policy;
     policy.mode           = rotate_policy::kind::size;
-    policy.max_bytes      = 100 * 1024 * 1024; // 1MB files
+    policy.max_bytes      = 1 * 1024 * 1024; // 1MB files
     policy.keep_files     = 10;
-    policy.sync_on_rotate = true; // Ensure durability
+    //policy.compress       = true; // Enable compression
 
     // Create sink based on type
     if (sink_type == "raw") {

@@ -62,6 +62,10 @@ inline constexpr int ROTATION_MAX_RETRIES      = 10;                           /
 inline constexpr auto ROTATION_INITIAL_BACKOFF = std::chrono::milliseconds(1); // Initial backoff for retries
 inline constexpr auto ROTATION_MAX_BACKOFF     = std::chrono::seconds(1);      // Maximum backoff for retries
 inline constexpr int ROTATION_LINK_ATTEMPTS    = 3;                            // Attempts for atomic link operation
+inline constexpr size_t MIN_EXTENSION_SIZE     = 2;                            // Minimum valid file extension size (e.g., ".x")
+
+// Compression thread constants
+constexpr size_t COMPRESS_THREAD_MAX_BATCH = 10; // Max files to compress in one batch
 
 // Metrics collection configuration
 // Define these before including log.hpp to enable metrics collection:

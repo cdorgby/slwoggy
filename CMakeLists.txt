@@ -201,6 +201,7 @@ set_target_properties(rotation_demo PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+
 # Platform-specific settings
 if(WIN32)
     # Windows-specific settings

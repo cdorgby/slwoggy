@@ -541,6 +541,84 @@ auto sink = make_writev_file_sink("/var/log/production.log", policy);
 log_line_dispatcher::instance().add_sink(sink);
 ```
 
+### File Compression
+
+slwoggy supports automatic gzip compression of rotated log files to save disk space. Compression can be configured to run either synchronously (in the rotation thread) or asynchronously (in a dedicated compression thread).
+
+⚠️ **WARNING**: Compression should NOT be used with high-throughput logging. Even with async compression, high log volumes can overwhelm the compression thread, cause queue overflows, and lead to data loss or undefined behavior. Compression is best suited for low to moderate throughput scenarios where disk space is a concern.
+
+#### Synchronous Compression
+
+```cpp
+// Simple compression for low-throughput scenarios
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size;
+policy.max_bytes = 10 * 1024 * 1024;  // 10MB files
+policy.keep_files = 5;
+policy.compress = true;  // Enable compression
+
+auto sink = make_writev_file_sink("/var/log/app.log", policy);
+log_line_dispatcher::instance().add_sink(sink);
+// Files will be compressed synchronously during rotation
+// ⚠️ Blocks rotation thread during compression
+```
+
+#### (Optional) Asynchronous Compression
+
+```cpp
+// Start compression thread, you can start it later
+file_rotation_service::instance().start_compression_thread(
+    std::chrono::milliseconds{500},  // Batch delay (wait for more files)
+    10                                // Max queue size
+);
+
+rotate_policy policy;
+policy.mode = rotate_policy::kind::size;
+policy.max_bytes = 100 * 1024 * 1024;  // 100MB files
+policy.keep_files = 30;
+policy.compress = true;  // Will use async compression thread
+
+auto sink = make_writev_file_sink("/var/log/app.log", policy);
+log_line_dispatcher::instance().add_sink(sink);
+
+// Thread can be stopped anytime, it can be restarted again at any time.
+file_rotation_service::instance().stop_compression_thread();
+```
+
+#### Compression Behavior
+
+- **File naming**: Compressed files get `.gz` extension (e.g., `app-20240120-001.log.gz`)
+- **Atomic operation**: Uses `.gz.pending` temporary files during compression
+- **Cancellation**: Files deleted by retention policy cancel pending compressions
+- **Queue overflow**: When compression queue is full, new compressions are skipped (data not lost, just not compressed)
+- **State tracking**: Files transition through states: idle → queued → compressing → done/cancelled
+
+#### Monitoring Compression
+
+```cpp
+// Get compression statistics
+auto stats = file_rotation_service::instance().get_compression_stats();
+std::cout << "Files queued: " << stats.files_queued << "\n";
+std::cout << "Files compressed: " << stats.files_compressed << "\n";
+std::cout << "Files cancelled: " << stats.files_cancelled << "\n";
+std::cout << "Queue overflows: " << stats.queue_overflows << "\n";
+std::cout << "Current queue size: " << stats.current_queue_size << "\n";
+std::cout << "Queue high water mark: " << stats.queue_high_water_mark << "\n";
+
+// Reset statistics (useful for testing)
+file_rotation_service::instance().reset_compression_stats();
+```
+
+#### Best Practices
+
+1. **Avoid compression for high-throughput systems** - Compression cannot keep up with rapid file rotation
+2. **Monitor queue depth** - If queue_overflows > 0, compression is falling behind
+3. **Use async over sync** - Async compression prevents rotation blocking but still has throughput limits
+4. **Batch processing** - The delay parameter allows batching multiple files for efficiency
+5. **Graceful shutdown** - Try to stop the compression thread before application exit if you want predictable shutdown.
+6. **ENOSPC handling** - Compression creates temporary files; ensure adequate disk space
+7. **Consider alternatives** - For high-throughput systems, use external log rotation tools or compress during off-peak hours
+
 ## Performance Tuning
 
 ### Compile-Time Optimization
