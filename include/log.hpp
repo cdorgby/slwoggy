@@ -406,6 +406,8 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 #define LOG_BASE_WITH_MODULE(_level, _line_type, _module_name)                                                          \
     []()                                                                                                                \
     {                                                                                                                   \
+        static_assert(std::is_convertible_v<decltype(_module_name), const char *>,                                      \
+                      "Module name must be convertible to const char*");                                                \
         constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                            \
         if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                         \
         {                                                                                                               \
