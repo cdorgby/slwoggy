@@ -323,5 +323,116 @@ inline bool file_to_gzip(const std::string &src, const std::string &dst, int lev
     return true;
 }
 
+/**
+ * @brief Compress a file to gzip format with cancellation support
+ * @param src Source file path
+ * @param dst Destination gzip file path (.gz extension)
+ * @param level Compression level (0-9, -1 for default)
+ * @param cancel_checker Function that returns true to cancel the operation
+ * @return true on success, false on failure or cancellation
+ */
+template <typename CancelFunc>
+inline bool file_to_gzip_with_cancel(const std::string &src, const std::string &dst, int level, CancelFunc cancel_checker)
+{
+    // Open source file for reading
+    file_descriptor in_fd(::open(src.c_str(), O_RDONLY | O_CLOEXEC));
+    if (!in_fd) return false;
+
+    // Get source file modification time
+    struct stat st;
+    uint32_t mtime = 0;
+    if (fstat(in_fd.get(), &st) == 0) { mtime = static_cast<uint32_t>(st.st_mtime); }
+
+    // Create temporary output file (will auto-delete on failure)
+    temp_file temp_out(dst);
+
+    // Open destination file for writing (exclusive creation)
+    file_descriptor out_fd(::open(dst.c_str(),
+                                  O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC
+#ifdef O_NOFOLLOW
+                                      | O_NOFOLLOW
+#endif
+                                  ,
+                                  0644));
+    if (!out_fd) return false;
+
+    // Write gzip header
+    auto gz_header = create_gzip_header(mtime);
+    if (!write_all(out_fd.get(), gz_header.data(), gz_header.size())) { return false; }
+
+    // Initialize compression stream (auto-cleanup on destruction)
+    compression_stream compressor;
+    if (!compressor.init(level)) { return false; }
+
+    // Compression buffers
+    std::vector<unsigned char> in_buf(BUFFER_SIZE);
+    std::vector<unsigned char> out_buf(BUFFER_SIZE);
+
+    // CRC32 calculation for gzip trailer
+    mz_ulong crc32    = MZ_CRC32_INIT;
+    mz_ulong total_in = 0;
+
+    auto *stream = compressor.get();
+
+    // Compression loop with cancellation checks
+    for (;;)
+    {
+        // Check for cancellation
+        if (cancel_checker())
+        {
+            return false; // Cancelled
+        }
+
+        // Read chunk from input file
+        ssize_t r = ::read(in_fd.get(), in_buf.data(), in_buf.size());
+        if (r < 0)
+        {
+            if (errno == EINTR) continue;
+            return false;
+        }
+
+        // Update CRC32 for gzip trailer
+        if (r > 0)
+        {
+            crc32 = mz_crc32(crc32, in_buf.data(), static_cast<unsigned>(r));
+            total_in += static_cast<unsigned>(r);
+        }
+
+        // Set up input for compression
+        stream->next_in  = in_buf.data();
+        stream->avail_in = static_cast<unsigned>(r);
+        int flush        = (r == 0) ? MZ_FINISH : MZ_NO_FLUSH;
+
+        // Compress and write output
+        do {
+            stream->next_out  = out_buf.data();
+            stream->avail_out = static_cast<unsigned>(out_buf.size());
+
+            int ret = compressor.deflate(flush);
+            if (ret == MZ_STREAM_ERROR) { return false; }
+
+            size_t have = out_buf.size() - stream->avail_out;
+            if (have && !write_all(out_fd.get(), out_buf.data(), have)) { return false; }
+        } while (stream->avail_out == 0);
+
+        // If we've finished all input, exit loop
+        if (flush == MZ_FINISH) break;
+    }
+
+    // Final cancellation check before committing
+    if (cancel_checker())
+    {
+        return false; // Cancelled
+    }
+
+    // Write gzip trailer
+    auto gz_trailer = create_gzip_trailer(crc32, total_in);
+    if (!write_all(out_fd.get(), gz_trailer.data(), gz_trailer.size())) { return false; }
+
+    // Success - commit the temp file so it won't be deleted
+    temp_out.commit();
+    return true;
+}
+
 } // namespace gzip
 } // namespace slwoggy

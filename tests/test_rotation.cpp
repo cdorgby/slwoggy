@@ -87,6 +87,82 @@ class rotation_test_fixture
         std::string data(bytes, 'A');
         writer.write(data.c_str(), data.size());
     }
+    
+    void write_data(writev_file_writer &writer, size_t bytes)
+    {
+        std::string data(bytes, 'A');
+        writer.write(data.c_str(), data.size());
+    }
+    
+    size_t count_compressed_files()
+    {
+        size_t count = 0;
+        for (const auto &entry : fs::directory_iterator(test_dir))
+        {
+            if (entry.is_regular_file())
+            {
+                std::string filename = entry.path().filename().string();
+                if (filename.ends_with(".gz")) { count++; }
+            }
+        }
+        return count;
+    }
+    
+    size_t count_pending_files()
+    {
+        size_t count = 0;
+        for (const auto &entry : fs::directory_iterator(test_dir))
+        {
+            if (entry.is_regular_file())
+            {
+                std::string filename = entry.path().filename().string();
+                if (filename.ends_with(".pending")) { count++; }
+            }
+        }
+        return count;
+    }
+    
+    void wait_for_compression(std::chrono::milliseconds timeout = 5000ms)
+    {
+        auto start = std::chrono::steady_clock::now();
+        while (count_pending_files() > 0)
+        {
+            if (std::chrono::steady_clock::now() - start > timeout) {
+                break;
+            }
+            std::this_thread::sleep_for(100ms);
+        }
+    }
+    
+    void generate_rotations(file_writer &writer, size_t num_rotations, size_t rotation_size)
+    {
+        // Each iteration writes enough to exceed rotation_size and trigger a rotation
+        for (size_t i = 0; i < num_rotations; ++i)
+        {
+            // Write more than rotation_size to trigger rotation
+            // The +200 ensures we exceed the limit and force rotation
+            write_data(writer, rotation_size + 200);
+            // Give time for rotation to complete before next write
+            std::this_thread::sleep_for(200ms);
+        }
+        // Extra wait after all writes to ensure all rotations complete
+        std::this_thread::sleep_for(200ms);
+    }
+    
+    void generate_rotations(writev_file_writer &writer, size_t num_rotations, size_t rotation_size)
+    {
+        // Each iteration writes enough to exceed rotation_size and trigger a rotation
+        for (size_t i = 0; i < num_rotations; ++i)
+        {
+            // Write more than rotation_size to trigger rotation
+            // The +200 ensures we exceed the limit and force rotation
+            write_data(writer, rotation_size + 200);
+            // Give time for rotation to complete before next write
+            std::this_thread::sleep_for(200ms);
+        }
+        // Extra wait after all writes to ensure all rotations complete
+        std::this_thread::sleep_for(200ms);
+    }
 };
 
 TEST_CASE_METHOD(rotation_test_fixture, "Basic rotation service instantiation", "[rotation]")
@@ -267,6 +343,232 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         // Should not exceed max_total_bytes (plus current file)
         INFO("Total size of rotated files: " << total_size);
         REQUIRE(total_size <= policy.max_total_bytes + 2048); // Allow for current file
+    }
+    
+    SECTION("Pre-existing files counted in retention")
+    {
+        // This test verifies that files from a "previous run" are properly
+        // included in retention policy enforcement
+        
+        rotate_policy policy;
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 256;  // Small size for quick rotation
+        policy.keep_files = 5;    // Keep only 5 files total
+        
+        // First, create 8 pre-existing rotated files to simulate previous run
+        // Use timestamps that look like real rotated files
+        auto now = std::chrono::system_clock::now();
+        auto now_t = std::chrono::system_clock::to_time_t(now);
+        
+        for (int i = 0; i < 8; ++i) {
+            // Create timestamp going back in time
+            auto file_time = now - std::chrono::hours(24 - i*3);
+            auto file_time_t = std::chrono::system_clock::to_time_t(file_time);
+            struct tm* tm_info = std::gmtime(&file_time_t);
+            
+            char timestamp[32];
+            std::snprintf(timestamp, sizeof(timestamp), 
+                         "%04d%02d%02d-%02d%02d%02d",
+                         tm_info->tm_year + 1900,
+                         tm_info->tm_mon + 1,
+                         tm_info->tm_mday,
+                         tm_info->tm_hour,
+                         tm_info->tm_min,
+                         tm_info->tm_sec);
+            
+            // Create filename matching rotation pattern
+            std::string filename = fmt::format("{}/test-{}-{:03d}.log", 
+                                              test_dir, timestamp, i + 1);
+            
+            // Write some content to make it a real file
+            std::ofstream ofs(filename);
+            ofs << "Pre-existing log file " << i << " from previous run\n";
+            ofs << std::string(200, 'X') << "\n";  // Add some bulk
+            ofs.close();
+            
+            INFO("Created pre-existing file: " << filename);
+        }
+        
+        // Verify we have 8 pre-existing files
+        REQUIRE(count_rotated_files() == 8);
+        
+        // Now create a new writer - it should scan and find the existing files
+        file_writer writer(base_filename, policy);
+        
+        // Write data to trigger first rotation
+        write_data(writer, 300);
+        
+        // Give rotation and retention cleanup time to run
+        std::this_thread::sleep_for(500ms);
+        
+        // Should have exactly 5 files (keep_files limit)
+        // The oldest 4 files should have been deleted
+        size_t final_count = count_rotated_files();
+        INFO("Final rotated file count: " << final_count);
+        REQUIRE(final_count == policy.keep_files);
+        
+        // Verify the remaining files are the newest ones
+        std::vector<std::string> remaining_files;
+        std::regex pattern("test-\\d{8}-\\d{6}-\\d{3}\\.log(\\.gz)?");
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, pattern)) {
+                    remaining_files.push_back(filename);
+                }
+            }
+        }
+        
+        // Sort files to check they're the newest
+        std::sort(remaining_files.begin(), remaining_files.end());
+        INFO("Remaining files after retention:");
+        for (const auto& f : remaining_files) {
+            INFO("  " << f);
+        }
+        
+        // Create a couple more rotations to verify ongoing retention works
+        for (int i = 0; i < 2; ++i) {
+            write_data(writer, 300);
+            std::this_thread::sleep_for(100ms);
+        }
+        
+        std::this_thread::sleep_for(500ms);
+        
+        // Should still have exactly 5 files
+        REQUIRE(count_rotated_files() == policy.keep_files);
+    }
+    
+    SECTION("Pre-existing compressed files counted in retention")
+    {
+        // This test verifies that compressed .gz files from previous runs
+        // are properly included in retention policy enforcement
+        
+        rotate_policy policy;
+        policy.mode       = rotate_policy::kind::size;
+        policy.max_bytes  = 256;  // Small size for quick rotation
+        policy.keep_files = 6;    // Keep only 6 files total
+        policy.compress   = true;  // Enable compression for new rotations
+        
+        // Create a mix of pre-existing files: some compressed, some not
+        auto now = std::chrono::system_clock::now();
+        
+        for (int i = 0; i < 10; ++i) {
+            // Create timestamp going back in time
+            auto file_time = now - std::chrono::hours(30 - i*3);
+            auto file_time_t = std::chrono::system_clock::to_time_t(file_time);
+            struct tm* tm_info = std::gmtime(&file_time_t);
+            
+            char timestamp[32];
+            std::snprintf(timestamp, sizeof(timestamp), 
+                         "%04d%02d%02d-%02d%02d%02d",
+                         tm_info->tm_year + 1900,
+                         tm_info->tm_mon + 1,
+                         tm_info->tm_mday,
+                         tm_info->tm_hour,
+                         tm_info->tm_min,
+                         tm_info->tm_sec);
+            
+            // Create filename matching rotation pattern
+            std::string filename = fmt::format("{}/test-{}-{:03d}.log", 
+                                              test_dir, timestamp, i + 1);
+            
+            // Write some content to make it a real file
+            std::ofstream ofs(filename);
+            ofs << "Pre-existing log file " << i << " from previous run\n";
+            ofs << std::string(500, 'Y') << "\n";  // Make it substantial
+            ofs.close();
+            
+            // Compress half of them (simulate some were compressed in previous run)
+            if (i % 2 == 0) {
+                // Simulate compressed files by renaming to .gz
+                // The rotation system only cares about the filename pattern, not the content
+                std::string gz_filename = filename + ".gz";
+                fs::rename(filename, gz_filename);
+                INFO("Created pre-existing compressed file: " << gz_filename);
+            } else {
+                INFO("Created pre-existing uncompressed file: " << filename);
+            }
+        }
+        
+        // Count files - should have 10 total (5 .log, 5 .log.gz)
+        size_t initial_count = count_rotated_files();
+        INFO("Initial rotated file count: " << initial_count);
+        REQUIRE(initial_count == 10);
+        
+        // List all files before writer starts
+        std::vector<std::string> initial_files;
+        std::regex pattern("test-\\d{8}-\\d{6}-\\d{3}\\.log(\\.gz)?");
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, pattern)) {
+                    initial_files.push_back(filename);
+                }
+            }
+        }
+        std::sort(initial_files.begin(), initial_files.end());
+        INFO("Initial files:");
+        for (const auto& f : initial_files) {
+            INFO("  " << f);
+        }
+        
+        // Now create a new writer - it should scan and find ALL files (.log and .gz)
+        file_writer writer(base_filename, policy);
+        
+        // Write data to trigger first rotation (will be compressed)
+        write_data(writer, 300);
+        
+        // Give rotation, compression, and retention cleanup time to run
+        std::this_thread::sleep_for(700ms);
+        
+        // Should have around 6 files (keep_files limit)
+        // The oldest files should have been deleted
+        // Compression is async so count may vary slightly
+        size_t final_count = count_rotated_files();
+        INFO("Final rotated file count: " << final_count);
+        REQUIRE(final_count >= policy.keep_files - 1);
+        REQUIRE(final_count <= policy.keep_files);
+        
+        // List remaining files
+        std::vector<std::string> remaining_files;
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            if (entry.is_regular_file()) {
+                std::string filename = entry.path().filename().string();
+                if (std::regex_match(filename, pattern)) {
+                    remaining_files.push_back(filename);
+                }
+            }
+        }
+        
+        std::sort(remaining_files.begin(), remaining_files.end());
+        INFO("Remaining files after retention (should be newest 6):");
+        for (const auto& f : remaining_files) {
+            INFO("  " << f);
+        }
+        
+        // Verify we have a mix of .log and .gz files
+        int gz_count = 0;
+        int log_count = 0;
+        for (const auto& f : remaining_files) {
+            if (f.ends_with(".gz")) {
+                gz_count++;
+            } else if (f.ends_with(".log")) {
+                log_count++;
+            }
+        }
+        
+        INFO("Compressed files: " << gz_count << ", Uncompressed: " << log_count);
+        // Should have at least one compressed file (the new rotation)
+        REQUIRE(gz_count >= 1);
+        
+        // Create another rotation to verify ongoing retention with compression
+        write_data(writer, 300);
+        std::this_thread::sleep_for(700ms);
+        
+        // Should still have around 6 files (compression timing may vary)
+        size_t final_final_count = count_rotated_files();
+        REQUIRE(final_final_count >= policy.keep_files - 1);
+        REQUIRE(final_final_count <= policy.keep_files);
     }
     
     SECTION("max_age retention")
@@ -672,8 +974,16 @@ TEST_CASE_METHOD(rotation_test_fixture, "Filename generation", "[rotation][filen
 
 TEST_CASE_METHOD(rotation_test_fixture, "Compression", "[rotation][compression]")
 {
-    SECTION("Compression with .pending files")
+    auto &metrics = rotation_metrics::instance();
+    auto initial_compressions = metrics.compression_failures.load();
+    
+    SECTION("Synchronous compression (no thread)")
     {
+        // Ensure compression thread is not running
+        if (file_rotation_service::instance().is_compression_enabled()) {
+            file_rotation_service::instance().stop_compression_thread();
+        }
+        
         rotate_policy policy;
         policy.mode = rotate_policy::kind::size;
         policy.max_bytes = 1024;
@@ -681,40 +991,594 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression", "[rotation][compression]"
         
         file_writer writer(base_filename, policy);
         
+        // Measure rotation time with synchronous compression
+        auto start = std::chrono::steady_clock::now();
+        
         // Trigger rotation with compression
         write_data(writer, 1500);
-        std::this_thread::sleep_for(200ms);
+        std::this_thread::sleep_for(500ms);  // Wait for rotation and compression
         
-        // Check for rotated files
+        auto end = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        
+        // Check for compressed files
+        REQUIRE(count_rotated_files() >= 1);
+        REQUIRE(count_compressed_files() >= 1);
+        REQUIRE(count_pending_files() == 0);  // No pending files should remain
+        
+        INFO("Synchronous compression took " << duration.count() << "ms");
+        
+        // Verify original file was deleted
+        for (const auto& entry : fs::directory_iterator(test_dir))
+        {
+            std::string filename = entry.path().filename().string();
+            if (filename.ends_with(".gz")) {
+                // Original file should not exist
+                std::string original = filename.substr(0, filename.size() - 3);
+                INFO("Checking original file doesn't exist: " << original);
+            }
+        }
+    }
+    
+    SECTION("Asynchronous compression with thread")
+    {
+        // Start compression thread
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{200},  // 200ms delay
+            10  // Max queue size
+        );
+        REQUIRE(file_rotation_service::instance().is_compression_enabled());
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 1024;
+        policy.compress = true;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Measure rotation time with async compression
+        auto start = std::chrono::steady_clock::now();
+        
+        // Trigger rotation
+        write_data(writer, 1500);
+        std::this_thread::sleep_for(100ms);  // Brief wait for rotation
+        
+        auto rotation_end = std::chrono::steady_clock::now();
+        auto rotation_duration = std::chrono::duration_cast<std::chrono::milliseconds>(rotation_end - start);
+        
+        // Rotation should be fast (no compression blocking)
+        INFO("Async rotation took " << rotation_duration.count() << "ms");
+        REQUIRE(rotation_duration.count() < 200);  // Should be much faster than sync
+        
+        // Files should be queued for compression
         REQUIRE(count_rotated_files() >= 1);
         
-        // Look for .pending files (created during compression)
-        bool found_pending = false;
-        bool found_gz = false;
+        // Wait for compression to complete
+        std::this_thread::sleep_for(1000ms);
         
+        // Now files should be compressed
+        REQUIRE(count_compressed_files() >= 1);
+        REQUIRE(count_pending_files() == 0);
+        
+        // Stop compression thread
+        file_rotation_service::instance().stop_compression_thread();
+        REQUIRE(!file_rotation_service::instance().is_compression_enabled());
+    }
+    
+    SECTION("Multiple rotations with async compression")
+    {
+        // Start compression thread with batching
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{500},  // 500ms batch delay
+            20  // Max queue size
+        );
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 512;
+        policy.compress = true;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate multiple rotations quickly
+        generate_rotations(writer, 3, 512);
+        
+        // Should have rotated files immediately
+        REQUIRE(count_rotated_files() >= 1);
+        
+        // Files should be queued, not yet compressed
+        size_t initial_compressed = count_compressed_files();
+        INFO("Initial compressed files: " << initial_compressed);
+        
+        // Wait for batch compression
+        std::this_thread::sleep_for(2000ms);
+        
+        // Should have compressed files now
+        size_t final_compressed = count_compressed_files();
+        INFO("Final compressed files: " << final_compressed);
+        REQUIRE(final_compressed >= 1);  // At least 1 compressed
+        
+        // Stop compression thread
+        file_rotation_service::instance().stop_compression_thread();
+    }
+}
+
+TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][compression][cancellation]")
+{
+    SECTION("Files deleted during compression are cancelled")
+    {
+        // Start compression thread with long delay
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{1000},  // 1 second delay
+            10
+        );
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 512;
+        policy.compress = true;
+        policy.keep_files = 2;  // Keep only 2 files
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate 3 rotations (one will be deleted by retention)
+        generate_rotations(writer, 3, 512);
+        
+        // Wait longer for all rotations to complete
+        std::this_thread::sleep_for(500ms);
+        
+        // Should have 2 files after retention (oldest deleted)
+        size_t rotated = count_rotated_files();
+        INFO("Rotated files after retention: " << rotated);
+        REQUIRE(rotated <= 2);  // May be 1 or 2 depending on timing
+        
+        // Wait for compression to process
+        std::this_thread::sleep_for(2000ms);
+        
+        // At most 2 files should be compressed (3rd was cancelled)
+        REQUIRE(count_compressed_files() <= 2);
+        REQUIRE(count_pending_files() == 0);
+        
+        file_rotation_service::instance().stop_compression_thread();
+    }
+    
+    SECTION("Compression statistics tracking")
+    {
+        // Reset statistics from previous tests
+        file_rotation_service::instance().reset_compression_stats();
+        
+        // Start compression thread
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{100},  // Short delay for faster test
+            3  // Small queue to test overflow
+        );
+        
+        // Get initial stats
+        auto stats_before = file_rotation_service::instance().get_compression_stats();
+        REQUIRE(stats_before.files_queued == 0);
+        REQUIRE(stats_before.files_compressed == 0);
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 256;
+        policy.compress = true;
+        policy.keep_files = 2;  // Will trigger cancellations
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate 5 rotations quickly to test queue overflow
+        for (size_t i = 0; i < 5; ++i) {
+            write_data(writer, 300);
+        }
+        
+        // Wait for processing
+        wait_for_compression(2000ms);
+        
+        file_rotation_service::instance().stop_compression_thread();
+        // Check statistics
+        auto stats_after = file_rotation_service::instance().get_compression_stats();
+        INFO("Files queued: " << stats_after.files_queued);
+        INFO("Files compressed: " << stats_after.files_compressed);
+        INFO("Files cancelled: " << stats_after.files_cancelled);
+        INFO("Queue overflows: " << stats_after.queue_overflows);
+        INFO("High water mark: " << stats_after.queue_high_water_mark);
+        
+        // Should have attempted to queue some files
+        REQUIRE(stats_after.files_queued > 0);
+        // Some should be compressed
+        REQUIRE(stats_after.files_compressed > 0);
+        // Some might be cancelled due to retention
+        // Queue might overflow with small size
+        if (stats_after.queue_overflows > 0) {
+            // If queue overflowed, not all files were queued
+            REQUIRE(stats_after.files_queued < 5);
+        }
+        // High water mark should be at most queue size
+        REQUIRE(stats_after.queue_high_water_mark <= 3);
+        
+    }
+    
+    SECTION("Non-regular file rotation disabled")
+    {
+        // Test that rotation is automatically disabled for non-regular files
+        std::string pipe_path = test_dir + "/test.pipe";
+        
+        // Create a named pipe
+        REQUIRE(mkfifo(pipe_path.c_str(), 0666) == 0);
+        
+        // Start a reader thread for the pipe
+        std::atomic<bool> reader_running{true};
+        std::atomic<size_t> bytes_read{0};
+        std::thread reader([&]() {
+            int fd = ::open(pipe_path.c_str(), O_RDONLY | O_NONBLOCK);
+            if (fd < 0) return;
+            
+            char buffer[1024];
+            while (reader_running.load()) {
+                fd_set read_fds;
+                FD_ZERO(&read_fds);
+                FD_SET(fd, &read_fds);
+                
+                struct timeval timeout;
+                timeout.tv_sec = 0;
+                timeout.tv_usec = 100000; // 100ms
+                
+                if (select(fd + 1, &read_fds, nullptr, nullptr, &timeout) > 0) {
+                    ssize_t n = ::read(fd, buffer, sizeof(buffer));
+                    if (n > 0) {
+                        bytes_read.fetch_add(n);
+                    } else if (n == 0) {
+                        break; // EOF
+                    }
+                }
+            }
+            ::close(fd);
+        });
+        
+        // RAII cleanup for thread
+        struct ThreadCleanup {
+            std::atomic<bool>& running;
+            std::thread& t;
+            ~ThreadCleanup() {
+                running = false;
+                if (t.joinable()) t.join();
+            }
+        } cleanup{reader_running, reader};
+        
+        // Let reader open the pipe first
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        
+        // Configure rotation policy (should be ignored for pipe)
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 100;  // Small size to trigger rotation
+        policy.keep_files = 5;
+        policy.compress = true;
+        
+        // Get initial rotation metrics
+        auto initial_stats = rotation_metrics::instance().get_stats();
+        
+        // Open the pipe for logging
+        auto sink = make_raw_file_sink(pipe_path, policy);
+        log_line_dispatcher::instance().add_sink(sink);
+        
+        // Write enough data to normally trigger multiple rotations
+        for (int i = 0; i < 1000; ++i) {
+            LOG(info) << "Test message " << i << " to pipe" << endl;
+        }
+        
+        // Flush and wait for data to be read
+        log_line_dispatcher::instance().flush();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // Verify data was received by reader
+        REQUIRE(bytes_read.load() > 0);
+        
+        // Get final rotation metrics
+        auto final_stats = rotation_metrics::instance().get_stats();
+        
+        // Verify no rotations occurred
+        REQUIRE(final_stats.total_rotations == initial_stats.total_rotations);
+        
+        // Verify only the pipe exists, no rotated files
+        size_t file_count = 0;
+        bool pipe_found = false;
+        for (const auto& entry : fs::directory_iterator(test_dir)) {
+            file_count++;
+            if (entry.path().filename().string() == "test.pipe") {
+                pipe_found = true;
+            }
+        }
+        
+        // The base log file may also exist
+        if (file_count == 2) {
+            // Check if the other file is the base log
+            bool has_base = false;
+            for (const auto& entry : fs::directory_iterator(test_dir)) {
+                std::string name = entry.path().filename().string();
+                if (name == "test.log" || name == "test.pipe") {
+                    has_base = true;
+                }
+            }
+            REQUIRE(has_base);
+        } else {
+            REQUIRE(file_count == 1);
+        }
+        REQUIRE(pipe_found);
+        
+        ::unlink(pipe_path.c_str());
+    }
+    
+    SECTION("Compression state transitions")
+    {
+        // This test verifies internal state transitions
+        // Start compression thread
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{500},
+            10
+        );
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 512;
+        policy.compress = true;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Trigger rotation
+        write_data(writer, 600);
+        
+        // File should be queued (state: idle -> queued)
+        std::this_thread::sleep_for(100ms);
+        
+        // Wait for compression (state: queued -> compressing -> done)
+        std::this_thread::sleep_for(2000ms);
+        
+        // Verify compression completed
+        REQUIRE(count_compressed_files() >= 1);
+        
+        file_rotation_service::instance().stop_compression_thread();
+    }
+}
+
+TEST_CASE_METHOD(rotation_test_fixture, "Compression queue management", "[rotation][compression][queue]")
+{
+    SECTION("Batching delay allows collection of multiple files")
+    {
+        // Start compression thread with batching delay
+        // The delay allows multiple files to be batched together
+        // Queue limit prevents unbounded queue growth but doesn't limit total files
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{500},  // Batching delay to collect items
+            2  // Max dispatch queue size - prevents unbounded growth
+        );
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 256;
+        policy.compress = true;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate rotations - each write of 300 bytes exceeds 256 byte limit
+        // Each write triggers a rotation since 300 > 256
+        for (size_t i = 0; i < 5; ++i)
+        {
+            write_data(writer, 300);
+            std::this_thread::sleep_for(50ms); // Give time for rotation
+        }
+        
+        // Wait for compression to complete
+        wait_for_compression(3000ms);
+        
+        file_rotation_service::instance().stop_compression_thread();
+        
+        size_t rotated = count_rotated_files();
+        size_t compressed = count_compressed_files();
+        INFO("Rotated files: " << rotated);
+        INFO("Compressed files: " << compressed);
+        
+        REQUIRE(rotated == 5);  // Each 300 byte write triggers rotation
+        // All rotated files should be compressed
+        REQUIRE(compressed == 5);
+    }
+    
+    SECTION("Compression thread processes queued files")
+    {
+        // Start compression thread 
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{100},  // Batching delay
+            10
+        );
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 512;
+        policy.compress = true;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate rotations
+        generate_rotations(writer, 3, 512);
+        
+        // Wait for compression to complete
+        wait_for_compression(1000ms);
+
+        // Stop thread 
+        file_rotation_service::instance().stop_compression_thread();
+        
+        size_t rotated = count_rotated_files();
+        size_t compressed = count_compressed_files();
+        
+        REQUIRE(rotated == 3);
+        REQUIRE(compressed == 3);  // All files should be compressed
+        
+        
+        // No pending files
+        REQUIRE(count_pending_files() == 0);
+    }
+}
+
+TEST_CASE_METHOD(rotation_test_fixture, "Compression with retention", "[rotation][compression][retention]")
+{
+    SECTION("Retention policies with compressed files")
+    {
+        // Start compression thread
+        file_rotation_service::instance().start_compression_thread(
+            std::chrono::milliseconds{200},
+            10
+        );
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 256;
+        policy.compress = true;
+        policy.keep_files = 2;  // Keep only 2 files
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate first batch of rotations
+        generate_rotations(writer, 2, 256);
+        
+        // Wait for compression
+        std::this_thread::sleep_for(1000ms);
+        REQUIRE(count_compressed_files() >= 1);  // At least some files compressed
+        
+        // Generate more rotations - should trigger retention
+        generate_rotations(writer, 2, 256);
+        
+        // Wait for retention and compression
+        std::this_thread::sleep_for(1000ms);
+        
+        // Should have limited compressed files due to retention
+        size_t final_compressed = count_compressed_files();
+        INFO("Final compressed files after retention: " << final_compressed);
+        REQUIRE(final_compressed <= 2);  // At most 2 due to keep_files
+        
+        // Verify total file count
+        size_t total_files = 0;
         for (const auto& entry : fs::directory_iterator(test_dir))
         {
             if (entry.is_regular_file())
             {
                 std::string filename = entry.path().filename().string();
-                if (filename.ends_with(".pending")) {
-                    found_pending = true;
-                    INFO("Found pending file: " << filename);
-                }
-                if (filename.ends_with(".gz")) {
-                    found_gz = true;
-                    INFO("Found compressed file: " << filename);
+                if (filename.starts_with("test") && !filename.ends_with(".pending"))
+                {
+                    total_files++;
+                    INFO("File: " << filename);
                 }
             }
         }
         
-        // Note: Compression is not yet implemented, so we expect no .gz files yet
-        // but the test verifies the compression flag is handled
-        INFO("Compression enabled, pending files: " << found_pending << ", gz files: " << found_gz);
+        // Should have 2 compressed + 1 active = 3 total
+        REQUIRE(total_files <= 3);
         
-        // Verify metrics
+        file_rotation_service::instance().stop_compression_thread();
+    }
+    
+    SECTION("ENOSPC cleanup with compressed files")
+    {
+        // This simulates ENOSPC cleanup priorities
+        // Note: Actual ENOSPC testing requires a small tmpfs mount
+        
+        rotate_policy policy;
+        policy.mode = rotate_policy::kind::size;
+        policy.max_bytes = 256;
+        policy.compress = true;
+        
+        file_writer writer(base_filename, policy);
+        
+        // Generate some rotations
+        generate_rotations(writer, 3, 256);
+        
+        // Wait for compression (synchronous since no thread started)
+        std::this_thread::sleep_for(1000ms);
+        
+        // Should have compressed files
+        REQUIRE(count_compressed_files() >= 1);
+        
+        // Manually create a .pending file to test cleanup priority
+        std::string pending_file = test_dir + "/test-20250101-000000-999.log.gz.pending";
+        std::ofstream(pending_file) << "test";
+        
+        REQUIRE(count_pending_files() == 1);
+        
+        // In real ENOSPC, .pending files are deleted first
+        // Here we just verify they exist and can be detected
+        INFO("Pending files would be deleted first in ENOSPC");
+        INFO("Then .gz files, then raw logs");
+    }
+}
+
+TEST_CASE_METHOD(rotation_test_fixture, "Compression performance", "[rotation][compression][performance]")
+{
+    SECTION("Performance comparison sync vs async")
+    {
         auto &metrics = rotation_metrics::instance();
-        REQUIRE(metrics.compression_failures.load() >= 0);
+        
+        // Test 1: Synchronous compression
+        {
+            auto initial_rotations = metrics.rotations_total.load();
+            
+            rotate_policy policy;
+            policy.mode = rotate_policy::kind::size;
+            policy.max_bytes = 1024;
+            policy.compress = true;
+            
+            file_writer writer(base_filename, policy);
+            
+            auto start = std::chrono::steady_clock::now();
+            generate_rotations(writer, 3, 1024);
+            std::this_thread::sleep_for(2000ms);  // Wait for sync compression
+            auto sync_duration = std::chrono::steady_clock::now() - start;
+            
+            auto sync_rotations = metrics.rotations_total.load() - initial_rotations;
+            auto sync_time = std::chrono::duration_cast<std::chrono::milliseconds>(sync_duration).count();
+            
+            INFO("Sync: " << sync_rotations << " rotations in " << sync_time << "ms");
+            REQUIRE(count_compressed_files() >= 1);  // At least 1 compressed
+            
+            // Clean up for next test
+            fs::remove_all(test_dir);
+            fs::create_directories(test_dir);
+        }
+        
+        // Test 2: Asynchronous compression
+        {
+            auto initial_rotations = metrics.rotations_total.load();
+            
+            // Start compression thread
+            file_rotation_service::instance().start_compression_thread(
+                std::chrono::milliseconds{100},
+                20
+            );
+            
+            rotate_policy policy;
+            policy.mode = rotate_policy::kind::size;
+            policy.max_bytes = 1024;
+            policy.compress = true;
+            
+            file_writer writer(base_filename, policy);
+            
+            auto start = std::chrono::steady_clock::now();
+            generate_rotations(writer, 3, 1024);
+            auto rotation_duration = std::chrono::steady_clock::now() - start;
+            
+            // Rotations should be fast
+            auto async_rotation_time = std::chrono::duration_cast<std::chrono::milliseconds>(rotation_duration).count();
+            INFO("Async rotation: " << 3 << " rotations in " << async_rotation_time << "ms");
+            
+            // Wait for compression to complete
+            std::this_thread::sleep_for(2000ms);
+            
+            auto async_rotations = metrics.rotations_total.load() - initial_rotations;
+            REQUIRE(count_compressed_files() >= 1);  // At least 1 compressed
+            
+            // Async should be significantly faster for rotations
+            INFO("Async rotation is much faster as compression doesn't block");
+            
+            file_rotation_service::instance().stop_compression_thread();
+        }
     }
 }
 

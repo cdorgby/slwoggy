@@ -68,9 +68,18 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
    - Comprehensive policies: size, time, or combined triggers
    - Automatic ENOSPC handling with cleanup priority (.pending → .gz → raw)
    - Retention management by count, age, and total size
-   - Optional gzip compression for rotated files
+   - Optional gzip compression for rotated files (sync or async)
    - Platform-specific sync (fdatasync/F_FULLFSYNC/_commit)
    - Thread-safe rotation metrics with structured stats interface
+   - Auto-detection of non-regular files (pipes, devices) with rotation disabled
+   
+10. **Compression Thread** (`log_file_rotator_impl.hpp`)
+   - Optional background thread for asynchronous compression
+   - State machine: idle → queued → compressing → done/cancelled
+   - Graceful cancellation when files deleted by retention
+   - Configurable batching delay for efficiency
+   - Bounded queue to prevent memory exhaustion
+   - Comprehensive statistics API with high-water mark tracking
 
 ## Key Design Decisions
 
@@ -340,9 +349,27 @@ policy.keep_files = 30;                 // Keep 30 files
 policy.compress = true;                 // Gzip old files
 policy.sync_on_rotate = true;           // Ensure durability
 
+// Optional: Start async compression thread (recommended for production)
+file_rotation_service::instance().start_compression_thread(
+    std::chrono::milliseconds{500},  // Batch delay
+    10                                // Max queue size
+);
+
 // Create sink with rotation
 auto sink = make_writev_file_sink("/var/log/app.log", policy);
 log_line_dispatcher::instance().add_sink(sink);
+```
+
+### Monitoring Compression
+
+```cpp
+// Get compression statistics
+auto stats = file_rotation_service::instance().get_compression_stats();
+LOG(info) << "Compression queue: " << stats.current_queue_size 
+          << "/" << stats.queue_high_water_mark;
+
+// Reset statistics for testing
+file_rotation_service::instance().reset_compression_stats();
 ```
 
 ## Build System
@@ -375,14 +402,21 @@ std::cout << "ENOSPC cleanups: " << stats.enospc_raw_deleted << "\n";
 # Build tests on-demand
 cd build && make tests
 
-# Run all tests
-./tests/all_tests
-
-# Run specific test
-./tests/test_log "[buffer_pool]"
-
-# Run rotation tests
+# Run all tests (no such binary - run individual test executables)
+./tests/test_log
 ./tests/test_rotation
+./tests/test_log_structured
+# ... etc
+
+# Run specific test case by name
+./tests/test_rotation "Size-based rotation"
+
+# Run specific test section with -c flag
+./tests/test_rotation -c "Compression cancellation"
+
+# Test compression features
+./tests/test_rotation -c "Non-regular file rotation disabled"
+./tests/test_rotation -c "Compression statistics tracking"
 
 # Test ENOSPC handling (requires tmpfs)
 # Create a 1MB tmpfs for testing:
@@ -392,6 +426,11 @@ TEST_TMPFS_DIR=/tmp/test_tmpfs ./tests/test_rotation "[enospc]"
 
 # With sanitizers
 ASAN_OPTIONS=detect_leaks=1 ./tests/test_log
+UBSAN_OPTIONS=print_stacktrace=1 ./tests/test_rotation
+
+# List available tests
+./tests/test_rotation --list-tests
+./tests/test_rotation --list-tags
 ```
 
 ### Ubuntu Testing Checklist
@@ -494,9 +533,14 @@ When testing on Ubuntu (or other Linux distributions):
 ## Recently Completed Features
 
 - **File Rotation**: Complete implementation with size/time policies
-- **Compression**: Automatic gzip compression for rotated files
+- **Compression**: Automatic gzip compression for rotated files (sync and async)
 - **Filter Chains**: RCU-based filter system with examples
 - **Sampling/Rate Limiting**: Implemented as example filters
+- **Async Compression Thread**: Optional background compression with cancellation
+- **Non-Regular File Detection**: Auto-disable rotation for pipes, devices, etc.
+- **Compression Statistics API**: Track queue depth, overflows, and throughput
+- **Filename Collision Fix**: Proper handling of .log and .gz filename generation
+- **Thread-Safe Test Cleanup**: RAII pattern for thread cleanup in tests
 
 ## Future Enhancements
 
@@ -516,6 +560,9 @@ Potential areas for extension:
 6. **Rotation Handle Lifetime**: Rotation handles must be properly closed
 7. **ENOSPC Handling**: Retention policies may be violated during disk exhaustion
 8. **Thread-Local Storage**: ProducerTokens use unique_ptr to prevent leaks
+9. **Compression with High Throughput**: Do NOT use compression (sync or async) with high-throughput logging - can cause data loss or UB
+10. **Non-Regular Files**: Rotation automatically disabled for /dev/null, pipes, sockets
+11. **Compression Thread Shutdown**: Call stop_compression_thread() in destructor to prevent crashes
 
 ## Performance Characteristics
 

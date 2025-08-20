@@ -45,6 +45,26 @@ class file_rotation_service;
 class rotation_handle;
 
 /**
+ * @brief State machine for compression status
+ * 
+ * State transitions:
+ * - idle -> queued: When file is enqueued for compression
+ * - queued -> compressing: When compression thread starts processing
+ * - queued -> cancelled: When file is deleted before compression starts
+ * - compressing -> done: When compression completes successfully
+ * - compressing -> cancelled: When file is deleted during compression
+ * - Any state -> cancelled: When retention policy deletes the file
+ */
+enum class compression_state : uint8_t
+{
+    idle,        ///< Not queued for compression
+    queued,      ///< In compression queue waiting to be processed
+    compressing, ///< Currently being compressed
+    done,        ///< Compression complete
+    cancelled    ///< Cancelled by retention/cleanup
+};
+
+/**
  * @brief Rotation policy configuration
  * 
  * Defines when and how log files should be rotated, including
@@ -126,6 +146,7 @@ struct rotation_metrics
 
     // Additional metrics
     std::atomic<uint64_t> compression_failures{0};
+    std::atomic<uint64_t> compression_queue_overflows{0};
     std::atomic<uint64_t> prepare_fd_failures{0};
     std::atomic<uint64_t> fsync_failures{0};
 
@@ -156,6 +177,7 @@ struct rotation_metrics
         // Error tracking
         uint64_t zero_gap_fallbacks;
         uint64_t compression_failures;
+        uint64_t compression_queue_overflows;
         uint64_t prepare_fd_failures;
         uint64_t fsync_failures;
     };
@@ -183,6 +205,7 @@ struct rotation_metrics
         // Error tracking
         s.zero_gap_fallbacks = zero_gap_fallback_total.load();
         s.compression_failures = compression_failures.load();
+        s.compression_queue_overflows = compression_queue_overflows.load();
         s.prepare_fd_failures = prepare_fd_failures.load();
         s.fsync_failures = fsync_failures.load();
         
@@ -253,8 +276,10 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
         std::string filename;
         std::chrono::system_clock::time_point timestamp;
         size_t size;
+        std::atomic<compression_state> comp_state{compression_state::idle};
+        std::weak_ptr<rotation_handle> handle;
     };
-    std::vector<rotated_file_entry> rotated_files_cache_;
+    std::vector<std::shared_ptr<rotated_file_entry>> rotated_files_cache_;
     std::mutex cache_mutex_;
 
     // Back-reference to service
@@ -336,6 +361,19 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
  * 
  * @note Thread-safe singleton accessed via instance() method
  */
+/**
+ * @brief Compression thread statistics
+ */
+struct compression_stats
+{
+    uint64_t files_queued;           ///< Total files queued for compression
+    uint64_t files_compressed;       ///< Total files successfully compressed
+    uint64_t files_cancelled;        ///< Total files cancelled before/during compression
+    uint64_t queue_overflows;        ///< Times queue was full when trying to enqueue
+    size_t current_queue_size;       ///< Current number of items in queue
+    size_t queue_high_water_mark;    ///< Maximum queue size ever reached
+};
+
 class file_rotation_service
 {
   private:
@@ -363,6 +401,20 @@ class file_rotation_service
     // Rotator thread
     std::thread rotator_thread_;
     std::atomic<bool> running_;
+    
+    // Compression thread infrastructure
+    std::thread compression_thread_;
+    std::atomic<bool> compression_running_{false};
+    moodycamel::BlockingConcurrentQueue<std::shared_ptr<rotation_handle::rotated_file_entry>> compression_queue_;
+    std::atomic<size_t> compression_queue_size_{0};
+    std::atomic<size_t> compression_queue_high_water_{0};
+    size_t compression_queue_max_{10};
+    std::chrono::milliseconds compression_delay_{500};
+    
+    // Compression statistics
+    std::atomic<uint64_t> compression_files_queued_{0};
+    std::atomic<uint64_t> compression_files_compressed_{0};
+    std::atomic<uint64_t> compression_files_cancelled_{0};
 
     file_rotation_service();
     ~file_rotation_service();
@@ -386,11 +438,15 @@ class file_rotation_service
     bool emergency_cleanup(rotation_handle *handle);
 
     void apply_retention_timestamped(rotation_handle *handle);
-    void add_to_cache(rotation_handle *handle, const std::string &filename, size_t size);
+    std::shared_ptr<rotation_handle::rotated_file_entry> add_to_cache(rotation_handle *handle, const std::string &filename, size_t size);
     void initialize_cache(rotation_handle *handle);
-    void update_cache_entry(const std::string &old_name, const std::string &new_name);
-
-    void compress_file_sync(const std::string &filename);
+    
+    // Compression functions
+    bool compress_file_sync(std::shared_ptr<rotation_handle::rotated_file_entry> entry);
+    void compression_thread_func();
+    bool enqueue_for_compression(std::shared_ptr<rotation_handle::rotated_file_entry> entry);
+    void drain_compression_queue();
+    
     void cleanup_expired_handles();
 
   public:
@@ -421,6 +477,53 @@ class file_rotation_service
     void enqueue_close(std::shared_ptr<rotation_handle> handle, int fd)
     {
         queue_.enqueue({rotation_message::CLOSE, handle, fd, ""});
+    }
+    
+    /**
+     * @brief Start the compression thread
+     * @param delay Batching delay - how long to wait for more items to batch together
+     * @param max_queue_size Maximum dispatch queue size - prevents unbounded growth, 
+     *                       NOT a limit on total files compressed
+     */
+    void start_compression_thread(
+        std::chrono::milliseconds delay = std::chrono::milliseconds{500},
+        size_t max_queue_size = 10);
+    
+    /**
+     * @brief Stop the compression thread
+     */
+    void stop_compression_thread();
+    
+    /**
+     * @brief Check if compression thread is running
+     */
+    bool is_compression_enabled() const { return compression_running_.load(); }
+    
+    /**
+     * @brief Get compression thread statistics
+     */
+    compression_stats get_compression_stats() const
+    {
+        compression_stats stats;
+        stats.files_queued = compression_files_queued_.load();
+        stats.files_compressed = compression_files_compressed_.load();
+        stats.files_cancelled = compression_files_cancelled_.load();
+        stats.queue_overflows = rotation_metrics::instance().compression_queue_overflows.load();
+        stats.current_queue_size = compression_queue_size_.load();
+        stats.queue_high_water_mark = compression_queue_high_water_.load();
+        return stats;
+    }
+    
+    /**
+     * @brief Reset compression statistics (for testing)
+     */
+    void reset_compression_stats()
+    {
+        compression_files_queued_ = 0;
+        compression_files_compressed_ = 0;
+        compression_files_cancelled_ = 0;
+        compression_queue_high_water_ = compression_queue_size_.load();
+        rotation_metrics::instance().compression_queue_overflows = 0;
     }
 };
 
