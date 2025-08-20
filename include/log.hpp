@@ -318,18 +318,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "fmt_config.hpp"     // IWYU pragma: keep
-#include "log_types.hpp"      // IWYU pragma: keep
-#include "log_site.hpp"       // IWYU pragma: keep
-#include "log_module.hpp"     // IWYU pragma: keep
-#include "log_buffer.hpp"     // IWYU pragma: keep
-#include "log_sink.hpp"       // IWYU pragma: keep
-#include "log_formatters.hpp" // IWYU pragma: keep
-#include "log_writers.hpp"    // IWYU pragma: keep
-#include "log_sinks.hpp"      // IWYU pragma: keep
-#include "log_version.hpp"    // IWYU pragma: keep
-#include "log_line.hpp"       // IWYU pragma: keep
-#include "log_dispatcher.hpp" // IWYU pragma: keep
+#include "fmt_config.hpp"       // IWYU pragma: keep
+#include "log_types.hpp"        // IWYU pragma: keep
+#include "log_site.hpp"         // IWYU pragma: keep
+#include "log_module.hpp"       // IWYU pragma: keep
+#include "log_buffer.hpp"       // IWYU pragma: keep
+#include "log_sink.hpp"         // IWYU pragma: keep
+#include "log_formatters.hpp"   // IWYU pragma: keep
+#include "log_writers.hpp"      // IWYU pragma: keep
+#include "log_sinks.hpp"        // IWYU pragma: keep
+#include "log_version.hpp"      // IWYU pragma: keep
+#include "log_line.hpp"         // IWYU pragma: keep
+#include "log_dispatcher.hpp"   // IWYU pragma: keep
 #include "log_file_rotator.hpp" // IWYU pragma: keep
 
 // formatter specializations for smart pointers
@@ -371,30 +371,93 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
  * 3. Runtime filtering: Checks against the current module's dynamic log level
  * 4. Returns a log_line object of the specified type
  */
-#define LOG_BASE(_level, _line_type)                                                                                          \
-    []()                                                                                                                      \
-    {                                                                                                                         \
-        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                                  \
-        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                               \
-        {                                                                                                                     \
-            static struct                                                                                                     \
-            {                                                                                                                 \
-                struct registrar                                                                                              \
-                {                                                                                                             \
-                    ::slwoggy::log_site_descriptor &site_;                                                                    \
-                    registrar()                                                                                               \
-                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__))         \
-                    {                                                                                                         \
-                    }                                                                                                         \
-                } r_;                                                                                                         \
-            } _reg;                                                                                                           \
-            if (level >= g_log_module_info.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level) \
-            {                                                                                                                 \
-                return ::slwoggy::_line_type(level, ::slwoggy::g_log_module_info, SOURCE_FILE_NAME, __LINE__);                \
-            }                                                                                                                 \
-        }                                                                                                                     \
-        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                       \
+#define LOG_BASE(_level, _line_type, _module)                                                                         \
+    []()                                                                                                              \
+    {                                                                                                                 \
+        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                          \
+        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                       \
+        {                                                                                                             \
+            static struct                                                                                             \
+            {                                                                                                         \
+                struct registrar                                                                                      \
+                {                                                                                                     \
+                    ::slwoggy::log_site_descriptor &site_;                                                            \
+                    registrar()                                                                                       \
+                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__)) \
+                    {                                                                                                 \
+                    }                                                                                                 \
+                } r_;                                                                                                 \
+            } _reg;                                                                                                   \
+            if (level >= _module.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level)   \
+            {                                                                                                         \
+                return ::slwoggy::_line_type(level, _module, SOURCE_FILE_NAME, __LINE__);                             \
+            }                                                                                                         \
+        }                                                                                                             \
+        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);               \
     }()
+
+/**
+ * @brief Base macro for log line creation with compile-time module lookup
+ * @internal
+ * 
+ * Similar to LOG_BASE but uses a different module specified at compile time.
+ * Module is looked up once and cached in a static variable.
+ */
+#define LOG_BASE_WITH_MODULE(_level, _line_type, _module_name)                                                          \
+    []()                                                                                                                \
+    {                                                                                                                   \
+        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                            \
+        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                         \
+        {                                                                                                               \
+            static struct                                                                                               \
+            {                                                                                                           \
+                ::slwoggy::log_module_info module{::slwoggy::log_module_registry::instance().get_module(_module_name)}; \
+                struct registrar                                                                                        \
+                {                                                                                                       \
+                    ::slwoggy::log_site_descriptor &site_;                                                              \
+                    registrar()                                                                                         \
+                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__))   \
+                    {                                                                                                   \
+                    }                                                                                                   \
+                } r_;                                                                                                   \
+            } _static_data;                                                                                             \
+            if (level >= _static_data.module.detail->level.load(std::memory_order_relaxed) &&                           \
+                level >= _static_data.r_.site_.min_level)                                                               \
+            {                                                                                                           \
+                return ::slwoggy::_line_type(level, _static_data.module, SOURCE_FILE_NAME, __LINE__);                   \
+            }                                                                                                           \
+        }                                                                                                               \
+        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                 \
+    }()
+
+/**
+ * @brief Log macros that allow specifying a module name at the call site
+ * 
+ * These macros use a module specified at compile time, looked up once
+ * and cached in a static variable for efficiency.
+ *
+ * Three variants are available:
+ * - LOG_MOD_TEXT: Uses traditional text format (log_line_headered)
+ * - LOG_MOD_STRUCT: Uses structured logfmt format (log_line_structured)
+ * - LOG_MOD: Alias for LOG_MOD_TEXT (default to text format)
+ *
+ * @param _level Log level (trace, debug, info, warn, error, critical)
+ * @param _module_name Module name as a string literal
+ *
+ * @code
+ * // Log with "network" module settings using text format
+ * LOG_MOD_TEXT(info, "network") << "Connection established";
+ * LOG_MOD(info, "network") << "Same as above - defaults to text";
+ * 
+ * // Log with "database" module using structured format
+ * LOG_MOD_STRUCT(error, "database")
+ *     .add("query_id", 123)
+ *     .format("Query failed: {}", error);
+ * @endcode
+ */
+#define LOG_MOD_TEXT(_level, _module_name)   LOG_BASE_WITH_MODULE(_level, log_line_headered, _module_name)
+#define LOG_MOD_STRUCT(_level, _module_name) LOG_BASE_WITH_MODULE(_level, log_line_structured, _module_name)
+#define LOG_MOD(_level, _module_name)        LOG_BASE_WITH_MODULE(_level, log_line_headered, _module_name)
 
 /**
  * @brief Creates a structured log line (logfmt format) with automatic source location
@@ -424,7 +487,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
  * // Output: msg="Request processed in 45ms" user_id=123 latency_ms=45 ts=... level=debug ...
  * @endcode
  */
-#define LOG_STRUCTURED(_level) LOG_BASE(_level, log_line_structured)
+#define LOG_STRUCTURED(_level) LOG_BASE(_level, log_line_structured, ::slwoggy::g_log_module_info)
 
 /**
  * @brief Creates a traditional text log line with header and automatic source location
@@ -449,7 +512,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
  * // Output: 00001235.123 [DEBUG] myapp      main.cpp:43 Processing 15 items
  * @endcode
  */
-#define LOG_TEXT(_level) LOG_BASE(_level, log_line_headered)
+#define LOG_TEXT(_level) LOG_BASE(_level, log_line_headered, ::slwoggy::g_log_module_info)
 
 /**
  * @brief Default log macro - uses the configured default log line type

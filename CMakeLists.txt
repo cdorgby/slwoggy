@@ -152,6 +152,20 @@ target_link_libraries(rotation_demo PRIVATE taocppjson fmt::fmt)
 # Set per-file compile definitions for rotation_demo
 set_source_file_compile_definitions(rotation_demo "src/rotation_demo.cpp")
 
+# Add log_mods executable
+add_executable(log_mods src/log_mods.cpp)
+
+# Add include directories for log_mods
+target_include_directories(log_mods PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+# Link with taocpp/json and fmt
+target_link_libraries(log_mods PRIVATE taocppjson fmt::fmt)
+
+# Set per-file compile definitions for log_mods
+set_source_file_compile_definitions(log_mods "src/log_mods.cpp")
+
 # Enable metrics collection for Debug, MemCheck, and Profile builds
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
     target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -172,6 +186,12 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR 
         LOG_COLLECT_STRUCTURED_METRICS
         LOG_COLLECT_DISPATCHER_MSG_RATE
     )
+    target_compile_definitions(log_mods PRIVATE
+        LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_DISPATCHER_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_DISPATCHER_MSG_RATE
+    )
 endif()
 
 # Reliable delivery option
@@ -183,6 +203,9 @@ if(LOG_RELIABLE_DELIVERY)
         LOG_RELIABLE_DELIVERY
     )
     target_compile_definitions(rotation_demo PRIVATE
+        LOG_RELIABLE_DELIVERY
+    )
+    target_compile_definitions(log_mods PRIVATE
         LOG_RELIABLE_DELIVERY
     )
     message(STATUS "Reliable delivery: ENABLED (blocking mode)")
@@ -198,6 +221,9 @@ set_target_properties(simple PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 set_target_properties(rotation_demo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+set_target_properties(log_mods PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
