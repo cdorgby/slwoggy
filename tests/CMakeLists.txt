@@ -8,6 +8,7 @@ set(TEST_SOURCES
     test_log_site_control.cpp
     test_log_filters.cpp
     test_rotation.cpp
+    test_sink_filters.cpp
 )
 
 # Function to set per-file compile definitions for tests
@@ -136,9 +137,21 @@ target_include_directories(test_rotation PRIVATE
 add_metrics_definitions(test_rotation)
 catch_discover_tests(test_rotation)
 
+# Sink filter tests
+set(TEST_SINK_FILTERS_SOURCES main.cpp test_sink_filters.cpp)
+add_executable(test_sink_filters ${TEST_SINK_FILTERS_SOURCES})
+set_target_properties(test_sink_filters PROPERTIES EXCLUDE_FROM_ALL TRUE)
+set_test_source_file_compile_definitions(test_sink_filters "${TEST_SINK_FILTERS_SOURCES}")
+target_link_libraries(test_sink_filters PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
+target_include_directories(test_sink_filters PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_metrics_definitions(test_sink_filters)
+catch_discover_tests(test_sink_filters)
+
 # Custom target to build all tests
 add_custom_target(tests
-    DEPENDS test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control test_log_filters test_rotation
+    DEPENDS test_log test_log_structured test_log_statistics test_log_level_control test_log_site_control test_log_filters test_rotation test_sink_filters
     COMMENT "Building all test executables"
 )
 

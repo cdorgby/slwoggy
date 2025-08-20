@@ -1,6 +1,6 @@
 /**
  * @file log_sinks.hpp
- * @brief Factory functions for creating common log sinks
+ * @brief Factory functions for creating common log sinks with optional filtering
  * @author dorgby.net
  * @copyright Copyright (c) 2025 dorgby.net. Licensed under MIT License, see LICENSE for details.
  */
@@ -9,29 +9,48 @@
 #include "log_sink.hpp"
 #include "log_formatters.hpp"
 #include "log_writers.hpp"
+#include "log_sink_filters.hpp"
 #include <string_view>
 
 namespace slwoggy
 {
 
-inline std::shared_ptr<log_sink> make_stdout_sink()
+// Factory functions with optional filtering support via default parameter
+
+template<typename Filter = no_filter>
+inline std::shared_ptr<log_sink> make_stdout_sink(Filter filter = {})
 {
-    return std::make_shared<log_sink>(raw_formatter{true, true}, file_writer{STDOUT_FILENO});
+    if constexpr (std::is_same_v<Filter, no_filter>)
+        return std::make_shared<log_sink>(raw_formatter{true, true}, file_writer{STDOUT_FILENO});
+    else
+        return std::make_shared<log_sink>(raw_formatter{true, true}, file_writer{STDOUT_FILENO}, std::move(filter));
 }
 
-inline std::shared_ptr<log_sink> make_raw_file_sink(const std::string_view &filename, rotate_policy policy = {})
+template<typename Filter = no_filter>
+inline std::shared_ptr<log_sink> make_raw_file_sink(const std::string_view &filename, rotate_policy policy = {}, Filter filter = {})
 {
-    return std::make_shared<log_sink>(raw_formatter{false, true}, file_writer{std::string(filename), policy});
+    if constexpr (std::is_same_v<Filter, no_filter>)
+        return std::make_shared<log_sink>(raw_formatter{false, true}, file_writer{std::string(filename), policy});
+    else
+        return std::make_shared<log_sink>(raw_formatter{false, true}, file_writer{std::string(filename), policy}, std::move(filter));
 }
 
-inline std::shared_ptr<log_sink> make_writev_file_sink(const std::string_view &filename, rotate_policy policy = {})
+template<typename Filter = no_filter>
+inline std::shared_ptr<log_sink> make_writev_file_sink(const std::string_view &filename, rotate_policy policy = {}, Filter filter = {})
 {
-    return std::make_shared<log_sink>(raw_formatter{false, true}, writev_file_writer{std::string(filename), policy});
+    if constexpr (std::is_same_v<Filter, no_filter>)
+        return std::make_shared<log_sink>(raw_formatter{false, true}, writev_file_writer{std::string(filename), policy});
+    else
+        return std::make_shared<log_sink>(raw_formatter{false, true}, writev_file_writer{std::string(filename), policy}, std::move(filter));
 }
 
-inline std::shared_ptr<log_sink> make_json_sink(const std::string_view &filename, rotate_policy policy = {})
+template<typename Filter = no_filter>
+inline std::shared_ptr<log_sink> make_json_sink(const std::string_view &filename, rotate_policy policy = {}, Filter filter = {})
 {
-    return std::make_shared<log_sink>(taocpp_json_formatter{false, true}, file_writer{std::string(filename), policy});
+    if constexpr (std::is_same_v<Filter, no_filter>)
+        return std::make_shared<log_sink>(taocpp_json_formatter{false, true}, file_writer{std::string(filename), policy});
+    else
+        return std::make_shared<log_sink>(taocpp_json_formatter{false, true}, file_writer{std::string(filename), policy}, std::move(filter));
 }
 
 } // namespace slwoggy
