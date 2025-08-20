@@ -116,6 +116,7 @@ struct rotate_policy
     /// @}
 };
 
+#ifdef LOG_COLLECT_ROTATION_METRICS
 /**
  * @brief Metrics for monitoring rotation behavior
  * 
@@ -214,6 +215,7 @@ struct rotation_metrics
 
     void dump_metrics() const; // Implementation in .cpp file
 };
+#endif // LOG_COLLECT_ROTATION_METRICS
 
 /**
  * @brief Handle for managing a rotating log file
@@ -361,6 +363,7 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
  * 
  * @note Thread-safe singleton accessed via instance() method
  */
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
 /**
  * @brief Compression thread statistics
  */
@@ -373,6 +376,7 @@ struct compression_stats
     size_t current_queue_size;       ///< Current number of items in queue
     size_t queue_high_water_mark;    ///< Maximum queue size ever reached
 };
+#endif
 
 class file_rotation_service
 {
@@ -411,10 +415,12 @@ class file_rotation_service
     size_t compression_queue_max_{10};
     std::chrono::milliseconds compression_delay_{500};
     
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
     // Compression statistics
     std::atomic<uint64_t> compression_files_queued_{0};
     std::atomic<uint64_t> compression_files_compressed_{0};
     std::atomic<uint64_t> compression_files_cancelled_{0};
+#endif
 
     file_rotation_service();
     ~file_rotation_service();
@@ -499,6 +505,7 @@ class file_rotation_service
      */
     bool is_compression_enabled() const { return compression_running_.load(); }
     
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
     /**
      * @brief Get compression thread statistics
      */
@@ -508,7 +515,11 @@ class file_rotation_service
         stats.files_queued = compression_files_queued_.load();
         stats.files_compressed = compression_files_compressed_.load();
         stats.files_cancelled = compression_files_cancelled_.load();
+#ifdef LOG_COLLECT_ROTATION_METRICS
         stats.queue_overflows = rotation_metrics::instance().compression_queue_overflows.load();
+#else
+        stats.queue_overflows = 0;
+#endif
         stats.current_queue_size = compression_queue_size_.load();
         stats.queue_high_water_mark = compression_queue_high_water_.load();
         return stats;
@@ -523,8 +534,11 @@ class file_rotation_service
         compression_files_compressed_ = 0;
         compression_files_cancelled_ = 0;
         compression_queue_high_water_ = compression_queue_size_.load();
+#ifdef LOG_COLLECT_ROTATION_METRICS
         rotation_metrics::instance().compression_queue_overflows = 0;
+#endif
     }
+#endif
 };
 
 // Inline implementations that need full definitions

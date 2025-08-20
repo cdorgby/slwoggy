@@ -176,17 +176,25 @@ TEST_CASE_METHOD(rotation_test_fixture, "Basic rotation service instantiation", 
 
     SECTION("Metrics singleton")
     {
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto &metrics1 = rotation_metrics::instance();
         auto &metrics2 = rotation_metrics::instance();
         REQUIRE(&metrics1 == &metrics2);
+#else
+        SUCCEED("Metrics disabled in Release build");
+#endif
     }
 }
 
 TEST_CASE_METHOD(rotation_test_fixture, "Size-based rotation", "[rotation][size]")
 {
     // Reset metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics          = rotation_metrics::instance();
     auto initial_rotations = metrics.rotations_total.load();
+#else
+    auto initial_rotations = 0;
+#endif
 
     SECTION("Rotation at exact size boundary")
     {
@@ -212,7 +220,9 @@ TEST_CASE_METHOD(rotation_test_fixture, "Size-based rotation", "[rotation][size]
         REQUIRE(file_exists(base_filename));
 
         // Verify metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
         REQUIRE(metrics.rotations_total.load() > initial_rotations);
+#endif
     }
 
     SECTION("Multiple rotations")
@@ -241,7 +251,9 @@ TEST_CASE_METHOD(rotation_test_fixture, "Size-based rotation", "[rotation][size]
 
 TEST_CASE_METHOD(rotation_test_fixture, "Time-based rotation", "[rotation][time]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
+#endif
 
     SECTION("Rotation on time boundary during write")
     {
@@ -605,7 +617,9 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
 
 TEST_CASE_METHOD(rotation_test_fixture, "Error handling", "[rotation][errors]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
+#endif
 
     SECTION("Handle missing directory")
     {
@@ -630,18 +644,26 @@ TEST_CASE_METHOD(rotation_test_fixture, "Error handling", "[rotation][errors]")
         // Simulate error state by creating max retries scenario
         // This is hard to test without mocking, but we can verify metrics
 
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto initial_dropped = metrics.dropped_records_total.load();
+#else
+        auto initial_dropped = 0;
+#endif
 
         // Normal write should succeed
         write_data(writer, 100);
 
+#ifdef LOG_COLLECT_ROTATION_METRICS
         REQUIRE(metrics.dropped_records_total.load() == initial_dropped);
+#endif
     }
 }
 
 TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
+#endif
     
     // Check for environment variable pointing to a restricted space directory
     const char* tmpfs_dir_env = std::getenv("TEST_TMPFS_DIR");
@@ -711,12 +733,14 @@ TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
         }
         
         // Record initial metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto initial_pending = metrics.enospc_deletions_pending.load();
         auto initial_gz = metrics.enospc_deletions_gz.load();
         auto initial_raw = metrics.enospc_deletions_raw.load();
         auto initial_dropped_records = metrics.dropped_records_total.load();
         auto initial_dropped_bytes = metrics.dropped_bytes_total.load();
         auto initial_prepare_failures = metrics.prepare_fd_failures.load();
+#endif
         
         std::string test_log_path = test_subdir + "/test.log";
         
@@ -755,15 +779,16 @@ TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
         } catch (const std::exception& e) {
             INFO("File writer threw exception: " << e.what());
         }
-        
+
+#ifdef LOG_COLLECT_ROTATION_METRICS
         // Check metrics to verify ENOSPC was handled
-        auto new_pending = metrics.enospc_deletions_pending.load();
-        auto new_gz = metrics.enospc_deletions_gz.load();
-        auto new_raw = metrics.enospc_deletions_raw.load();
-        auto new_dropped_records = metrics.dropped_records_total.load();
-        auto new_dropped_bytes = metrics.dropped_bytes_total.load();
+        auto new_pending          = metrics.enospc_deletions_pending.load();
+        auto new_gz               = metrics.enospc_deletions_gz.load();
+        auto new_raw              = metrics.enospc_deletions_raw.load();
+        auto new_dropped_records  = metrics.dropped_records_total.load();
+        auto new_dropped_bytes    = metrics.dropped_bytes_total.load();
         auto new_prepare_failures = metrics.prepare_fd_failures.load();
-        
+
         INFO("ENOSPC handling results:");
         INFO("  Pending deletions: " << (new_pending - initial_pending));
         INFO("  GZ deletions: " << (new_gz - initial_gz));
@@ -771,25 +796,25 @@ TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
         INFO("  Dropped records: " << (new_dropped_records - initial_dropped_records));
         INFO("  Dropped bytes: " << (new_dropped_bytes - initial_dropped_bytes));
         INFO("  Prepare FD failures: " << (new_prepare_failures - initial_prepare_failures));
-        
+
         // With a real restricted filesystem, we should see ENOSPC handling
         // At minimum, one of these should have increased:
-        bool enospc_handled = (new_pending > initial_pending) ||
-                             (new_gz > initial_gz) ||
-                             (new_raw > initial_raw) ||
-                             (new_prepare_failures > initial_prepare_failures) ||
-                             (new_dropped_records > initial_dropped_records);
-        
+        bool enospc_handled = (new_pending > initial_pending) || (new_gz > initial_gz) || (new_raw > initial_raw) ||
+                              (new_prepare_failures > initial_prepare_failures) ||
+                              (new_dropped_records > initial_dropped_records);
+
         REQUIRE(enospc_handled);
-        
+
         // Verify deletion priority if deletions occurred
-        if (new_pending > initial_pending || new_gz > initial_gz || new_raw > initial_raw) {
+        if (new_pending > initial_pending || new_gz > initial_gz || new_raw > initial_raw)
+        {
             INFO("Emergency cleanup was triggered - verifying priority order");
             // .pending files should be deleted before .gz files
             // .gz files should be deleted before raw logs
             // This is more of a code coverage check than a strict requirement
         }
-        
+#endif
+
         // Cleanup
         try {
             fs::remove_all(test_subdir);
@@ -807,8 +832,13 @@ TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
         fs::create_directories(restricted_dir);
         
         // Record initial dropped metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto initial_dropped_records = metrics.dropped_records_total.load();
         auto initial_dropped_bytes = metrics.dropped_bytes_total.load();
+#else
+        auto initial_dropped_records = 0;
+        auto initial_dropped_bytes = 0;
+#endif
         
         rotate_policy policy;
         policy.mode = rotate_policy::kind::size;
@@ -842,6 +872,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
         }
         
         // Check that drops were recorded or writes failed
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto new_dropped_records = metrics.dropped_records_total.load();
         auto new_dropped_bytes = metrics.dropped_bytes_total.load();
         
@@ -851,11 +882,13 @@ TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
         // Metrics should be accessible (may or may not increase depending on timing)
         REQUIRE(new_dropped_records >= initial_dropped_records);
         REQUIRE(new_dropped_bytes >= initial_dropped_bytes);
+#endif
     }
 }
 
 TEST_CASE_METHOD(rotation_test_fixture, "Zero-gap rotation", "[rotation][zero-gap]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics          = rotation_metrics::instance();
     auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
 
@@ -907,6 +940,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Zero-gap rotation", "[rotation][zero-ga
         // Verify files were still rotated successfully even if fallback was used
         REQUIRE(count_rotated_files() >= 2);
     }
+#endif
 }
 
 TEST_CASE_METHOD(rotation_test_fixture, "Filename generation", "[rotation][filenames]")
@@ -974,8 +1008,12 @@ TEST_CASE_METHOD(rotation_test_fixture, "Filename generation", "[rotation][filen
 
 TEST_CASE_METHOD(rotation_test_fixture, "Compression", "[rotation][compression]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
     auto initial_compressions = metrics.compression_failures.load();
+#else
+    auto initial_compressions = 0;
+#endif
     
     SECTION("Synchronous compression (no thread)")
     {
@@ -1145,7 +1183,9 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
     SECTION("Compression statistics tracking")
     {
         // Reset statistics from previous tests
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
         file_rotation_service::instance().reset_compression_stats();
+#endif
         
         // Start compression thread
         file_rotation_service::instance().start_compression_thread(
@@ -1154,9 +1194,11 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
         );
         
         // Get initial stats
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
         auto stats_before = file_rotation_service::instance().get_compression_stats();
         REQUIRE(stats_before.files_queued == 0);
         REQUIRE(stats_before.files_compressed == 0);
+#endif
         
         rotate_policy policy;
         policy.mode = rotate_policy::kind::size;
@@ -1176,6 +1218,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
         
         file_rotation_service::instance().stop_compression_thread();
         // Check statistics
+#ifdef LOG_COLLECT_COMPRESSION_METRICS
         auto stats_after = file_rotation_service::instance().get_compression_stats();
         INFO("Files queued: " << stats_after.files_queued);
         INFO("Files compressed: " << stats_after.files_compressed);
@@ -1195,6 +1238,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
         }
         // High water mark should be at most queue size
         REQUIRE(stats_after.queue_high_water_mark <= 3);
+#endif
         
     }
     
@@ -1256,7 +1300,9 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
         policy.compress = true;
         
         // Get initial rotation metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto initial_stats = rotation_metrics::instance().get_stats();
+#endif
         
         // Open the pipe for logging
         auto sink = make_raw_file_sink(pipe_path, policy);
@@ -1275,10 +1321,14 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression cancellation", "[rotation][
         REQUIRE(bytes_read.load() > 0);
         
         // Get final rotation metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto final_stats = rotation_metrics::instance().get_stats();
+#endif
         
         // Verify no rotations occurred
+#ifdef LOG_COLLECT_ROTATION_METRICS
         REQUIRE(final_stats.total_rotations == initial_stats.total_rotations);
+#endif
         
         // Verify only the pipe exists, no rotated files
         size_t file_count = 0;
@@ -1512,6 +1562,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression with retention", "[rotation
 
 TEST_CASE_METHOD(rotation_test_fixture, "Compression performance", "[rotation][compression][performance]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     SECTION("Performance comparison sync vs async")
     {
         auto &metrics = rotation_metrics::instance();
@@ -1580,6 +1631,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression performance", "[rotation][c
             file_rotation_service::instance().stop_compression_thread();
         }
     }
+#endif
 }
 
 TEST_CASE_METHOD(rotation_test_fixture, "Concurrent rotation", "[rotation][concurrent]")
@@ -1628,6 +1680,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Concurrent rotation", "[rotation][concu
 
 TEST_CASE_METHOD(rotation_test_fixture, "Metrics accuracy", "[rotation][metrics]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
 
     // Reset/baseline metrics
@@ -1678,6 +1731,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Metrics accuracy", "[rotation][metrics]
             REQUIRE(avg_duration < 1'000'000); // Less than 1 second
         }
     }
+#endif
 }
 
 TEST_CASE_METHOD(rotation_test_fixture, "Writer comparison", "[rotation][writers]")
@@ -1843,9 +1897,11 @@ TEST_CASE_METHOD(rotation_test_fixture, "Integration with log system", "[rotatio
         std::this_thread::sleep_for(500ms);
 
         // Check metrics
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto &metrics = rotation_metrics::instance();
         REQUIRE(metrics.rotations_total.load() > 0);
         REQUIRE(metrics.dropped_records_total.load() == 0);
+#endif
 
         // Verify retention - should have at most keep_files rotated files
         REQUIRE(count_rotated_files() <= 3);
@@ -1882,6 +1938,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Integration with log system", "[rotatio
 // Failure metrics tests - critical for forensics/traceability
 TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][metrics]")
 {
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
 
     SECTION("ENOSPC metrics tracking")
@@ -2099,7 +2156,9 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
 
     SECTION("Metrics persistence across rotations")
     {
+#ifdef LOG_COLLECT_ROTATION_METRICS
         auto &metrics = rotation_metrics::instance();
+#endif
 
         // Record all initial values
         auto initial_rotations      = metrics.rotations_total.load();
@@ -2159,6 +2218,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
         REQUIRE(metrics.prepare_fd_failures.load() >= 0);
         REQUIRE(metrics.fsync_failures.load() >= 0);
     }
+#endif
 }
 
 // Performance test (not run by default)
