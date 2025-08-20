@@ -581,7 +581,7 @@ policy.compress = true;  // Will use async compression thread
 auto sink = make_writev_file_sink("/var/log/app.log", policy);
 log_line_dispatcher::instance().add_sink(sink);
 
-// Thread can be stopped anytime, it can be retarted again at any time.
+// Thread can be stopped anytime, it can be restarted again at any time.
 file_rotation_service::instance().stop_compression_thread();
 ```
 
