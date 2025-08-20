@@ -396,8 +396,8 @@ inline std::string file_rotation_service::generate_rotated_filename(const std::s
     std::string stem = base_path.stem().string();
     std::string ext = base_path.extension().string();
     
-    // If no extension or extension is not a typical log extension, use .log
-    if (ext.empty() || (ext != ".log" && ext != ".txt")) {
+    // If no extension or invalid extension format, use .log
+    if (ext.empty() || ext.size() < 2 || !ext.starts_with(".")) {
         ext = ".log";
     }
 
