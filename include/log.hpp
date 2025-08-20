@@ -191,10 +191,12 @@
  * for minimal overhead using single-writer patterns where possible.
  *
  * Metrics collection is optional and must be enabled at compile time by defining:
- * - LOG_COLLECT_BUFFER_POOL_METRICS - Buffer pool statistics
- * - LOG_COLLECT_DISPATCHER_METRICS - Dispatcher and queue statistics
+ * - LOG_COLLECT_BUFFER_POOL_METRICS - Buffer pool statistics with usage tracking
+ * - LOG_COLLECT_DISPATCHER_METRICS - Dispatcher and queue statistics  
  * - LOG_COLLECT_STRUCTURED_METRICS - Structured logging drop statistics
  * - LOG_COLLECT_DISPATCHER_MSG_RATE - Sliding window message rate tracking
+ * - LOG_COLLECT_ROTATION_METRICS - File rotation statistics
+ * - LOG_COLLECT_COMPRESSION_METRICS - Compression thread statistics
  *
  * Available Metrics (when enabled):
  *
@@ -208,6 +210,9 @@
  *    - usage_percent: Current utilization percentage
  *    - pool_memory_kb: Total memory footprint
  *    - high_water_mark: Maximum buffers ever in use
+ *    - metadata_usage: Min/max/avg bytes used in metadata area
+ *    - text_usage: Min/max/avg bytes used in text area
+ *    - total_usage: Min/max/avg total buffer bytes used
  *
  * 2. Dispatcher Statistics (log_line_dispatcher::instance().get_stats()):
  *    - total_dispatched: Total messages processed
@@ -219,13 +224,14 @@
  *    - queue_usage_percent: Queue utilization
  *    - worker_iterations: Worker loop iterations
  *    - active_sinks: Currently configured sinks
- *    - avg_dispatch_time_us: Average sink dispatch time PER BUFFER (batch time / buffer count)
- *    - max_dispatch_time_us: Maximum sink dispatch time PER BUFFER (worst per-buffer average)
+ *    - avg_dispatch_time_us: Average sink dispatch time PER BUFFER
+ *    - max_dispatch_time_us: Maximum sink dispatch time PER BUFFER
  *    - messages_per_second_1s: Message rate over last 1 second (requires LOG_COLLECT_DISPATCHER_MSG_RATE)
  *    - messages_per_second_10s: Message rate over last 10 seconds (requires LOG_COLLECT_DISPATCHER_MSG_RATE)
  *    - messages_per_second_60s: Message rate over last 60 seconds (requires LOG_COLLECT_DISPATCHER_MSG_RATE)
  *    - avg_batch_size: Average messages per batch
  *    - total_batches: Total batches processed
+ *    - min_batch_size: Minimum batch size observed
  *    - max_batch_size: Maximum batch size observed
  *    - min_inflight_time_us: Minimum in-flight time (buffer creation to sink completion)
  *    - avg_inflight_time_us: Average in-flight time (buffer creation to sink completion)
@@ -235,16 +241,48 @@
  *    - max_dequeue_time_us: Maximum TOTAL time in dequeue_buffers (includes waiting)
  *    - uptime: Time since dispatcher started
  *
- * 3. Structured Logging Statistics:
+ * 3. Structured Logging Statistics (requires LOG_COLLECT_STRUCTURED_METRICS):
  *    - Key Registry (structured_log_key_registry::instance().get_stats()):
  *      - key_count: Number of registered keys
- *      - max_keys: Maximum allowed
+ *      - max_keys: Maximum allowed (MAX_STRUCTURED_KEYS)
  *      - usage_percent: Registry utilization
  *      - estimated_memory_kb: Memory usage estimate
  *
  *    - Metadata Drops (log_buffer_metadata_adapter::get_drop_stats()):
- *      - drop_count: Metadata entries dropped
+ *      - dropped_count: Metadata entries dropped
  *      - dropped_bytes: Total bytes dropped
+ *
+ * 4. File Rotation Statistics (requires LOG_COLLECT_ROTATION_METRICS):
+ *    - Rotation Metrics (rotation_metrics::instance().get_stats()):
+ *      - total_rotations: Total rotation operations performed
+ *      - avg_rotation_time_us: Average time per rotation
+ *      - total_rotation_time_us: Total time spent rotating
+ *      - failed_rotations: Rotations that failed
+ *      - enospc_errors: Disk full errors encountered
+ *      - enospc_pending_deleted: .pending files deleted for space
+ *      - enospc_gz_deleted: .gz files deleted for space
+ *      - enospc_raw_deleted: Raw log files deleted for space
+ *      - retention_files_deleted: Files deleted by retention policy
+ *      - retention_bytes_deleted: Bytes freed by retention
+ *      - compress_errors: Compression failures
+ *      - compress_successes: Successful compressions
+ *      - compress_bytes_saved: Space saved by compression
+ *      - compress_time_us: Time spent compressing
+ *      - open_errors: File open failures
+ *      - write_errors: Write failures
+ *      - sync_errors: Sync failures
+ *      - cache_size: Current rotation cache size
+ *      - cache_memory_kb: Memory used by cache
+ *      - compression_queue_overflows: Times compression queue was full
+ *
+ *    - Compression Statistics (requires LOG_COLLECT_COMPRESSION_METRICS):
+ *      file_rotation_service::instance().get_compression_stats():
+ *      - files_queued: Total files queued for compression
+ *      - files_compressed: Successfully compressed files
+ *      - files_cancelled: Files cancelled before/during compression
+ *      - queue_overflows: Times queue was full when enqueueing
+ *      - current_queue_size: Current compression queue depth
+ *      - queue_high_water_mark: Maximum queue size reached
  *
  * Monitoring Examples:
  * @code
@@ -277,6 +315,22 @@
  *     std::cerr << "WARNING: Dropped " << drops << " metadata entries ("
  *               << bytes << " bytes) - consider smaller metadata\n";
  * }
+ * #endif
+ *
+ * #ifdef LOG_COLLECT_ROTATION_METRICS
+ * // Monitor rotation metrics
+ * auto rot_stats = rotation_metrics::instance().get_stats();
+ * if (rot_stats.failed_rotations > 0 || rot_stats.enospc_errors > 0) {
+ *     std::cerr << "WARNING: Rotation issues - " << rot_stats.failed_rotations 
+ *               << " failures, " << rot_stats.enospc_errors << " disk full errors\n";
+ * }
+ * #endif
+ * 
+ * #ifdef LOG_COLLECT_COMPRESSION_METRICS
+ * // Monitor compression metrics
+ * auto comp_stats = file_rotation_service::instance().get_compression_stats();
+ * std::cout << "Compression queue: " << comp_stats.current_queue_size 
+ *           << "/" << comp_stats.queue_high_water_mark << " (max)\n";
  * #endif
  *
  * // Health check function (requires all metrics enabled)
@@ -318,18 +372,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "fmt_config.hpp"     // IWYU pragma: keep
-#include "log_types.hpp"      // IWYU pragma: keep
-#include "log_site.hpp"       // IWYU pragma: keep
-#include "log_module.hpp"     // IWYU pragma: keep
-#include "log_buffer.hpp"     // IWYU pragma: keep
-#include "log_sink.hpp"       // IWYU pragma: keep
-#include "log_formatters.hpp" // IWYU pragma: keep
-#include "log_writers.hpp"    // IWYU pragma: keep
-#include "log_sinks.hpp"      // IWYU pragma: keep
-#include "log_version.hpp"    // IWYU pragma: keep
-#include "log_line.hpp"       // IWYU pragma: keep
-#include "log_dispatcher.hpp" // IWYU pragma: keep
+#include "fmt_config.hpp"       // IWYU pragma: keep
+#include "log_types.hpp"        // IWYU pragma: keep
+#include "log_site.hpp"         // IWYU pragma: keep
+#include "log_module.hpp"       // IWYU pragma: keep
+#include "log_buffer.hpp"       // IWYU pragma: keep
+#include "log_sink.hpp"         // IWYU pragma: keep
+#include "log_formatters.hpp"   // IWYU pragma: keep
+#include "log_writers.hpp"      // IWYU pragma: keep
+#include "log_sinks.hpp"        // IWYU pragma: keep
+#include "log_version.hpp"      // IWYU pragma: keep
+#include "log_line.hpp"         // IWYU pragma: keep
+#include "log_dispatcher.hpp"   // IWYU pragma: keep
 #include "log_file_rotator.hpp" // IWYU pragma: keep
 
 // formatter specializations for smart pointers
@@ -371,30 +425,96 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
  * 3. Runtime filtering: Checks against the current module's dynamic log level
  * 4. Returns a log_line object of the specified type
  */
-#define LOG_BASE(_level, _line_type)                                                                                          \
-    []()                                                                                                                      \
-    {                                                                                                                         \
-        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                                  \
-        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                               \
-        {                                                                                                                     \
-            static struct                                                                                                     \
-            {                                                                                                                 \
-                struct registrar                                                                                              \
-                {                                                                                                             \
-                    ::slwoggy::log_site_descriptor &site_;                                                                    \
-                    registrar()                                                                                               \
-                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__))         \
-                    {                                                                                                         \
-                    }                                                                                                         \
-                } r_;                                                                                                         \
-            } _reg;                                                                                                           \
-            if (level >= g_log_module_info.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level) \
-            {                                                                                                                 \
-                return ::slwoggy::_line_type(level, ::slwoggy::g_log_module_info, SOURCE_FILE_NAME, __LINE__);                \
-            }                                                                                                                 \
-        }                                                                                                                     \
-        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                       \
+#define LOG_BASE(_level, _line_type, _module)                                                                         \
+    []()                                                                                                              \
+    {                                                                                                                 \
+        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                          \
+        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                       \
+        {                                                                                                             \
+            static struct                                                                                             \
+            {                                                                                                         \
+                struct registrar                                                                                      \
+                {                                                                                                     \
+                    ::slwoggy::log_site_descriptor &site_;                                                            \
+                    registrar()                                                                                       \
+                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__)) \
+                    {                                                                                                 \
+                    }                                                                                                 \
+                } r_;                                                                                                 \
+            } _reg;                                                                                                   \
+            if (level >= _module.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level)   \
+            {                                                                                                         \
+                return ::slwoggy::_line_type(level, _module, SOURCE_FILE_NAME, __LINE__);                             \
+            }                                                                                                         \
+        }                                                                                                             \
+        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);               \
     }()
+
+/**
+ * @brief Base macro for log line creation with compile-time module lookup
+ * @internal
+ * 
+ * Similar to LOG_BASE but uses a different module specified at compile time.
+ * Module is looked up once and cached in a static variable.
+ */
+#define LOG_BASE_WITH_MODULE(_level, _line_type, _module_name)                                                          \
+    []()                                                                                                                \
+    {                                                                                                                   \
+        static_assert(std::is_convertible_v<decltype(_module_name), const char *>,                                      \
+                      "Module name must be convertible to const char*");                                                \
+        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                            \
+        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                         \
+        {                                                                                                               \
+            static struct                                                                                               \
+            {                                                                                                           \
+                ::slwoggy::log_module_info module{::slwoggy::log_module_registry::instance().get_module(_module_name)}; \
+                struct registrar                                                                                        \
+                {                                                                                                       \
+                    ::slwoggy::log_site_descriptor &site_;                                                              \
+                    registrar()                                                                                         \
+                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__))   \
+                    {                                                                                                   \
+                    }                                                                                                   \
+                } r_;                                                                                                   \
+            } _static_data;                                                                                             \
+            if (level >= _static_data.module.detail->level.load(std::memory_order_relaxed) &&                           \
+                level >= _static_data.r_.site_.min_level)                                                               \
+            {                                                                                                           \
+                return ::slwoggy::_line_type(level, _static_data.module, SOURCE_FILE_NAME, __LINE__);                   \
+            }                                                                                                           \
+        }                                                                                                               \
+        /* Fallback when level is filtered at compile time - _static_data doesn't exist */                              \
+        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                 \
+    }()
+
+/**
+ * @brief Log macros that allow specifying a module name at the call site
+ * 
+ * These macros use a module specified at compile time, looked up once
+ * and cached in a static variable for efficiency.
+ *
+ * Three variants are available:
+ * - LOG_MOD_TEXT: Uses traditional text format (log_line_headered)
+ * - LOG_MOD_STRUCT: Uses structured logfmt format (log_line_structured)
+ * - LOG_MOD: Alias for LOG_MOD_TEXT (default to text format)
+ *
+ * @param _level Log level (trace, debug, info, warn, error, critical)
+ * @param _module_name Module name as a string literal
+ *
+ * @code
+ * // Log with "network" module settings using text format
+ * LOG_MOD_TEXT(info, "network") << "Connection established";
+ * LOG_MOD(info, "network") << "Same as above - defaults to text";
+ * 
+ * // Log with "database" module using structured format
+ * LOG_MOD_STRUCT(error, "database")
+ *     .add("query_id", 123)
+ *     .format("Query failed: {}", error);
+ * @endcode
+ */
+#define LOG_MOD_TEXT(_level, _module_name)   LOG_BASE_WITH_MODULE(_level, log_line_headered, _module_name)
+#define LOG_MOD_STRUCT(_level, _module_name) LOG_BASE_WITH_MODULE(_level, log_line_structured, _module_name)
+#define LOG_MOD(_level, _module_name)        LOG_BASE_WITH_MODULE(_level, log_line_headered, _module_name)
 
 /**
  * @brief Creates a structured log line (logfmt format) with automatic source location
@@ -424,7 +544,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
  * // Output: msg="Request processed in 45ms" user_id=123 latency_ms=45 ts=... level=debug ...
  * @endcode
  */
-#define LOG_STRUCTURED(_level) LOG_BASE(_level, log_line_structured)
+#define LOG_STRUCTURED(_level) LOG_BASE(_level, log_line_structured, ::slwoggy::g_log_module_info)
 
 /**
  * @brief Creates a traditional text log line with header and automatic source location
@@ -449,7 +569,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
  * // Output: 00001235.123 [DEBUG] myapp      main.cpp:43 Processing 15 items
  * @endcode
  */
-#define LOG_TEXT(_level) LOG_BASE(_level, log_line_headered)
+#define LOG_TEXT(_level) LOG_BASE(_level, log_line_headered, ::slwoggy::g_log_module_info)
 
 /**
  * @brief Default log macro - uses the configured default log line type

@@ -72,8 +72,9 @@ constexpr size_t COMPRESS_THREAD_MAX_BATCH = 10; // Max files to compress in one
 // #define LOG_COLLECT_BUFFER_POOL_METRICS 1 // Enable buffer pool statistics
 // #define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
 // #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
-// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
-// LOG_COLLECT_DISPATCHER_METRICS)
+// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires LOG_COLLECT_DISPATCHER_METRICS)
+// #define LOG_COLLECT_ROTATION_METRICS    1 // Enable file rotation statistics
+// #define LOG_COLLECT_COMPRESSION_METRICS 1 // Enable compression thread statistics
 
 /**
  * @brief Concept for types that can be logged

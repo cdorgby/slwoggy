@@ -207,6 +207,30 @@ for (const auto& [name, level] : modules) {
 - Avoid spaces and special characters
 - The "generic" module is the default for files without LOG_MODULE_NAME
 
+### Dynamic Module Selection
+
+You can specify a module name at the log call site using the LOG_MOD macros. This allows logging with a different module's settings without changing the compilation unit's default module:
+
+```cpp
+// Three variants available:
+// LOG_MOD_TEXT - traditional text format
+// LOG_MOD_STRUCT - structured logfmt format  
+// LOG_MOD - alias for LOG_MOD_TEXT (defaults to text)
+
+// Log with "network" module even if file uses different module
+LOG_MOD(info, "network") << "Connection established";
+LOG_MOD_TEXT(debug, "network") << "Same as above - explicit text format";
+
+// Structured format with specific module
+LOG_MOD_STRUCT(error, "database")
+    .add("query_id", 123)
+    .add("error", "connection timeout")
+    << "Query failed";
+
+```
+
+**Performance Note:** The LOG_MOD macros perform a one-time module lookup during static initialization and cache the result. While more efficient than runtime lookup on every call, they still have slightly more overhead than regular LOG macros which use a pre-resolved module reference from the compilation unit. The module name must be a compile-time string literal.
+
 ## Structured Logging
 
 Add searchable metadata to any log message:

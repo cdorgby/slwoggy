@@ -30,6 +30,8 @@ function(add_metrics_definitions TARGET)
             LOG_COLLECT_DISPATCHER_METRICS
             LOG_COLLECT_STRUCTURED_METRICS
             LOG_COLLECT_DISPATCHER_MSG_RATE
+            LOG_COLLECT_ROTATION_METRICS
+            LOG_COLLECT_COMPRESSION_METRICS
         )
     endif()
     # Apply LOG_RELIABLE_DELIVERY setting from parent
@@ -76,6 +78,8 @@ target_compile_definitions(test_log_statistics PRIVATE
     LOG_COLLECT_BUFFER_POOL_METRICS
     LOG_COLLECT_DISPATCHER_METRICS
     LOG_COLLECT_STRUCTURED_METRICS
+    LOG_COLLECT_ROTATION_METRICS
+    LOG_COLLECT_COMPRESSION_METRICS
 )
 target_link_libraries(test_log_statistics PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
 target_include_directories(test_log_statistics PRIVATE 
