@@ -397,7 +397,7 @@ inline std::string file_rotation_service::generate_rotated_filename(const std::s
     std::string ext = base_path.extension().string();
     
     // If no extension or invalid extension format, use .log
-    if (ext.empty() || ext.size() < 2 || !ext.starts_with(".")) {
+    if (ext.empty() || ext.size() < MIN_EXTENSION_SIZE || !ext.starts_with(".")) {
         ext = ".log";
     }
 
@@ -727,6 +727,10 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
                             
                             handle->rotated_files_cache_.push_back(file_entry);
                         }
+                        else
+                        {
+                            LOG(debug) << "Failed to stat file for cache initialization: " << get_error_string(errno);
+                        }
                     }
                 }
             }
@@ -866,7 +870,6 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
 // Compression thread functions
 inline void file_rotation_service::compression_thread_func()
 {
-    constexpr size_t MAX_BATCH = 10;
     std::vector<std::shared_ptr<rotation_handle::rotated_file_entry>> batch;
     
     while (compression_running_.load()) {
@@ -895,7 +898,7 @@ inline void file_rotation_service::compression_thread_func()
                 if (entry) {
                     batch.push_back(entry);
                     compression_queue_size_.fetch_sub(1);
-                    if (batch.size() >= MAX_BATCH) break;
+                    if (batch.size() >= COMPRESS_THREAD_MAX_BATCH) break;
                 }
             }
         } while (compression_running_.load() && log_fast_timestamp() < deadline);

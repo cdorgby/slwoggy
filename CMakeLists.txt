@@ -201,40 +201,6 @@ set_target_properties(rotation_demo PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
-# Add test_compress executable for compression thread testing
-add_executable(test_compress src/test_compression.cpp)
-
-# Add include directories for test_compress
-target_include_directories(test_compress PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Link with taocpp/json and fmt
-target_link_libraries(test_compress PRIVATE taocppjson fmt::fmt)
-
-# Set per-file compile definitions for test_compress
-set_source_file_compile_definitions(test_compress "src/test_compression.cpp")
-
-# Enable same metrics collection as rotation_demo
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
-    target_compile_definitions(test_compress PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
-        LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
-        LOG_COLLECT_DISPATCHER_MSG_RATE
-    )
-endif()
-
-# Enable reliable delivery if configured
-if(LOG_RELIABLE_DELIVERY)
-    target_compile_definitions(test_compress PRIVATE
-        LOG_RELIABLE_DELIVERY
-    )
-endif()
-
-set_target_properties(test_compress PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
 
 # Platform-specific settings
 if(WIN32)
