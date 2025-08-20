@@ -18,16 +18,6 @@ on:
           - development
           - release
 
-  # Trigger on pushes to main for development builds
-  push:
-    branches:
-      - main
-    paths:
-      - 'include/**'
-      - 'amalgamate/**'
-      - 'create-amalgamation.sh'
-      - 'README.md'
-
 jobs:
   create-amalgamation:
     runs-on: ubuntu-latest
