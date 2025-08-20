@@ -615,7 +615,7 @@ file_rotation_service::instance().reset_compression_stats();
 2. **Monitor queue depth** - If queue_overflows > 0, compression is falling behind
 3. **Use async over sync** - Async compression prevents rotation blocking but still has throughput limits
 4. **Batch processing** - The delay parameter allows batching multiple files for efficiency
-5. **Graceful shutdown** - Try stop the compression thread before application exit if you want predictable shutdown.
+5. **Graceful shutdown** - Try to stop the compression thread before application exit if you want predictable shutdown.
 6. **ENOSPC handling** - Compression creates temporary files; ensure adequate disk space
 7. **Consider alternatives** - For high-throughput systems, use external log rotation tools or compress during off-peak hours
 
