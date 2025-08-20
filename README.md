@@ -1076,9 +1076,36 @@ cd build
 make amalgamation
 ```
 
-This creates `include/slwoggy.hpp` which includes the moodycamel library and all slwoggy headers in one file. Simply copy this file to your project and `#include "slwoggy.hpp"`.
+This creates `amalgamation/slwoggy.hpp` which includes the moodycamel library and all slwoggy headers in one file. Simply copy this file to your project and `#include "slwoggy.hpp"`.
 
 **Note about file paths**: When building with CMake, `SOURCE_FILE_NAME` is defined to show relative paths in log output. The amalgamated header automatically falls back to `__FILE__` when `SOURCE_FILE_NAME` is not defined, so it works out of the box without any build system configuration.
+
+### Pre-Built Downloads
+
+For convenience, automated builds are available that include the amalgamated header and documentation:
+
+**GitHub Releases** (for tagged versions):
+- Visit the [Releases page](https://github.com/cdorgby/slwoggy/releases) 
+- Download `slwoggy.hpp` directly from any release
+- Includes version info and ready-to-use examples
+
+**GitHub Actions Artifacts** (for development builds):
+- Go to [Actions](https://github.com/cdorgby/slwoggy/actions/workflows/amalgamation-build.yml)
+- Download build artifacts from recent runs
+- Contains complete build package with examples and documentation
+
+Each build package includes:
+- `slwoggy.hpp` - Single-header library (~1MB)
+- `BUILD_README.md` - Quick start guide
+- `example.cpp` - Simple usage example  
+- `build-example.sh` - Build script
+- Full project documentation
+
+**Quick start with a pre-built download:**
+1. Download `slwoggy.hpp` from releases or actions
+2. Copy to your project: `cp slwoggy.hpp my_project/`
+3. Include and use: `#include "slwoggy.hpp"`
+4. Compile: `g++ -std=c++20 -pthread my_file.cpp`
 
 ### Build Modes
 
