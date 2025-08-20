@@ -429,6 +429,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
                 return ::slwoggy::_line_type(level, _static_data.module, SOURCE_FILE_NAME, __LINE__);                   \
             }                                                                                                           \
         }                                                                                                               \
+        /* were using g_log_module_info here cuz _static_data has been constexpred-out */                               \
         return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);                 \
     }()
 
