@@ -1,0 +1,246 @@
+name: Amalgamation Build
+
+on:
+  # Trigger on new releases/tags
+  push:
+    tags:
+      - 'v*'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Type of release'
+        required: false
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - release
+
+  # Trigger on pushes to main for development builds
+  push:
+    branches:
+      - main
+    paths:
+      - 'include/**'
+      - 'amalgamate/**'
+      - 'create-amalgamation.sh'
+      - 'README.md'
+
+jobs:
+  create-amalgamation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Need full history for git describe to work
+          fetch-depth: 0
+          # Initialize submodules for dependencies
+          submodules: recursive
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ python3
+      
+      - name: Generate amalgamation
+        run: |
+          echo "Creating slwoggy amalgamation build..."
+          ./create-amalgamation.sh
+          
+          # Verify the amalgamation was created successfully
+          if [ ! -f "amalgamation/slwoggy.hpp" ]; then
+            echo "ERROR: Amalgamation failed - slwoggy.hpp not found"
+            exit 1
+          fi
+          
+          # Get file stats for logging
+          echo "Amalgamation created successfully:"
+          echo "  File: amalgamation/slwoggy.hpp"
+          echo "  Size: $(wc -c < amalgamation/slwoggy.hpp) bytes"
+          echo "  Lines: $(wc -l < amalgamation/slwoggy.hpp) lines"
+      
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+          
+          # Set a clean name for the artifact
+          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            CLEAN_VERSION=${VERSION#v}  # Remove 'v' prefix
+            echo "clean_version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+            echo "artifact_name=slwoggy-$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "clean_version=$VERSION" >> $GITHUB_OUTPUT
+            echo "artifact_name=slwoggy-$VERSION" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create build package
+        run: |
+          # Create a clean directory for the build
+          mkdir -p slwoggy-build
+          
+          # Copy the amalgamated header
+          cp amalgamation/slwoggy.hpp slwoggy-build/
+          
+          # Copy documentation
+          cp README.md slwoggy-build/
+          cp LICENSE slwoggy-build/
+          
+          # Create a simple usage example
+          cat > slwoggy-build/example.cpp << 'EOF'
+          #include "slwoggy.hpp"
+          
+          using namespace slwoggy;
+          
+          int main() {
+              // Configure a simple console sink
+              auto console_sink = make_console_sink();
+              log_line_dispatcher::instance().add_sink(console_sink);
+              
+              // Basic logging examples
+              LOG(info) << "Hello from slwoggy!" << endl;
+              LOG(debug) << "This is a debug message" << endl;
+              LOG(warn) << "This is a warning" << endl;
+              
+              // Structured logging example
+              LOG_STRUCTURED(info)
+                  .add("user", "alice")
+                  .add("action", "login")
+                  .add("ip", "192.168.1.100") << "User login successful" << endl;
+              
+              // Wait for all logs to be written
+              log_line_dispatcher::instance().flush();
+              
+              return 0;
+          }
+          EOF
+          
+          # Create a simple build script
+          cat > slwoggy-build/build-example.sh << 'EOF'
+          #!/bin/bash
+          echo "Building slwoggy example..."
+          g++ -std=c++20 -O2 -pthread example.cpp -o example
+          echo "Done! Run './example' to test."
+          EOF
+          chmod +x slwoggy-build/build-example.sh
+          
+          # Create README for the build package
+          cat > slwoggy-build/BUILD_README.md << EOF
+          # slwoggy Single-Header Build
+          
+          This package contains a single-header build of the slwoggy logging library.
+          
+          ## Version
+          
+          **slwoggy version:** ${{ steps.version.outputs.version }}
+          
+          ## Contents
+          
+          - \`slwoggy.hpp\` - The complete single-header library
+          - \`README.md\` - Full project documentation  
+          - \`LICENSE\` - MIT license
+          - \`example.cpp\` - Simple usage example
+          - \`build-example.sh\` - Script to build the example
+          
+          ## Quick Start
+          
+          1. Copy \`slwoggy.hpp\` to your project
+          2. Include it: \`#include "slwoggy.hpp"\`
+          3. Compile with C++20: \`g++ -std=c++20 -pthread your_file.cpp\`
+          
+          ## Example Usage
+          
+          \`\`\`cpp
+          #include "slwoggy.hpp"
+          
+          using namespace slwoggy;
+          
+          int main() {
+              auto console_sink = make_console_sink();
+              log_line_dispatcher::instance().add_sink(console_sink);
+              
+              LOG(info) << "Hello from slwoggy!" << endl;
+              log_line_dispatcher::instance().flush();
+              return 0;
+          }
+          \`\`\`
+          
+          For complete documentation, see \`README.md\`.
+          EOF
+          
+          echo "Build package created in slwoggy-build/"
+          ls -la slwoggy-build/
+      
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.artifact_name }}
+          path: slwoggy-build/
+          retention-days: 90
+      
+      - name: Create release (for tagged versions)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            slwoggy-build/slwoggy.hpp
+            slwoggy-build/BUILD_README.md
+            slwoggy-build/example.cpp
+            slwoggy-build/build-example.sh
+          body: |
+            # slwoggy ${{ steps.version.outputs.version }} - Single-Header Build
+            
+            This release contains the amalgamated single-header version of slwoggy.
+            
+            ## Quick Download
+            
+            **For most users:** Download the `slwoggy.hpp` file below and include it in your project.
+            
+            ## What's Included
+            
+            - `slwoggy.hpp` - Complete single-header library (~1MB)
+            - `BUILD_README.md` - Quick start guide
+            - `example.cpp` - Usage example
+            - `build-example.sh` - Build script for the example
+            
+            ## Usage
+            
+            ```cpp
+            #include "slwoggy.hpp"
+            
+            using namespace slwoggy;
+            
+            int main() {
+                auto console_sink = make_console_sink();
+                log_line_dispatcher::instance().add_sink(console_sink);
+                
+                LOG(info) << "Hello from slwoggy!" << endl;
+                log_line_dispatcher::instance().flush();
+                return 0;
+            }
+            ```
+            
+            Compile with: `g++ -std=c++20 -pthread your_file.cpp`
+            
+            ## Full Documentation
+            
+            See the main [README](https://github.com/cdorgby/slwoggy/blob/main/README.md) for complete documentation.
+            
+            ---
+            
+            **File sizes:**
+            - slwoggy.hpp: ~$(du -h slwoggy-build/slwoggy.hpp | cut -f1)
+            - Total lines: $(wc -l < slwoggy-build/slwoggy.hpp)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
