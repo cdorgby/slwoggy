@@ -433,6 +433,122 @@ dispatcher.add_sink(file_sink);
 
 **NOTE**: Never write multiple sinks to the same file path! This causes undefined behavior due to concurrent writes.
 
+## Per-Sink Filtering
+
+slwoggy allows each sink to have its own filter, enabling different log levels and criteria for different outputs. Filters have zero overhead when not used.
+
+### Basic Level Filtering
+
+```cpp
+#include "slwoggy.hpp"
+#include "log_sink_filters.hpp"
+
+using namespace slwoggy;
+
+// Console shows only warnings and above
+auto console = make_stdout_sink(level_filter{log_level::warn});
+
+// File captures everything for debugging
+auto debug_file = make_raw_file_sink("/var/log/debug.log");
+
+// Error log captures only errors and fatal
+auto error_file = make_raw_file_sink("/var/log/errors.log", {}, 
+                                      level_filter{log_level::error});
+
+auto& dispatcher = log_line_dispatcher::instance();
+dispatcher.set_sink(0, console);       // Replace default stdout
+dispatcher.add_sink(debug_file);       // Add debug file
+dispatcher.add_sink(error_file);       // Add error file
+
+// Now:
+// - INFO and below go only to debug.log
+// - WARN goes to console and debug.log
+// - ERROR and FATAL go to all three outputs
+```
+
+### Range and Max Level Filters
+
+```cpp
+// Only capture info and warn levels (not debug or error)
+auto info_sink = make_file_sink("info.log", {}, 
+    level_range_filter{log_level::info, log_level::warn});
+
+// Only capture trace and debug (useful for verbose debug logs)
+auto verbose_sink = make_file_sink("verbose.log", {},
+    max_level_filter{log_level::debug});
+```
+
+### Composite Filters
+
+Combine multiple filters with AND, OR, and NOT logic:
+
+```cpp
+// AND filter: warn/error only (not debug or fatal)
+and_filter warn_error_only;
+warn_error_only.add(level_filter{log_level::warn})
+               .add(max_level_filter{log_level::error});
+auto filtered = make_stdout_sink(warn_error_only);
+
+// OR filter: debug messages OR errors and above
+or_filter debug_or_severe;
+debug_or_severe.add(level_range_filter{log_level::debug, log_level::debug})
+               .add(level_filter{log_level::error});
+auto special = make_file_sink("special.log", {}, debug_or_severe);
+
+// NOT filter: everything except info level
+auto no_info = make_stdout_sink(
+    not_filter{level_range_filter{log_level::info, log_level::info}});
+```
+
+### Complex Filtering Example
+
+```cpp
+// Production setup with different filters for different purposes
+void setup_production_logging() {
+    auto& dispatcher = log_line_dispatcher::instance();
+    
+    // Console: warnings and above for operators
+    dispatcher.set_sink(0, make_stdout_sink(level_filter{log_level::warn}));
+    
+    // Main log: everything, rotated daily
+    rotate_policy daily;
+    daily.mode = rotate_policy::kind::time;
+    daily.every = std::chrono::hours(24);
+    daily.keep_files = 30;
+    dispatcher.add_sink(make_writev_file_sink("/var/log/app.log", daily));
+    
+    // Error log: only errors, kept longer
+    rotate_policy error_policy;
+    error_policy.mode = rotate_policy::kind::size;
+    error_policy.max_bytes = 10 * 1024 * 1024;  // 10MB
+    error_policy.keep_files = 90;  // Keep 90 files
+    dispatcher.add_sink(make_writev_file_sink("/var/log/errors.log", 
+                                               error_policy,
+                                               level_filter{log_level::error}));
+    
+    // Debug log: only in debug builds
+#ifdef DEBUG
+    // Verbose debugging but exclude info level (too noisy)
+    and_filter debug_filter;
+    debug_filter.add(max_level_filter{log_level::debug})
+                .add(not_filter{level_range_filter{log_level::info, log_level::info}});
+    dispatcher.add_sink(make_file_sink("/tmp/debug.log", {}, debug_filter));
+#endif
+}
+```
+
+### Available Filter Types
+
+- **`no_filter`** - Default, accepts all messages (zero overhead)
+- **`level_filter{min_level}`** - Accepts messages >= min_level
+- **`max_level_filter{max_level}`** - Accepts messages <= max_level  
+- **`level_range_filter{min, max}`** - Accepts messages in range [min, max]
+- **`and_filter`** - All sub-filters must pass
+- **`or_filter`** - At least one sub-filter must pass
+- **`not_filter{filter}`** - Inverts the wrapped filter
+
+Filters are evaluated in the dispatcher's worker thread, not in the logging thread, so filtering overhead doesn't block the application's logging calls.
+
 ## File Rotation
 
 slwoggy provides comprehensive file rotation support with size-based, time-based, and combined rotation policies.
