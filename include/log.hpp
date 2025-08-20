@@ -113,6 +113,34 @@
  * // Now logs go to both the file and stdout (as JSON)
  * @endcode
  *
+ * Per-Sink Filtering:
+ * @code  
+ * // Console shows warnings and above
+ * auto console = make_stdout_sink(level_filter{log_level::warn});
+ * 
+ * // File captures everything for debugging
+ * auto debug_file = make_raw_file_sink("/var/log/debug.log");
+ * 
+ * // Error log captures only errors and fatal
+ * auto error_file = make_raw_file_sink("/var/log/errors.log", {}, 
+ *                                       level_filter{log_level::error});
+ * 
+ * // Complex filter: warnings and errors only (not debug or fatal)
+ * and_filter warn_error_only;
+ * warn_error_only.add(level_filter{log_level::warn})
+ *                .add(max_level_filter{log_level::error});
+ * auto filtered = make_stdout_sink(warn_error_only);
+ * 
+ * // Composite OR filter: debug messages OR errors and above
+ * or_filter debug_or_severe;
+ * debug_or_severe.add(level_range_filter{log_level::debug, log_level::debug})
+ *                .add(level_filter{log_level::error});
+ * 
+ * // NOT filter: everything except info level
+ * auto no_info = make_stdout_sink(not_filter{level_range_filter{
+ *     log_level::info, log_level::info}});
+ * @endcode
+ *
  * Log Levels (in order of severity):
  * - trace: Finest-grained debugging information
  * - debug: Debugging information

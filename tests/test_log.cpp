@@ -7,7 +7,6 @@
 #include <atomic>
 #include <chrono>
 #include <regex>
-#include <barrier>
 #include <random>
 #include <mutex>
 #include <condition_variable>
