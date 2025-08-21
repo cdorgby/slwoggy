@@ -27,6 +27,7 @@ endif()
 option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
 option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
 option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
+option(LOG_RELIABLE_DELIVERY "Enable reliable delivery mode" ON)
 
 # Metrics options (OFF by default for Release builds)
 option(SLWOGGY_METRICS_BUFFER_POOL "Enable buffer pool metrics" OFF)
@@ -207,6 +208,11 @@ if(_SLWOGGY_COMPILE_DEFINITIONS)
     target_compile_definitions(slwoggy INTERFACE ${_SLWOGGY_COMPILE_DEFINITIONS})
 endif()
 
+# Add LOG_RELIABLE_DELIVERY if enabled
+if(LOG_RELIABLE_DELIVERY)
+    target_compile_definitions(slwoggy INTERFACE LOG_RELIABLE_DELIVERY)
+endif()
+
 # Version definition
 target_compile_definitions(slwoggy INTERFACE SLWOGGY_VERSION_STRING="${GIT_VERSION}")
 
@@ -260,5 +266,6 @@ message(STATUS "  Version: ${GIT_VERSION}")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Examples: ${SLWOGGY_BUILD_EXAMPLES}")
 message(STATUS "  Tests: ${SLWOGGY_BUILD_TESTS}")
+message(STATUS "  Reliable delivery: ${LOG_RELIABLE_DELIVERY}")
 message(STATUS "  Metrics: ${_SLWOGGY_COMPILE_DEFINITIONS}")
 message(STATUS "")

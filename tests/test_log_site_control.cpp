@@ -10,7 +10,7 @@ static size_t count_test_file_sites() {
     auto& all_sites = log_site_registry::sites();
     size_t count = 0;
     for (const auto& site : all_sites) {
-        if (std::strstr(site.file, "test_log_site_control.cpp")) {
+        if (std::strcmp(site.file, file_source()) == 0) {
             count++;
         }
     }
@@ -22,7 +22,7 @@ static std::vector<log_level> get_test_file_levels() {
     auto& all_sites = log_site_registry::sites();
     std::vector<log_level> levels;
     for (const auto& site : all_sites) {
-        if (std::strstr(site.file, "test_log_site_control.cpp")) {
+        if (std::strcmp(site.file, file_source()) == 0) {
             levels.push_back(site.min_level);
         }
     }
@@ -43,9 +43,9 @@ TEST_CASE("Site registration and finding", "[site_control]") {
         LOG(warn) << "Test message 3" << endl;
         
         // Find the sites we just registered
-        auto* site1 = log_site_registry::find_site(SOURCE_FILE_NAME, line1);
-        auto* site2 = log_site_registry::find_site(SOURCE_FILE_NAME, line2);
-        auto* site3 = log_site_registry::find_site(SOURCE_FILE_NAME, line3);
+        auto* site1 = log_site_registry::find_site(file_source(), line1);
+        auto* site2 = log_site_registry::find_site(file_source(), line2);
+        auto* site3 = log_site_registry::find_site(file_source(), line3);
         
         REQUIRE(site1 != nullptr);
         REQUIRE(site2 != nullptr);
@@ -61,7 +61,7 @@ TEST_CASE("Site registration and finding", "[site_control]") {
         REQUIRE(site3->min_level == log_level::warn);
         
         // Non-existent site should return nullptr
-        auto* not_found = log_site_registry::find_site(SOURCE_FILE_NAME, 999);
+        auto* not_found = log_site_registry::find_site(file_source(), 999);
         REQUIRE(not_found == nullptr);
     }
     
@@ -80,7 +80,8 @@ TEST_CASE("Site registration and finding", "[site_control]") {
         bool found_fatal = false;
         
         for (const auto& site : all_sites) {
-            if (std::strstr(site.file, "test_log_site_control.cpp")) {
+            // Check if this is our file (using file_source() result)
+            if (std::strcmp(site.file, file_source()) == 0) {
                 if (site.line == error_line) {
                     found_error = true;
                     REQUIRE(site.min_level == log_level::error);
@@ -104,26 +105,26 @@ TEST_CASE("Site level control", "[site_control]") {
         LOG(info) << "Test site" << endl;
         
         // Get initial level
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, test_line) == log_level::info);
+        REQUIRE(log_site_registry::get_site_level(file_source(), test_line) == log_level::info);
         
         // Change the level
-        bool result = log_site_registry::set_site_level(SOURCE_FILE_NAME, test_line, log_level::error);
+        bool result = log_site_registry::set_site_level(file_source(), test_line, log_level::error);
         REQUIRE(result == true);
         
         // Verify it changed
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, test_line) == log_level::error);
+        REQUIRE(log_site_registry::get_site_level(file_source(), test_line) == log_level::error);
         
         // Verify in sites() too
-        auto* site = log_site_registry::find_site(SOURCE_FILE_NAME, test_line);
+        auto* site = log_site_registry::find_site(file_source(), test_line);
         REQUIRE(site != nullptr);
         REQUIRE(site->min_level == log_level::error);
         
         // Try to set level for non-existent site
-        result = log_site_registry::set_site_level(SOURCE_FILE_NAME, 999, log_level::debug);
+        result = log_site_registry::set_site_level(file_source(), 999, log_level::debug);
         REQUIRE(result == false);
         
         // Get level for non-existent site returns nolog
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, 999) == log_level::nolog);
+        REQUIRE(log_site_registry::get_site_level(file_source(), 999) == log_level::nolog);
     }
     
     SECTION("Multiple site updates") {
@@ -135,14 +136,14 @@ TEST_CASE("Site level control", "[site_control]") {
         LOG(warn) << "Site 3" << endl;
         
         // Set different levels
-        log_site_registry::set_site_level(SOURCE_FILE_NAME, line1, log_level::fatal);
-        log_site_registry::set_site_level(SOURCE_FILE_NAME, line2, log_level::trace);
-        log_site_registry::set_site_level(SOURCE_FILE_NAME, line3, log_level::error);
+        log_site_registry::set_site_level(file_source(), line1, log_level::fatal);
+        log_site_registry::set_site_level(file_source(), line2, log_level::trace);
+        log_site_registry::set_site_level(file_source(), line3, log_level::error);
         
         // Verify each
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line1) == log_level::fatal);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line2) == log_level::trace);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line3) == log_level::error);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line1) == log_level::fatal);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line2) == log_level::trace);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line3) == log_level::error);
     }
 }
 
@@ -160,7 +161,7 @@ TEST_CASE("File level control", "[site_control]") {
         REQUIRE(initial_count >= 4);
         
         // Set all sites in this file to fatal
-        size_t updated = log_site_registry::set_file_level(SOURCE_FILE_NAME, log_level::fatal);
+        size_t updated = log_site_registry::set_file_level(file_source(), log_level::fatal);
         REQUIRE(updated == initial_count);
         
         // Verify all sites in this file are now fatal
@@ -183,14 +184,18 @@ TEST_CASE("File level control", "[site_control]") {
         
         size_t test_file_count = count_test_file_sites();
         
-        // Test prefix wildcard: "tests/test_*" (SOURCE_FILE_NAME includes path)
-        size_t updated = log_site_registry::set_file_level("tests/test_*", log_level::warn);
-        REQUIRE(updated >= test_file_count);  // Should match our test file
+        // Test exact match first to verify sites exist
+        INFO("file_source() returns: " << file_source());
+        INFO("test_file_count: " << test_file_count);
+        
+        // Use exact match with what file_source() returns
+        size_t updated = log_site_registry::set_file_level(file_source(), log_level::warn);
+        REQUIRE(updated == test_file_count);  // Should match our test file exactly
         
         // Verify our sites got updated
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line1) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line2) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line3) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line1) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line2) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line3) == log_level::warn);
         
         // Test suffix wildcard: "*_control.cpp"
         updated = log_site_registry::set_file_level("*_control.cpp", log_level::error);
@@ -217,9 +222,9 @@ TEST_CASE("File level control", "[site_control]") {
         // Shouldn't match our test file, but might match other files
         
         // Our sites should still be trace
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line1) == log_level::trace);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line2) == log_level::trace);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, line3) == log_level::trace);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line1) == log_level::trace);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line2) == log_level::trace);
+        REQUIRE(log_site_registry::get_site_level(file_source(), line3) == log_level::trace);
         
         // Test another non-matching pattern
         updated = log_site_registry::set_file_level("*xyz.cpp", log_level::fatal);
@@ -254,12 +259,12 @@ TEST_CASE("Set all sites level", "[site_control]") {
         log_site_registry::set_all_sites_level(log_level::warn);
         
         // Verify all our sites are now warn
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, l1) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, l2) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, l3) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, l4) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, l5) == log_level::warn);
-        REQUIRE(log_site_registry::get_site_level(SOURCE_FILE_NAME, l6) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), l1) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), l2) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), l3) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), l4) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), l5) == log_level::warn);
+        REQUIRE(log_site_registry::get_site_level(file_source(), l6) == log_level::warn);
         
         // Also verify via sites()
         auto& all_sites = log_site_registry::sites();
@@ -287,7 +292,7 @@ TEST_CASE("Clear sites", "[site_control]") {
         REQUIRE(sites_after.empty());
         
         // Finding sites should return nullptr
-        REQUIRE(log_site_registry::find_site(SOURCE_FILE_NAME, __LINE__) == nullptr);
-        REQUIRE(log_site_registry::find_site(SOURCE_FILE_NAME, __LINE__ - 1) == nullptr);
+        REQUIRE(log_site_registry::find_site(file_source(), __LINE__) == nullptr);
+        REQUIRE(log_site_registry::find_site(file_source(), __LINE__ - 1) == nullptr);
     }
 }

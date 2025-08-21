@@ -20,6 +20,7 @@
 #include "moodycamel/concurrentqueue.h"         // IWYU pragma: keep
 
 #include "log_types.hpp"
+#include "log_module.hpp"
 
 // Forward declarations (must be in slwoggy namespace)
 namespace slwoggy
@@ -63,6 +64,7 @@ public:
     // Cold metadata - less frequently accessed
     std::string_view file_;
     std::chrono::steady_clock::time_point timestamp_;
+    const log_module_info_detail *module_;
 
 protected:
     // Protected constructor - prevents default construction

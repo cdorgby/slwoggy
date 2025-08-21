@@ -58,43 +58,27 @@ struct log_line_base
     bool needs_header_{true};      // should the write_header() be called before first text write
     bool human_readable_{false};   // true for human-readable format with padding, false for structured/logfmt
 
-    // Store these for endl support and header writing
-    log_level level_;
-    std::string_view file_;
-    uint32_t line_;
-    std::chrono::steady_clock::time_point timestamp_;
-    const log_module_info &module_;
-
     log_line_base() = delete;
 
     log_line_base(log_level level, log_module_info &mod, std::string_view file, uint32_t line, bool needs_header, bool human_readable)
     : buffer_(level != log_level::nolog ? buffer_pool::instance().acquire(human_readable) : nullptr),
       needs_header_(needs_header), // Start with header needed
-      human_readable_(human_readable),
-      level_(level),
-      file_(file),
-      line_(line),
-      timestamp_(log_fast_timestamp()),
-      module_(mod)
+      human_readable_(human_readable)
     {
         if (buffer_)
         {
-            buffer_->level_     = level_;
-            buffer_->file_      = file_;
-            buffer_->line_      = line_;
-            buffer_->timestamp_ = timestamp_;
+            buffer_->level_     = level;
+            buffer_->file_      = file;
+            buffer_->module_    = mod.detail; // Store module info pointer
+            buffer_->line_      = line;
+            buffer_->timestamp_ = log_fast_timestamp();
         }
     }
 
     // Move constructor - swap buffers
     log_line_base(log_line_base &&other) noexcept
     : buffer_(std::exchange(other.buffer_, nullptr)),
-      needs_header_(std::exchange(other.needs_header_, false)),
-      level_(other.level_),
-      file_(other.file_),
-      line_(other.line_),
-      timestamp_(other.timestamp_),
-      module_(other.module_)
+      needs_header_(std::exchange(other.needs_header_, false))
     {
     }
 
@@ -410,9 +394,6 @@ struct log_line_base
     {
         auto *old_buffer = buffer_;
 
-        // Finalize the old buffer before swapping
-        if (old_buffer) { old_buffer->finalize(); }
-
         buffer_ = buffer_pool::instance().acquire(human_readable_);
 
         // Reset positions
@@ -421,11 +402,16 @@ struct log_line_base
         // Set buffer metadata if we got a new buffer
         if (buffer_)
         {
-            buffer_->level_     = level_;
-            buffer_->file_      = file_;
-            buffer_->line_      = line_;
-            buffer_->timestamp_ = timestamp_;
+            buffer_->level_     = old_buffer->level_;
+            buffer_->file_      = old_buffer->file_;
+            buffer_->module_    = old_buffer->module_;
+            buffer_->line_      = old_buffer->line_;
+            buffer_->timestamp_ = old_buffer->timestamp_;
         }
+
+        // Finalize the old buffer before swapping
+        if (old_buffer) { old_buffer->finalize(); }
+
 
         return old_buffer;
     }
@@ -505,11 +491,12 @@ class log_line_structured : public log_line_base
             auto metadata = buffer_->get_metadata_adapter();
 
             // Add standard metadata fields
-            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_TS, timestamp_.time_since_epoch().count());
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_TS,
+                                      buffer_->timestamp_.time_since_epoch().count());
             metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_LEVEL, string_from_log_level(level));
-            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_MODULE, module_.detail->name);
-            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_FILE, file_);
-            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_LINE, line_);
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_MODULE, buffer_->module_->name);
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_FILE, buffer_->file_);
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_LINE, buffer_->line_);
         }
     }
 
