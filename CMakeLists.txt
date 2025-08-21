@@ -79,14 +79,14 @@ message(STATUS "Build tests: ${SLWOGGY_BUILD_TESTS}")
 # FetchContent for dependencies
 include(FetchContent)
 
-# fmt - always needed
+# fmt - header-only mode
 FetchContent_Declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git
     GIT_TAG 10.1.1
 )
 
-# taocpp-json - always needed
+# taocpp-json - header-only
 FetchContent_Declare(
     taocpp_json
     GIT_REPOSITORY https://github.com/taocpp/json.git
@@ -102,19 +102,25 @@ if(SLWOGGY_BUILD_TESTS)
     )
 endif()
 
-# Configure fmt options
-set(FMT_DOC OFF CACHE BOOL "" FORCE)
-set(FMT_TEST OFF CACHE BOOL "" FORCE)
-set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+# Configure fmt for header-only mode
+set(FMT_HEADER_ONLY ON CACHE BOOL "" FORCE)
 
-# Make dependencies available
-FetchContent_MakeAvailable(fmt taocpp_json)
+# Get dependencies (header-only, so we just need the source)
+FetchContent_Populate(fmt)
+FetchContent_Populate(taocpp_json)
+
 if(SLWOGGY_BUILD_TESTS)
+    # Catch2 needs full processing
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 endif()
 
-# Create taocpp::json interface library
+# Create interface libraries for header-only dependencies
+add_library(fmt_header_only INTERFACE)
+target_include_directories(fmt_header_only INTERFACE ${fmt_SOURCE_DIR}/include)
+target_compile_definitions(fmt_header_only INTERFACE FMT_HEADER_ONLY)
+add_library(fmt::fmt ALIAS fmt_header_only)
+
 add_library(taocppjson INTERFACE)
 target_include_directories(taocppjson INTERFACE ${taocpp_json_SOURCE_DIR}/include)
 
@@ -128,10 +134,10 @@ target_include_directories(slwoggy INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-# Link dependencies
+# Link dependencies - only during build since config file handles them at install
 target_link_libraries(slwoggy INTERFACE 
-    fmt::fmt
-    taocppjson
+    $<BUILD_INTERFACE:fmt::fmt>
+    $<BUILD_INTERFACE:taocppjson>
 )
 
 # Set C++ standard requirement
