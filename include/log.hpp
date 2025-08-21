@@ -479,6 +479,15 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
     return result;
 }
 
+/**
+ * @brief Macro to get shortened source file path at compile time
+ * 
+ * Uses get_path_suffix() to extract just the last directory and filename
+ * from __FILE__. This provides consistent, shorter file paths in logs
+ * while preserving enough context to identify the source location.
+ * 
+ * @return Shortened file path (e.g., "src/main.cpp" from "/path/to/project/src/main.cpp")
+ */
 #define file_source() get_path_suffix(__FILE__)
 
 

@@ -16,6 +16,8 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
    - Cache-line aligned to prevent false sharing
    - Automatic padding for multi-line logs
    - Thread-local ProducerToken using unique_ptr for proper cleanup
+   - Stores module pointer for efficient sink filtering
+   - Contains all metadata (timestamp, level, module, file, line)
 
 2. **buffer_pool** (`log_buffer.hpp`)
    - Pre-allocated pool of 32K buffers
@@ -40,9 +42,11 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
 5. **Filter System** (`log_filter.hpp`, `log_filters.hpp`)
    - RCU-based filter chain management
    - Zero-allocation filtering via buffer flags
-   - Example filters: dedup, rate limit, sampler
+   - Example filters: dedup, rate limit, sampler, module, module_exclude
    - Filters run in dispatcher worker thread only
    - Filters set `filtered_` flag on buffers to drop
+   - Module filters enable efficient log routing to specialized sinks
+   - Composite filters (and_filter, or_filter, not_filter) for complex rules
 
 6. **Module Registry** (`log_module.hpp`)
    - Thread-safe module management
@@ -100,6 +104,8 @@ slwoggy is a header-only C++20 logging library that provides asynchronous loggin
 - Static site registration
 - Template-based formatters
 - Macro-based source location
+- Compile-time path shortening with get_path_suffix()
+- file_source() macro for consistent, shorter file paths
 
 ### Structured Logging Design
 - Binary metadata format for efficiency
@@ -334,6 +340,35 @@ log_line_dispatcher::instance().add_sink(
 );
 ```
 
+### Creating Module-Filtered Sinks
+
+```cpp
+using namespace slwoggy;
+
+// Route specific modules to dedicated files
+auto network_sink = make_raw_file_sink("network.log", {},
+    module_filter{{"network", "http", "websocket"}});
+
+auto db_sink = make_raw_file_sink("database.log", {},
+    module_filter{{"database", "sql", "cache"}});
+
+// Exclude verbose modules from main log
+auto main_sink = make_raw_file_sink("app.log", {},
+    module_exclude_filter{{"trace", "debug_internal"}});
+
+// Complex filtering with composite filters
+and_filter critical_errors;
+critical_errors.add(module_filter{{"security", "auth"}})
+               .add(level_filter{log_level::error});
+auto alert_sink = make_stdout_sink(critical_errors);
+
+// Add all sinks
+log_line_dispatcher::instance().add_sink(network_sink);
+log_line_dispatcher::instance().add_sink(db_sink);
+log_line_dispatcher::instance().add_sink(main_sink);
+log_line_dispatcher::instance().add_sink(alert_sink);
+```
+
 ### Creating a Rotating File Sink
 
 ```cpp
@@ -505,6 +540,9 @@ When testing on Ubuntu (or other Linux distributions):
 - Verify with `get_all_modules()`
 - Check module name spelling
 - Use `configure_from_string()` carefully
+- Module filters require exact string match
+- Module names are case-sensitive
+- Filters work on dispatcher thread (after LOG() returns)
 
 ## Implementation Notes
 
@@ -541,6 +579,10 @@ When testing on Ubuntu (or other Linux distributions):
 - **Compression Statistics API**: Track queue depth, overflows, and throughput
 - **Filename Collision Fix**: Proper handling of .log and .gz filename generation
 - **Thread-Safe Test Cleanup**: RAII pattern for thread cleanup in tests
+- **Module-Based Sink Filtering**: Route logs to different sinks based on module
+- **Metadata Refactoring**: Moved all metadata to log_buffer for better efficiency
+- **Compile-Time Path Shortening**: get_path_suffix() and file_source() for cleaner logs
+- **Composite Filters**: and_filter, or_filter, not_filter for complex filtering rules
 
 ## Future Enhancements
 
@@ -563,6 +605,9 @@ Potential areas for extension:
 9. **Compression with High Throughput**: Do NOT use compression (sync or async) with high-throughput logging - can cause data loss or UB
 10. **Non-Regular Files**: Rotation automatically disabled for /dev/null, pipes, sockets
 11. **Compression Thread Shutdown**: Call stop_compression_thread() in destructor to prevent crashes
+12. **Module Filter Performance**: Module filtering happens in dispatcher thread, not at LOG() site
+13. **Buffer Metadata**: All metadata now in log_buffer, log_line is text-only
+14. **Filter Order**: Filters in composite filters are evaluated in the order they were added
 
 ## Performance Characteristics
 
