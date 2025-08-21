@@ -1060,8 +1060,7 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
             // This is a special file (device, pipe, socket, etc.)
             // Disable rotation and compression for special files
             LOG(warn) << "File '" << filename << "' is not a regular file, disabling rotation and compression";
-            handle->policy_.mode = rotate_policy::kind::none;
-            handle->policy_.compress = false;
+            handle->policy_ = {};
         }
     }
     
@@ -1083,8 +1082,11 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
         handle->compute_next_rotation_time();
     }
 
-    // Prepare next fd immediately (will be ready for entire rotation cycle)
-    prepare_next_fd_with_retry(handle.get());
+    if (handle->policy_.mode != rotate_policy::kind::none)
+    {
+        // Prepare next fd immediately (will be ready for entire rotation cycle)
+        prepare_next_fd_with_retry(handle.get());
+    }
 
     // Track handle
     std::lock_guard<std::mutex> lock(handles_mutex_);
