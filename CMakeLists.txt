@@ -128,10 +128,10 @@ target_include_directories(slwoggy INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-# Link dependencies - use generator expressions for proper export
+# Link dependencies
 target_link_libraries(slwoggy INTERFACE 
-    $<BUILD_INTERFACE:fmt::fmt>
-    $<BUILD_INTERFACE:taocppjson>
+    fmt::fmt
+    taocppjson
 )
 
 # Set C++ standard requirement
