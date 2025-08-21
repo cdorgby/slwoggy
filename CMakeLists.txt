@@ -136,7 +136,7 @@ target_include_directories(slwoggy INTERFACE
     $<INSTALL_INTERFACE:include>
 )
 
-# Link dependencies - only during build since config file handles them at install
+# Propagate include directories from dependencies
 target_link_libraries(slwoggy INTERFACE 
     $<BUILD_INTERFACE:fmt::fmt>
     $<BUILD_INTERFACE:taocppjson>
