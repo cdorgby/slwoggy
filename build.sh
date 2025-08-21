@@ -156,9 +156,14 @@ main() {
     if [[ $? -eq 0 ]]; then
         echo "==================================="
         echo "Build successful!"
-        echo "Executable: $build_dir/bin/slwoggy"
-        echo ""
-        echo "To run tests: make tests"
+        if [[ "$BUILD_TYPE" == "Debug" ]] || [[ "$BUILD_TYPE" == "MemCheck" ]]; then
+            echo "Executables: $build_dir/bin/slwoggy_demo (and others)"
+            echo ""
+            echo "To run tests: ctest or make test"
+        else
+            echo "Examples not built in Release mode."
+            echo "To build examples: cmake -DSLWOGGY_BUILD_EXAMPLES=ON"
+        fi
         echo "==================================="
     else
         echo "Build failed!"
