@@ -743,7 +743,7 @@ TEST_CASE("Module filtering", "[sink_filters][module]") {
     
     SECTION("Basic module filter - single module") {
         test_sink.clear();  // Clear sink for fresh test
-        module_filter filter{{"network"}};
+        module_filter filter{"network"};
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
         // Use LOG_MOD to specify module name dynamically
@@ -763,7 +763,7 @@ TEST_CASE("Module filtering", "[sink_filters][module]") {
     
     SECTION("Module filter - multiple allowed modules") {
         test_sink.clear();  // Clear sink for fresh test
-        module_filter filter{{"network", "http", "websocket"}};
+        module_filter filter{"network", "http", "websocket"};
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
         LOG_MOD(info, "network") << "Network msg" << endl;
@@ -784,7 +784,7 @@ TEST_CASE("Module filtering", "[sink_filters][module]") {
     
     SECTION("Module filter - empty allowed list accepts all") {
         test_sink.clear();  // Clear sink for fresh test
-        module_filter filter{{}};  // Empty list
+        module_filter filter{};  // Empty list (correct syntax)
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
         LOG_MOD(info, "any") << "Any module 1" << endl;
@@ -799,7 +799,7 @@ TEST_CASE("Module filtering", "[sink_filters][module]") {
     
     SECTION("Module exclude filter - single exclusion") {
         test_sink.clear();  // Clear sink for fresh test
-        module_exclude_filter filter{{"verbose"}};
+        module_exclude_filter filter{"verbose"};
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
         LOG_MOD(info, "normal") << "Normal message" << endl;
@@ -816,7 +816,7 @@ TEST_CASE("Module filtering", "[sink_filters][module]") {
     
     SECTION("Module exclude filter - multiple exclusions") {
         test_sink.clear();  // Clear sink for fresh test
-        module_exclude_filter filter{{"trace", "debug", "verbose"}};
+        module_exclude_filter filter{"trace", "debug", "verbose"};
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
         LOG_MOD(info, "app") << "App message" << endl;
@@ -837,7 +837,7 @@ TEST_CASE("Module filtering", "[sink_filters][module]") {
     
     SECTION("Module exclude filter - empty exclusion list accepts all") {
         test_sink.clear();  // Clear sink for fresh test
-        module_exclude_filter filter{{}};  // Empty exclusion list
+        module_exclude_filter filter{};  // Empty exclusion list (correct syntax)
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
         LOG_MOD(info, "any") << "Any module 1" << endl;
@@ -858,7 +858,7 @@ TEST_CASE("Module filters with composite filters", "[sink_filters][module][compo
         test_sink.clear();  // Clear sink for fresh test
         // Only ERROR and above from network module
         and_filter filter;
-        filter.add(module_filter{{"network", "http"}})
+        filter.add(module_filter{"network", "http"})
               .add(level_filter{log_level::error});
         
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
@@ -892,7 +892,7 @@ TEST_CASE("Module filters with composite filters", "[sink_filters][module][compo
         // Accept errors from anywhere OR anything from debug module
         or_filter filter;
         filter.add(level_filter{log_level::error})
-              .add(module_filter{{"debug"}});
+              .add(module_filter{"debug"});
         
         SinkGuard guard(test_sink.get_sink_with_filter(filter));
         
@@ -921,15 +921,15 @@ TEST_CASE("Module filters with composite filters", "[sink_filters][module][compo
         or_filter main_filter;
         
         and_filter network_errors;
-        network_errors.add(module_filter{{"network"}})
+        network_errors.add(module_filter{"network"})
                       .add(level_filter{log_level::error});
         
         and_filter database_warnings;
-        database_warnings.add(module_filter{{"database"}})
+        database_warnings.add(module_filter{"database"})
                          .add(level_filter{log_level::warn});
         
         // Exclude verbose module entirely
-        module_exclude_filter exclude_verbose{{"verbose"}};
+        module_exclude_filter exclude_verbose{"verbose"};
         
         main_filter.add(network_errors)
                    .add(database_warnings);

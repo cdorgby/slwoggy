@@ -8,6 +8,7 @@
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
+#include "robin_hood.h"
 #include <vector>
 #include <string>
 #include <memory>
@@ -127,13 +128,20 @@ struct level_range_filter final
  * // Only logs from network, http, and websocket modules
  * @endcode
  * 
- * @note Performance: O(n) where n is the number of allowed modules.
- *       For better performance with many modules, consider using
- *       fewer sinks with broader module groups.
+ * @note Performance: O(1) average case using hash set lookup.
+ *       Significantly faster than linear search for multiple modules.
  */
 struct module_filter final
 {
-    std::vector<std::string> allowed_modules;
+    robin_hood::unordered_set<std::string> allowed_modules;
+    
+    // Constructor from initializer list (also serves as default constructor)
+    module_filter(std::initializer_list<std::string> modules = {})
+    {
+        for (const auto& module : modules) {
+            allowed_modules.insert(module);
+        }
+    }
     
     /**
      * @brief Check if buffer is from an allowed module
@@ -154,14 +162,8 @@ struct module_filter final
         const char* module_name = buffer->module_->name;
         if (!module_name) [[unlikely]] return false;
         
-        // Check if module is in allowed list
-        for (const auto& allowed : allowed_modules)
-        {
-            if (allowed == module_name)
-                return true;
-        }
-        
-        return false;
+        // O(1) hash lookup instead of O(n) linear search
+        return allowed_modules.count(module_name) > 0;
     }
 };
 
@@ -178,11 +180,20 @@ struct module_filter final
  * // All logs except trace and verbose_debug modules
  * @endcode
  * 
- * @note Performance: O(n) where n is the number of excluded modules.
+ * @note Performance: O(1) average case using hash set lookup.
+ *       Significantly faster than linear search for multiple modules.
  */
 struct module_exclude_filter final
 {
-    std::vector<std::string> excluded_modules;
+    robin_hood::unordered_set<std::string> excluded_modules;
+    
+    // Constructor from initializer list (also serves as default constructor)
+    module_exclude_filter(std::initializer_list<std::string> modules = {})
+    {
+        for (const auto& module : modules) {
+            excluded_modules.insert(module);
+        }
+    }
     
     /**
      * @brief Check if buffer is NOT from an excluded module
@@ -203,14 +214,8 @@ struct module_exclude_filter final
         const char* module_name = buffer->module_->name;
         if (!module_name) [[unlikely]] return true;  // No name = not excluded
         
-        // Check if module is in excluded list
-        for (const auto& excluded : excluded_modules)
-        {
-            if (excluded == module_name)
-                return false;  // Module is excluded
-        }
-        
-        return true;  // Module is not in excluded list
+        // O(1) hash lookup instead of O(n) linear search
+        return excluded_modules.count(module_name) == 0;  // Not in set = not excluded
     }
 };
 
