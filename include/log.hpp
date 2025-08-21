@@ -190,9 +190,6 @@
  *                          When enabled: Threads block until buffers available (no message loss)
  *                          When disabled: Returns nullptr immediately (higher throughput, may drop)
  *                          To disable: #undef LOG_RELIABLE_DELIVERY before including log.hpp
- * - SOURCE_FILE_NAME: Set by CMake for relative file paths in log output.
- *                     When using the amalgamated header without CMake, automatically
- *                     falls back to __FILE__ for full paths.
  * - LOG_MODULE_NAME: Define per-file module name for categorized logging
  * - LOG_MODULE_LEVEL: Set initial log level for the current module
  *
@@ -491,11 +488,6 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 #define file_source() get_path_suffix(__FILE__)
 
 
-#ifndef SOURCE_FILE_NAME
-// Fallback to __FILE__ if SOURCE_FILE_NAME is not defined
-#define SOURCE_FILE_NAME __FILE__
-#endif
-
 /**
  * @brief Base macro for log line creation with specified type
  * @internal
@@ -506,29 +498,29 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
  * 3. Runtime filtering: Checks against the current module's dynamic log level
  * 4. Returns a log_line object of the specified type
  */
-#define LOG_BASE(_level, _line_type, _module)                                                                         \
-    []()                                                                                                              \
-    {                                                                                                                 \
-        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                          \
-        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                       \
-        {                                                                                                             \
-            static struct                                                                                             \
-            {                                                                                                         \
-                struct registrar                                                                                      \
-                {                                                                                                     \
-                    ::slwoggy::log_site_descriptor &site_;                                                            \
-                    registrar()                                                                                       \
-                    : site_(::slwoggy::log_site_registry::register_site(file_source(), __LINE__, level, __func__)) \
-                    {                                                                                                 \
-                    }                                                                                                 \
-                } r_;                                                                                                 \
-            } _reg;                                                                                                   \
-            if (level >= _module.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level)   \
-            {                                                                                                         \
-                return ::slwoggy::_line_type(level, _module, SOURCE_FILE_NAME, __LINE__);                             \
-            }                                                                                                         \
-        }                                                                                                             \
-        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);               \
+#define LOG_BASE(_level, _line_type, _module)                                                                       \
+    []()                                                                                                            \
+    {                                                                                                               \
+        constexpr ::slwoggy::log_level level = ::slwoggy::log_level::_level;                                        \
+        if constexpr (level >= ::slwoggy::GLOBAL_MIN_LOG_LEVEL)                                                     \
+        {                                                                                                           \
+            static struct                                                                                           \
+            {                                                                                                       \
+                struct registrar                                                                                    \
+                {                                                                                                   \
+                    ::slwoggy::log_site_descriptor &site_;                                                          \
+                    registrar()                                                                                     \
+                    : site_(::slwoggy::log_site_registry::register_site(file_source(), __LINE__, level, __func__))  \
+                    {                                                                                               \
+                    }                                                                                               \
+                } r_;                                                                                               \
+            } _reg;                                                                                                 \
+            if (level >= _module.detail->level.load(std::memory_order_relaxed) && level >= _reg.r_.site_.min_level) \
+            {                                                                                                       \
+                return ::slwoggy::_line_type(level, _module, file_source(), __LINE__);                              \
+            }                                                                                                       \
+        }                                                                                                           \
+        return ::slwoggy::_line_type(::slwoggy::log_level::nolog, ::slwoggy::g_log_module_info, "", 0);             \
     }()
 
 /**
@@ -553,7 +545,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
                 {                                                                                                       \
                     ::slwoggy::log_site_descriptor &site_;                                                              \
                     registrar()                                                                                         \
-                    : site_(::slwoggy::log_site_registry::register_site(file_source(), __LINE__, level, __func__))   \
+                    : site_(::slwoggy::log_site_registry::register_site(file_source(), __LINE__, level, __func__))      \
                     {                                                                                                   \
                     }                                                                                                   \
                 } r_;                                                                                                   \
@@ -561,7 +553,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
             if (level >= _static_data.module.detail->level.load(std::memory_order_relaxed) &&                           \
                 level >= _static_data.r_.site_.min_level)                                                               \
             {                                                                                                           \
-                return ::slwoggy::_line_type(level, _static_data.module, file_source(), __LINE__);                   \
+                return ::slwoggy::_line_type(level, _static_data.module, file_source(), __LINE__);                      \
             }                                                                                                           \
         }                                                                                                               \
         /* Fallback when level is filtered at compile time - _static_data doesn't exist */                              \

@@ -10,7 +10,6 @@
 #include <random>
 #include <mutex>
 #include <condition_variable>
-#include <barrier>
 
 using namespace slwoggy;
 
@@ -289,7 +288,7 @@ TEST_CASE("Log output verification with test sink", "[log][sink]") {
         REQUIRE(formatted.find("[INFO ]") != std::string::npos);
         // The log output will contain the file path with line number
         // Just check that it contains the line number where LOG was called
-        REQUIRE(formatted.find(":279 ") != std::string::npos);  // Line 279 is where LOG(info) << "Test" is
+        REQUIRE(formatted.find(":278 ") != std::string::npos);  // Line 279 is where LOG(info) << "Test" is
         REQUIRE(formatted.find("Test") != std::string::npos);
         
         // Color codes are added by stdout sink, not in the buffer
