@@ -8,6 +8,7 @@
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
+#include "robin_hood.h"
 #include <vector>
 #include <string>
 #include <memory>
@@ -126,24 +127,95 @@ struct level_range_filter final
  *     module_filter{{"network", "http", "websocket"}});
  * // Only logs from network, http, and websocket modules
  * @endcode
+ * 
+ * @note Performance: O(1) average case using hash set lookup.
+ *       Significantly faster than linear search for multiple modules.
  */
 struct module_filter final
 {
-    std::vector<std::string> allowed_modules;
+    robin_hood::unordered_set<std::string> allowed_modules;
+    
+    // Constructor from initializer list (also serves as default constructor)
+    module_filter(std::initializer_list<std::string> modules = {})
+    {
+        for (const auto& module : modules) {
+            allowed_modules.insert(module);
+        }
+    }
     
     /**
      * @brief Check if buffer is from an allowed module
      * @param buffer The buffer to check
      * @return true if buffer's module is in allowed list
-     * 
-     * @note This requires extracting module info from buffer metadata,
-     *       which may have a small performance cost
      */
     bool should_process(const log_buffer_base* buffer) const noexcept
     {
-        // TODO: Implement module filtering when we have access to module info
-        // For now, accept all buffers (no filtering)
-        return buffer != nullptr;
+        if (!buffer) [[unlikely]] return false;
+        
+        // If no modules specified, accept all (permissive by default)
+        if (allowed_modules.empty()) return true;
+        
+        // Check if buffer has module info
+        if (!buffer->module_) [[unlikely]] return false;
+        
+        // Get the module name
+        const char* module_name = buffer->module_->name;
+        if (!module_name) [[unlikely]] return false;
+        
+        // O(1) hash lookup instead of O(n) linear search
+        return allowed_modules.count(module_name) > 0;
+    }
+};
+
+/**
+ * @brief Filter that excludes specific modules
+ * 
+ * Processes all buffers EXCEPT those from specified modules.
+ * Module names must match exactly (case-sensitive).
+ * Useful for filtering out noisy modules.
+ * 
+ * @code
+ * auto main_sink = make_file_sink("app.log", 
+ *     module_exclude_filter{{"trace", "verbose_debug"}});
+ * // All logs except trace and verbose_debug modules
+ * @endcode
+ * 
+ * @note Performance: O(1) average case using hash set lookup.
+ *       Significantly faster than linear search for multiple modules.
+ */
+struct module_exclude_filter final
+{
+    robin_hood::unordered_set<std::string> excluded_modules;
+    
+    // Constructor from initializer list (also serves as default constructor)
+    module_exclude_filter(std::initializer_list<std::string> modules = {})
+    {
+        for (const auto& module : modules) {
+            excluded_modules.insert(module);
+        }
+    }
+    
+    /**
+     * @brief Check if buffer is NOT from an excluded module
+     * @param buffer The buffer to check
+     * @return true if buffer's module is NOT in excluded list
+     */
+    bool should_process(const log_buffer_base* buffer) const noexcept
+    {
+        if (!buffer) [[unlikely]] return false;
+        
+        // If no modules specified, accept all
+        if (excluded_modules.empty()) return true;
+        
+        // Check if buffer has module info
+        if (!buffer->module_) [[unlikely]] return true;  // No module = not excluded
+        
+        // Get the module name
+        const char* module_name = buffer->module_->name;
+        if (!module_name) [[unlikely]] return true;  // No name = not excluded
+        
+        // O(1) hash lookup instead of O(n) linear search
+        return excluded_modules.count(module_name) == 0;  // Not in set = not excluded
     }
 };
 

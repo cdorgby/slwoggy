@@ -43,3 +43,6 @@ add_slwoggy_example(log_mods log_mods.cpp)
 
 # Sink filter demo
 add_slwoggy_example(sink_filter_demo sink_filter_demo.cpp)
+
+# Module filter demo
+add_slwoggy_example(module_filter_demo module_filter_demo.cpp)

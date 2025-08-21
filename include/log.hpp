@@ -437,6 +437,59 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 };
 } // namespace std
 
+/**
+ * @brief keep the filename + @p KeepParts parts of the path (KeepParts = 1 e.g. "/dev/swloggy/src/main.cpp" -> "src/main.cpp")
+ * 
+ * @tparam N Length of the path string
+ * @tparam KeepParts Number of path parts to keep (default: 1)
+ * @return constexpr const char* 
+ */
+template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(const char (&path)[N])
+{
+    // Count total separators
+    int total_separators = 0;
+    for (size_t i = 0; i < N && path[i]; ++i)
+    {
+        if (path[i] == '/' || path[i] == '\\') { total_separators++; }
+    }
+
+    // Calculate how many separators to skip
+    int skip_separators = total_separators - KeepParts;
+    if (skip_separators <= 0)
+    {
+        return path; // Return full path if we want to keep everything
+    }
+
+    // Find the starting point after skipping
+    const char *result = path;
+    int skipped        = 0;
+    for (size_t i = 0; i < N && path[i]; ++i)
+    {
+        if (path[i] == '/' || path[i] == '\\')
+        {
+            skipped++;
+            if (skipped == skip_separators)
+            {
+                result = &path[i + 1];
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * @brief Macro to get shortened source file path at compile time
+ * 
+ * Uses get_path_suffix() to extract just the last directory and filename
+ * from __FILE__. This provides consistent, shorter file paths in logs
+ * while preserving enough context to identify the source location.
+ * 
+ * @return Shortened file path (e.g., "src/main.cpp" from "/path/to/project/src/main.cpp")
+ */
+#define file_source() get_path_suffix(__FILE__)
+
 
 #ifndef SOURCE_FILE_NAME
 // Fallback to __FILE__ if SOURCE_FILE_NAME is not defined
@@ -465,7 +518,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
                 {                                                                                                     \
                     ::slwoggy::log_site_descriptor &site_;                                                            \
                     registrar()                                                                                       \
-                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__)) \
+                    : site_(::slwoggy::log_site_registry::register_site(file_source(), __LINE__, level, __func__)) \
                     {                                                                                                 \
                     }                                                                                                 \
                 } r_;                                                                                                 \
@@ -500,7 +553,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
                 {                                                                                                       \
                     ::slwoggy::log_site_descriptor &site_;                                                              \
                     registrar()                                                                                         \
-                    : site_(::slwoggy::log_site_registry::register_site(SOURCE_FILE_NAME, __LINE__, level, __func__))   \
+                    : site_(::slwoggy::log_site_registry::register_site(file_source(), __LINE__, level, __func__))   \
                     {                                                                                                   \
                     }                                                                                                   \
                 } r_;                                                                                                   \
@@ -508,7 +561,7 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
             if (level >= _static_data.module.detail->level.load(std::memory_order_relaxed) &&                           \
                 level >= _static_data.r_.site_.min_level)                                                               \
             {                                                                                                           \
-                return ::slwoggy::_line_type(level, _static_data.module, SOURCE_FILE_NAME, __LINE__);                   \
+                return ::slwoggy::_line_type(level, _static_data.module, file_source(), __LINE__);                   \
             }                                                                                                           \
         }                                                                                                               \
         /* Fallback when level is filtered at compile time - _static_data doesn't exist */                              \
