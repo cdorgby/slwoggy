@@ -17,9 +17,9 @@
             ],
             "includePath": [
                 "${workspaceFolder}/include/**",
-                "${workspaceFolder}/third_party/fmt/include",
-                "${workspaceFolder}/third_party/taocpp-json/include",
-                "${workspaceFolder}/third_party/Catch2/src"
+                "${workspaceFolder}/build/_deps/fmt-src/include",
+                "${workspaceFolder}/build/_deps/taocpp_json-src/include",
+                "${workspaceFolder}/build/_deps/catch2-src/src"
             ]
         },
         {
@@ -36,9 +36,9 @@
             "defines": [],
             "includePath": [
                 "${workspaceFolder}/include/**",
-                "${workspaceFolder}/third_party/fmt/include",
-                "${workspaceFolder}/third_party/taocpp-json/include",
-                "${workspaceFolder}/third_party/Catch2/src"
+                "${workspaceFolder}/build/_deps/fmt-src/include",
+                "${workspaceFolder}/build/_deps/taocpp_json-src/include",
+                "${workspaceFolder}/build/_deps/catch2-src/src"
             ]
         },
         {
@@ -56,9 +56,9 @@
             ],
             "includePath": [
                 "${workspaceFolder}/include/**",
-                "${workspaceFolder}/third_party/fmt/include",
-                "${workspaceFolder}/third_party/taocpp-json/include",
-                "${workspaceFolder}/third_party/Catch2/src"
+                "${workspaceFolder}/build/_deps/fmt-src/include",
+                "${workspaceFolder}/build/_deps/taocpp_json-src/include",
+                "${workspaceFolder}/build/_deps/catch2-src/src"
             ],
             "windowsSdkVersion": "10.0.19041.0"
         }

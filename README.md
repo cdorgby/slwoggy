@@ -40,6 +40,68 @@ int main() {
 }
 ```
 
+## Integration
+
+### Using CMake FetchContent (Recommended)
+
+Add slwoggy to your project using CMake's FetchContent:
+
+```cmake
+cmake_minimum_required(VERSION 3.11)
+project(my_project)
+
+include(FetchContent)
+
+FetchContent_Declare(
+    slwoggy
+    GIT_REPOSITORY https://github.com/cdorgby/slwoggy.git
+    GIT_TAG main  # or use a specific tag/commit
+    GIT_SHALLOW TRUE  # Faster cloning
+)
+
+FetchContent_MakeAvailable(slwoggy)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE slwoggy::slwoggy)
+```
+
+Then in your code:
+```cpp
+#include <slwoggy.hpp>
+
+using namespace slwoggy;
+
+int main() {
+    log_line_dispatcher::instance().add_sink(make_stdout_sink());
+    LOG(info) << "Hello from slwoggy!" << endl;
+    return 0;
+}
+```
+
+### Using the Amalgamated Header
+
+For simpler integration without CMake, use the single-header version:
+
+1. Download `slwoggy.hpp` from the [releases page](https://github.com/cdorgby/slwoggy/releases)
+2. Copy it to your project
+3. Include it: `#include "slwoggy.hpp"`
+
+The amalgamated header includes all dependencies (fmt, taocpp-json, moodycamel) and works standalone.
+
+### CMake Options
+
+When using FetchContent or building slwoggy directly, these options are available:
+
+- `SLWOGGY_BUILD_EXAMPLES` - Build example applications (default: OFF)
+- `SLWOGGY_BUILD_TESTS` - Build tests (default: OFF)
+- `SLWOGGY_METRICS_ALL` - Enable all metrics collection (default: OFF)
+- `SLWOGGY_METRICS_BUFFER_POOL` - Enable buffer pool metrics
+- `SLWOGGY_METRICS_DISPATCHER` - Enable dispatcher metrics
+- `SLWOGGY_METRICS_STRUCTURED` - Enable structured logging metrics
+- `SLWOGGY_METRICS_MSG_RATE` - Enable message rate tracking
+
+For Release builds, examples and tests are OFF by default. For Debug builds, they're automatically enabled.
+
 ## Formatting Methods
 
 slwoggy provides multiple ways to format log messages:
