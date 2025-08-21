@@ -143,10 +143,9 @@ endif()
 add_library(slwoggy INTERFACE)
 add_library(slwoggy::slwoggy ALIAS slwoggy)
 
-# Set include directories
+# Set include directories (build interface only - no installation support)
 target_include_directories(slwoggy INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
 )
 
 # Propagate include directories from dependencies
