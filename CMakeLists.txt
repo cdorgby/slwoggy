@@ -12,6 +12,9 @@ if(NOT GIT_VERSION)
     set(GIT_VERSION "dev")
 endif()
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 project(slwoggy VERSION 1.0.0 LANGUAGES CXX)
 
 # Set default build type to Release
@@ -134,6 +137,8 @@ if(NOT TARGET taocppjson)
 endif()
 
 if(SLWOGGY_BUILD_TESTS)
+    # Set C++ standard before fetching Catch2 so it compiles with C++20
+    
     # Catch2 needs full processing
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)

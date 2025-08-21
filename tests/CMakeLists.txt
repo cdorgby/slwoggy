@@ -51,10 +51,7 @@ set(TEST_LOG_SOURCES main.cpp test_log.cpp)
 add_executable(test_log ${TEST_LOG_SOURCES})
 set_target_properties(test_log PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log "${TEST_LOG_SOURCES}")
-target_link_libraries(test_log PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_log PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_log PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_log)
 catch_discover_tests(test_log)
 
@@ -63,10 +60,7 @@ set(TEST_LOG_STRUCTURED_SOURCES main.cpp test_log_structured.cpp)
 add_executable(test_log_structured ${TEST_LOG_STRUCTURED_SOURCES})
 set_target_properties(test_log_structured PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_structured "${TEST_LOG_STRUCTURED_SOURCES}")
-target_link_libraries(test_log_structured PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_log_structured PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_log_structured PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_log_structured)
 catch_discover_tests(test_log_structured)
 
@@ -82,10 +76,7 @@ target_compile_definitions(test_log_statistics PRIVATE
     LOG_COLLECT_ROTATION_METRICS
     LOG_COLLECT_COMPRESSION_METRICS
 )
-target_link_libraries(test_log_statistics PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_log_statistics PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_log_statistics PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_log_statistics)
 catch_discover_tests(test_log_statistics)
 
@@ -94,10 +85,7 @@ set(TEST_LOG_LEVEL_CONTROL_SOURCES main.cpp test_log_level_control.cpp)
 add_executable(test_log_level_control ${TEST_LOG_LEVEL_CONTROL_SOURCES})
 set_target_properties(test_log_level_control PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_level_control "${TEST_LOG_LEVEL_CONTROL_SOURCES}")
-target_link_libraries(test_log_level_control PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_log_level_control PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_log_level_control PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_log_level_control)
 catch_discover_tests(test_log_level_control)
 
@@ -106,10 +94,7 @@ set(TEST_LOG_SITE_CONTROL_SOURCES main.cpp test_log_site_control.cpp)
 add_executable(test_log_site_control ${TEST_LOG_SITE_CONTROL_SOURCES})
 set_target_properties(test_log_site_control PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_site_control "${TEST_LOG_SITE_CONTROL_SOURCES}")
-target_link_libraries(test_log_site_control PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_log_site_control PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_log_site_control PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_log_site_control)
 catch_discover_tests(test_log_site_control)
 
@@ -118,10 +103,7 @@ set(TEST_LOG_FILTERS_SOURCES main.cpp test_log_filters.cpp)
 add_executable(test_log_filters ${TEST_LOG_FILTERS_SOURCES})
 set_target_properties(test_log_filters PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_log_filters "${TEST_LOG_FILTERS_SOURCES}")
-target_link_libraries(test_log_filters PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_log_filters PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_log_filters PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_log_filters)
 catch_discover_tests(test_log_filters)
 
@@ -130,10 +112,7 @@ set(TEST_ROTATION_SOURCES main.cpp test_rotation.cpp)
 add_executable(test_rotation ${TEST_ROTATION_SOURCES})
 set_target_properties(test_rotation PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_rotation "${TEST_ROTATION_SOURCES}")
-target_link_libraries(test_rotation PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_rotation PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_rotation PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_rotation)
 catch_discover_tests(test_rotation)
 
@@ -142,10 +121,7 @@ set(TEST_SINK_FILTERS_SOURCES main.cpp test_sink_filters.cpp)
 add_executable(test_sink_filters ${TEST_SINK_FILTERS_SOURCES})
 set_target_properties(test_sink_filters PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_test_source_file_compile_definitions(test_sink_filters "${TEST_SINK_FILTERS_SOURCES}")
-target_link_libraries(test_sink_filters PRIVATE Catch2::Catch2WithMain taocppjson fmt::fmt)
-target_include_directories(test_sink_filters PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
+target_link_libraries(test_sink_filters PRIVATE Catch2::Catch2WithMain slwoggy::slwoggy)
 add_metrics_definitions(test_sink_filters)
 catch_discover_tests(test_sink_filters)
 
