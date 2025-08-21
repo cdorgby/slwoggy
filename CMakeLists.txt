@@ -23,7 +23,6 @@ endif()
 # Options
 option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
 option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
-option(SLWOGGY_INSTALL "Generate install target" ON)
 option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
 
 # Metrics options (OFF by default for Release builds)
@@ -84,6 +83,7 @@ FetchContent_Declare(
     fmt
     GIT_REPOSITORY https://github.com/fmtlib/fmt.git
     GIT_TAG 10.1.1
+    GIT_SHALLOW TRUE
 )
 
 # taocpp-json - header-only
@@ -91,6 +91,7 @@ FetchContent_Declare(
     taocpp_json
     GIT_REPOSITORY https://github.com/taocpp/json.git
     GIT_TAG 1.0.0-beta.14
+    GIT_SHALLOW TRUE
 )
 
 # Catch2 - only needed for tests
@@ -99,6 +100,7 @@ if(SLWOGGY_BUILD_TESTS)
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
         GIT_TAG v3.4.0
+        GIT_SHALLOW TRUE
     )
 endif()
 
@@ -234,52 +236,6 @@ else()
     )
 endif()
 
-# Installation
-if(SLWOGGY_INSTALL)
-    include(GNUInstallDirs)
-    include(CMakePackageConfigHelpers)
-    
-    # Install headers
-    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    
-    # Install amalgamation if it exists
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/slwoggy.hpp)
-        install(FILES amalgamation/slwoggy.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    endif()
-    
-    # Install library target
-    install(TARGETS slwoggy
-        EXPORT slwoggyTargets
-    )
-    
-    # Install export
-    install(EXPORT slwoggyTargets
-        FILE slwoggyTargets.cmake
-        NAMESPACE slwoggy::
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/slwoggy
-    )
-    
-    # Create and install config file
-    configure_package_config_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/slwoggyConfig.cmake.in
-        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfig.cmake
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/slwoggy
-    )
-    
-    # Create and install version file
-    write_basic_package_version_file(
-        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfigVersion.cmake
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY AnyNewerVersion
-    )
-    
-    install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfig.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/slwoggy
-    )
-endif()
-
 # Print summary
 message(STATUS "")
 message(STATUS "slwoggy configuration summary:")
@@ -287,6 +243,5 @@ message(STATUS "  Version: ${GIT_VERSION}")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Examples: ${SLWOGGY_BUILD_EXAMPLES}")
 message(STATUS "  Tests: ${SLWOGGY_BUILD_TESTS}")
-message(STATUS "  Install: ${SLWOGGY_INSTALL}")
 message(STATUS "  Metrics: ${_SLWOGGY_COMPILE_DEFINITIONS}")
 message(STATUS "")

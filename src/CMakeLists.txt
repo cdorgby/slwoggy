@@ -43,8 +43,3 @@ add_slwoggy_example(log_mods log_mods.cpp)
 
 # Sink filter demo
 add_slwoggy_example(sink_filter_demo sink_filter_demo.cpp)
-
-# Simple installation rule - install main executable
-install(TARGETS slwoggy_demo
-    RUNTIME DESTINATION bin
-)
