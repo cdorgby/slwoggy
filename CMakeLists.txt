@@ -12,15 +12,32 @@ if(NOT GIT_VERSION)
     set(GIT_VERSION "dev")
 endif()
 
-project(slwoggy)
+project(slwoggy VERSION 1.0.0 LANGUAGES CXX)
 
-# Make git version available
-add_compile_definitions(SLWOGGY_VERSION_STRING="${GIT_VERSION}")
-
-# Set default build type if not specified
+# Set default build type to Release
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MemCheck" "Profile")
+endif()
+
+# Options
+option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
+option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
+option(SLWOGGY_INSTALL "Generate install target" ON)
+option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
+
+# Metrics options (OFF by default for Release builds)
+option(SLWOGGY_METRICS_BUFFER_POOL "Enable buffer pool metrics" OFF)
+option(SLWOGGY_METRICS_DISPATCHER "Enable dispatcher metrics" OFF)
+option(SLWOGGY_METRICS_STRUCTURED "Enable structured logging metrics" OFF)
+option(SLWOGGY_METRICS_MSG_RATE "Enable message rate tracking" OFF)
+option(SLWOGGY_METRICS_ALL "Enable all metrics" OFF)
+
+# Automatically enable examples and tests for Debug builds
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck")
+    set(SLWOGGY_BUILD_EXAMPLES ON CACHE BOOL "Build example applications" FORCE)
+    set(SLWOGGY_BUILD_TESTS ON CACHE BOOL "Build tests" FORCE)
+    set(SLWOGGY_METRICS_ALL ON CACHE BOOL "Enable all metrics" FORCE)
 endif()
 
 # Custom MemCheck build type
@@ -56,270 +73,214 @@ mark_as_advanced(
 
 # Display current build type
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Build examples: ${SLWOGGY_BUILD_EXAMPLES}")
+message(STATUS "Build tests: ${SLWOGGY_BUILD_TESTS}")
+
+# FetchContent for dependencies
+include(FetchContent)
+
+# fmt - always needed
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG 10.1.1
+)
+
+# taocpp-json - always needed
+FetchContent_Declare(
+    taocpp_json
+    GIT_REPOSITORY https://github.com/taocpp/json.git
+    GIT_TAG 1.0.0-beta.14
+)
+
+# Catch2 - only needed for tests
+if(SLWOGGY_BUILD_TESTS)
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.4.0
+    )
+endif()
+
+# Configure fmt options
+set(FMT_DOC OFF CACHE BOOL "" FORCE)
+set(FMT_TEST OFF CACHE BOOL "" FORCE)
+set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+
+# Make dependencies available
+FetchContent_MakeAvailable(fmt taocpp_json)
+if(SLWOGGY_BUILD_TESTS)
+    FetchContent_MakeAvailable(Catch2)
+    list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+endif()
+
+# Create taocpp::json interface library
+add_library(taocppjson INTERFACE)
+target_include_directories(taocppjson INTERFACE ${taocpp_json_SOURCE_DIR}/include)
+
+# Create the main slwoggy interface library
+add_library(slwoggy INTERFACE)
+add_library(slwoggy::slwoggy ALIAS slwoggy)
+
+# Set include directories
+target_include_directories(slwoggy INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+# Link dependencies - use generator expressions for proper export
+target_link_libraries(slwoggy INTERFACE 
+    $<BUILD_INTERFACE:fmt::fmt>
+    $<BUILD_INTERFACE:taocppjson>
+)
+
+# Set C++ standard requirement
+target_compile_features(slwoggy INTERFACE cxx_std_20)
+
+# Platform-specific link libraries
+if(UNIX AND NOT APPLE)
+    target_link_libraries(slwoggy INTERFACE pthread m dl)
+elseif(APPLE)
+    # macOS doesn't need special libraries for slwoggy
+endif()
+
+# Metrics configuration
+set(_SLWOGGY_COMPILE_DEFINITIONS "")
+
+if(SLWOGGY_METRICS_ALL)
+    list(APPEND _SLWOGGY_COMPILE_DEFINITIONS
+        LOG_COLLECT_BUFFER_POOL_METRICS
+        LOG_COLLECT_DISPATCHER_METRICS
+        LOG_COLLECT_STRUCTURED_METRICS
+        LOG_COLLECT_DISPATCHER_MSG_RATE
+        LOG_COLLECT_ROTATION_METRICS
+        LOG_COLLECT_COMPRESSION_METRICS
+    )
+else()
+    if(SLWOGGY_METRICS_BUFFER_POOL)
+        list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_BUFFER_POOL_METRICS)
+    endif()
+    if(SLWOGGY_METRICS_DISPATCHER)
+        list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_DISPATCHER_METRICS)
+    endif()
+    if(SLWOGGY_METRICS_STRUCTURED)
+        list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_STRUCTURED_METRICS)
+    endif()
+    if(SLWOGGY_METRICS_MSG_RATE)
+        list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_DISPATCHER_MSG_RATE)
+    endif()
+endif()
+
+# Always collect rotation and compression metrics (they're lightweight)
+list(APPEND _SLWOGGY_COMPILE_DEFINITIONS
+    LOG_COLLECT_ROTATION_METRICS
+    LOG_COLLECT_COMPRESSION_METRICS
+)
+
+# Apply compile definitions
+if(_SLWOGGY_COMPILE_DEFINITIONS)
+    target_compile_definitions(slwoggy INTERFACE ${_SLWOGGY_COMPILE_DEFINITIONS})
+endif()
+
+# Version definition
+target_compile_definitions(slwoggy INTERFACE SLWOGGY_VERSION_STRING="${GIT_VERSION}")
 
 # Enable additional debug features for MemCheck builds
 if(CMAKE_BUILD_TYPE STREQUAL "MemCheck")
-    add_compile_definitions(
-        _GLIBCXX_DEBUG  # Enable libstdc++ debug mode
-        _GLIBCXX_DEBUG_PEDANTIC  # Enable pedantic debug mode
+    target_compile_definitions(slwoggy INTERFACE
+        _GLIBCXX_DEBUG
+        _GLIBCXX_DEBUG_PEDANTIC
     )
-    # Set environment variable for ASan options at runtime
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_MEMCHECK ${CMAKE_BINARY_DIR}/bin)
     message(STATUS "MemCheck build enabled with AddressSanitizer and UndefinedBehaviorSanitizer")
     message(STATUS "Run with: ASAN_OPTIONS=detect_leaks=1:check_initialization_order=1:strict_init_order=1")
-endif()
-
-# Enable profiling features for Profile builds
-if(CMAKE_BUILD_TYPE STREQUAL "Profile")
-    message(STATUS "Profile build enabled with optimization level 2 and debug symbols")
-    message(STATUS "Frame pointers preserved for accurate profiling")
 endif()
 
 # Generate compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# C++ standard
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Options
-option(LOG_RELIABLE_DELIVERY "Enable blocking behavior when buffer pool exhausted (reliable delivery)" ON)
-
-# Compiler flags
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    # GCC-specific flags
-    add_compile_options(-Wno-interference-size)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Clang-specific flags (if needed)
+# Build examples if requested
+if(SLWOGGY_BUILD_EXAMPLES)
+    add_subdirectory(src)
 endif()
 
-# Function to set per-file compile definitions
-function(set_source_file_compile_definitions TARGET SOURCES)
-    foreach(SOURCE ${SOURCES})
-        # Get relative path from project root
-        file(RELATIVE_PATH REL_PATH ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/${SOURCE})
-        # Set compile definition for this specific source file
-        set_source_files_properties(${SOURCE} PROPERTIES
-            COMPILE_DEFINITIONS "SOURCE_FILE_NAME=\"${REL_PATH}\""
-        )
-    endforeach()
-endfunction()
-
-# Add source files
-set(SOURCES
-    src/main.cpp
-)
-
-# Add our executable
-add_executable(${PROJECT_NAME} ${SOURCES})
-
-# Add include directories
-target_include_directories(${PROJECT_NAME} PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Link with taocpp/json and fmt
-target_link_libraries(${PROJECT_NAME} PRIVATE taocppjson fmt::fmt)
-
-# Set per-file compile definitions
-set_source_file_compile_definitions(${PROJECT_NAME} "${SOURCES}")
-
-# Add simple test executable
-add_executable(simple src/simple.cpp)
-
-# Add include directories for simple
-target_include_directories(simple PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Link with taocpp/json and fmt
-target_link_libraries(simple PRIVATE taocppjson fmt::fmt)
-
-# Set per-file compile definitions for simple
-set_source_file_compile_definitions(simple "src/simple.cpp")
-
-# Add rotation_demo executable
-add_executable(rotation_demo src/rotation_demo.cpp)
-
-# Add include directories for rotation_demo
-target_include_directories(rotation_demo PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Link with taocpp/json and fmt
-target_link_libraries(rotation_demo PRIVATE taocppjson fmt::fmt)
-
-# Set per-file compile definitions for rotation_demo
-set_source_file_compile_definitions(rotation_demo "src/rotation_demo.cpp")
-
-# Add log_mods executable
-add_executable(log_mods src/log_mods.cpp)
-
-# Add include directories for log_mods
-target_include_directories(log_mods PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Link with taocpp/json and fmt
-target_link_libraries(log_mods PRIVATE taocppjson fmt::fmt)
-
-# Set per-file compile definitions for log_mods
-set_source_file_compile_definitions(log_mods "src/log_mods.cpp")
-
-# Add sink_filter_demo executable
-add_executable(sink_filter_demo src/sink_filter_demo.cpp)
-
-# Add include directories for sink_filter_demo
-target_include_directories(sink_filter_demo PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-# Link with taocpp/json and fmt
-target_link_libraries(sink_filter_demo PRIVATE taocppjson fmt::fmt)
-
-# Set per-file compile definitions for sink_filter_demo
-set_source_file_compile_definitions(sink_filter_demo "src/sink_filter_demo.cpp")
-
-# Enable metrics collection for Debug, MemCheck, and Profile builds
-if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "MemCheck" OR CMAKE_BUILD_TYPE STREQUAL "Profile")
-    target_compile_definitions(${PROJECT_NAME} PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
-        LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
-        LOG_COLLECT_DISPATCHER_MSG_RATE
-        LOG_COLLECT_ROTATION_METRICS
-        LOG_COLLECT_COMPRESSION_METRICS
-    )
-    target_compile_definitions(simple PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
-        LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
-        LOG_COLLECT_DISPATCHER_MSG_RATE
-        LOG_COLLECT_ROTATION_METRICS
-        LOG_COLLECT_COMPRESSION_METRICS
-    )
-    target_compile_definitions(rotation_demo PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
-        LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
-        LOG_COLLECT_DISPATCHER_MSG_RATE
-        LOG_COLLECT_ROTATION_METRICS
-        LOG_COLLECT_COMPRESSION_METRICS
-    )
-    target_compile_definitions(log_mods PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
-        LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
-        LOG_COLLECT_DISPATCHER_MSG_RATE
-        LOG_COLLECT_ROTATION_METRICS
-        LOG_COLLECT_COMPRESSION_METRICS
-    )
-    target_compile_definitions(sink_filter_demo PRIVATE
-        LOG_COLLECT_BUFFER_POOL_METRICS
-        LOG_COLLECT_DISPATCHER_METRICS
-        LOG_COLLECT_STRUCTURED_METRICS
-        LOG_COLLECT_DISPATCHER_MSG_RATE
-        LOG_COLLECT_ROTATION_METRICS
-        LOG_COLLECT_COMPRESSION_METRICS
-    )
+# Build tests if requested
+if(SLWOGGY_BUILD_TESTS)
+    enable_testing()
+    include(CTest)
+    include(Catch)
+    add_subdirectory(tests)
 endif()
-
-# Reliable delivery option
-if(LOG_RELIABLE_DELIVERY)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE
-        LOG_RELIABLE_DELIVERY
-    )
-    target_compile_definitions(simple PRIVATE
-        LOG_RELIABLE_DELIVERY
-    )
-    target_compile_definitions(rotation_demo PRIVATE
-        LOG_RELIABLE_DELIVERY
-    )
-    target_compile_definitions(log_mods PRIVATE
-        LOG_RELIABLE_DELIVERY
-    )
-    message(STATUS "Reliable delivery: ENABLED (blocking mode)")
-else()
-    message(STATUS "Reliable delivery: DISABLED (best-effort mode)")
-endif()
-
-# Set output directories
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
-set_target_properties(simple PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
-set_target_properties(rotation_demo PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
-set_target_properties(log_mods PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
-
-
-# Platform-specific settings
-if(WIN32)
-    # Windows-specific settings
-    if(MINGW)
-        target_link_libraries(${PROJECT_NAME} PRIVATE -static-libgcc -static-libstdc++)
-    endif()
-elseif(APPLE)
-    # macOS-specific settings - no special frameworks needed for this test app
-elseif(UNIX)
-    # Linux-specific settings
-    target_link_libraries(${PROJECT_NAME} PRIVATE m pthread dl)
-endif()
-
-# Enable testing support
-enable_testing()
-
-# Check if git submodules are initialized
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/fmt/CMakeLists.txt")
-    message(FATAL_ERROR "Git submodules not initialized. Please run: git submodule update --init --recursive")
-endif()
-
-# Configure third-party dependencies
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)  # Don't build tests for dependencies
-
-# fmt configuration
-set(FMT_DOC OFF CACHE BOOL "" FORCE)
-set(FMT_TEST OFF CACHE BOOL "" FORCE)
-set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
-
-# Add fmt - only built when something links to it
-add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
-
-# Add taocpp/json as interface library (header-only)
-add_library(taocppjson INTERFACE)
-target_include_directories(taocppjson INTERFACE ${CMAKE_SOURCE_DIR}/third_party/taocpp-json/include)
-
-# Add Catch2 - only built when tests are built
-add_subdirectory(third_party/Catch2 EXCLUDE_FROM_ALL)
-
-# Include Catch2's CMake utilities for tests
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/third_party/Catch2/extras)
-include(CTest)
-include(Catch)
-
-# Add tests subdirectory with EXCLUDE_FROM_ALL
-# Tests will only be built when explicitly requested (e.g., make tests)
-add_subdirectory(tests EXCLUDE_FROM_ALL)
-
-# Simple installation rule - just install the executable
-install(TARGETS ${PROJECT_NAME}
-    RUNTIME DESTINATION bin
-)
 
 # Amalgamation target
-add_custom_target(amalgamation
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create-amalgamation.sh
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Creating single-header amalgamation"
-    VERBATIM
-)
-
-# Install amalgamation header if it exists
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/slwoggy.hpp)
-    install(FILES amalgamation/slwoggy.hpp DESTINATION include)
+if(SLWOGGY_BUILD_AMALGAMATION)
+    add_custom_target(amalgamation ALL
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create-amalgamation.sh
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Creating single-header amalgamation"
+        VERBATIM
+    )
+else()
+    add_custom_target(amalgamation
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/create-amalgamation.sh
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Creating single-header amalgamation"
+        VERBATIM
+    )
 endif()
+
+# Installation
+if(SLWOGGY_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+    
+    # Install headers
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    
+    # Install amalgamation if it exists
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/slwoggy.hpp)
+        install(FILES amalgamation/slwoggy.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    endif()
+    
+    # Install library target
+    install(TARGETS slwoggy
+        EXPORT slwoggyTargets
+    )
+    
+    # Install export
+    install(EXPORT slwoggyTargets
+        FILE slwoggyTargets.cmake
+        NAMESPACE slwoggy::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/slwoggy
+    )
+    
+    # Create and install config file
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/slwoggyConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/slwoggy
+    )
+    
+    # Create and install version file
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY AnyNewerVersion
+    )
+    
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/slwoggyConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/slwoggy
+    )
+endif()
+
+# Print summary
+message(STATUS "")
+message(STATUS "slwoggy configuration summary:")
+message(STATUS "  Version: ${GIT_VERSION}")
+message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Examples: ${SLWOGGY_BUILD_EXAMPLES}")
+message(STATUS "  Tests: ${SLWOGGY_BUILD_TESTS}")
+message(STATUS "  Install: ${SLWOGGY_INSTALL}")
+message(STATUS "  Metrics: ${_SLWOGGY_COMPILE_DEFINITIONS}")
+message(STATUS "")
