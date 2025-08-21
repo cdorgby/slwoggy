@@ -10,6 +10,7 @@
 #include <random>
 #include <mutex>
 #include <condition_variable>
+#include <barrier>
 
 using namespace slwoggy;
 
