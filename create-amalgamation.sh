@@ -44,7 +44,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fmt taocpp_json)
 EOF
 
-cmake -B "$TEMP_BUILD/build" -S "$TEMP_BUILD" -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+if ! cmake -B "$TEMP_BUILD/build" -S "$TEMP_BUILD" -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1; then
+    echo "Failed to fetch dependencies for amalgamation"
+    rm -rf "$TEMP_BUILD"
+    exit 1
+fi
 
 # Update amalgamate config to use fetched dependencies
 cat > "$TOP/amalgamate/amalgamate-config.json" << EOF

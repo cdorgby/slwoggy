@@ -104,27 +104,40 @@ if(SLWOGGY_BUILD_TESTS)
     )
 endif()
 
-# Configure fmt for header-only mode
-set(FMT_HEADER_ONLY ON CACHE BOOL "" FORCE)
+# Set policy for FetchContent_Populate deprecation
+if(POLICY CMP0169)
+    cmake_policy(SET CMP0169 OLD)
+endif()
 
-# Get dependencies (header-only, so we just need the source)
-FetchContent_Populate(fmt)
-FetchContent_Populate(taocpp_json)
+# For header-only usage, fetch but don't build
+FetchContent_GetProperties(fmt)
+if(NOT fmt_POPULATED)
+    FetchContent_Populate(fmt)
+endif()
+
+FetchContent_GetProperties(taocpp_json)
+if(NOT taocpp_json_POPULATED)
+    FetchContent_Populate(taocpp_json)
+endif()
+
+# Create header-only interface targets
+if(NOT TARGET fmt::fmt)
+    add_library(fmt_header_only INTERFACE)
+    target_include_directories(fmt_header_only INTERFACE ${fmt_SOURCE_DIR}/include)
+    target_compile_definitions(fmt_header_only INTERFACE FMT_HEADER_ONLY)
+    add_library(fmt::fmt ALIAS fmt_header_only)
+endif()
+
+if(NOT TARGET taocppjson)
+    add_library(taocppjson INTERFACE)
+    target_include_directories(taocppjson INTERFACE ${taocpp_json_SOURCE_DIR}/include)
+endif()
 
 if(SLWOGGY_BUILD_TESTS)
     # Catch2 needs full processing
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 endif()
-
-# Create interface libraries for header-only dependencies
-add_library(fmt_header_only INTERFACE)
-target_include_directories(fmt_header_only INTERFACE ${fmt_SOURCE_DIR}/include)
-target_compile_definitions(fmt_header_only INTERFACE FMT_HEADER_ONLY)
-add_library(fmt::fmt ALIAS fmt_header_only)
-
-add_library(taocppjson INTERFACE)
-target_include_directories(taocppjson INTERFACE ${taocpp_json_SOURCE_DIR}/include)
 
 # Create the main slwoggy interface library
 add_library(slwoggy INTERFACE)
