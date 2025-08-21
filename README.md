@@ -562,6 +562,42 @@ auto no_info = make_stdout_sink(
     not_filter{level_range_filter{log_level::info, log_level::info}});
 ```
 
+### Module-Based Filtering
+
+Filter logs by module name to route different subsystems to different sinks:
+
+```cpp
+// Network logs go to a dedicated file
+auto network_sink = make_raw_file_sink("network.log", {},
+    module_filter{{"network", "http", "websocket"}});
+
+// Database operations to another file
+auto db_sink = make_raw_file_sink("database.log", {},
+    module_filter{{"database", "sql"}});
+
+// Exclude verbose modules from main log
+auto main_sink = make_raw_file_sink("app.log", {},
+    module_exclude_filter{{"trace", "verbose", "debug_internal"}});
+
+// Combine module and level filtering
+and_filter critical_network;
+critical_network.add(module_filter{{"network", "security"}})
+                .add(level_filter{log_level::error});
+auto alert_sink = make_stdout_sink(critical_network);
+
+// Add all sinks
+auto& dispatcher = log_line_dispatcher::instance();
+dispatcher.add_sink(network_sink);
+dispatcher.add_sink(db_sink);
+dispatcher.add_sink(main_sink);
+dispatcher.add_sink(alert_sink);
+
+// Use LOG_MOD to specify module at log site
+LOG_MOD(info, "network") << "Connection established";
+LOG_MOD(error, "database") << "Query failed";
+LOG_MOD(debug, "verbose") << "Detailed trace info";  // Excluded from main_sink
+```
+
 ### Complex Filtering Example
 
 ```cpp
@@ -1263,6 +1299,20 @@ make -j$(nproc)
 
 # Run tests
 make tests && ctest
+```
+
+### Build Options
+
+- **LOG_RELIABLE_DELIVERY** (default: ON) - When enabled, LOG() calls block if buffer pool is exhausted instead of dropping messages
+- **SLWOGGY_BUILD_TESTS** (default: OFF) - Build test suite
+- **SLWOGGY_BUILD_EXAMPLES** (default: ON) - Build example applications
+
+```bash
+# Build with reliable delivery disabled (allows message drops)
+cmake .. -DLOG_RELIABLE_DELIVERY=OFF
+
+# Build with tests
+cmake .. -DSLWOGGY_BUILD_TESTS=ON
 ```
 
 ### Single-Header Version

@@ -29,10 +29,6 @@ inline log_line_base &log_line_base::operator=(log_line_base &&other) noexcept
         // Move from other
         buffer_       = std::exchange(other.buffer_, nullptr);
         needs_header_ = std::exchange(other.needs_header_, false);
-        level_        = other.level_;
-        file_         = other.file_;
-        line_         = other.line_;
-        timestamp_    = other.timestamp_;
     }
     return *this;
 }
@@ -59,7 +55,7 @@ inline size_t log_line_headered::write_header()
 
     // Use stored timestamp
     auto &dispatcher = log_line_dispatcher::instance();
-    int64_t diff_us = std::chrono::duration_cast<std::chrono::microseconds>(timestamp_ - dispatcher.start_time()).count();
+    int64_t diff_us = std::chrono::duration_cast<std::chrono::microseconds>(buffer_->timestamp_ - dispatcher.start_time()).count();
     int64_t ms = diff_us / 1000;
     int64_t us = std::abs(diff_us % 1000);
 
@@ -69,17 +65,17 @@ inline size_t log_line_headered::write_header()
 
     // Use fmt::format_to_buffer_with_padding for better performance
     int file_width      = log_site_registry::longest_file();
-    int actual_file_len = std::min(file_width, static_cast<int>(file_.size()));
+    int actual_file_len = std::min(file_width, static_cast<int>(buffer_->file_.size()));
 
     buffer_->format_to_buffer_with_padding("{:08}.{:03} [{:<5}] {:<10} {:>{}.{}}:{} ",
                                            ms,
                                            us,
-                                           log_level_names[static_cast<int>(level_)],
-                                           module_.detail->name,
-                                           file_.substr(0, actual_file_len),
+                                           log_level_names[static_cast<int>(buffer_->level_)],
+                                           buffer_->module_->name,
+                                           buffer_->file_.substr(0, actual_file_len),
                                            file_width,
                                            actual_file_len,
-                                           line_);
+                                           buffer_->line_);
 
     buffer_->header_width_ = buffer_->len() - text_len_before;
     return buffer_->header_width_;
