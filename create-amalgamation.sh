@@ -15,10 +15,72 @@ mkdir -p "$TOP/amalgamation"
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
 echo "Creating amalgamation header: amalgamation/slwoggy.hpp (version: $VERSION)"
 
+# Create a temporary build directory to fetch dependencies
+TEMP_BUILD="$TOP/.amalgamate-build"
+mkdir -p "$TEMP_BUILD"
+
+# Use CMake to fetch dependencies needed for amalgamation
+echo "Fetching dependencies for amalgamation..."
+cat > "$TEMP_BUILD/CMakeLists.txt" << 'EOF'
+cmake_minimum_required(VERSION 3.11)
+project(amalgamate_deps)
+
+include(FetchContent)
+
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG 10.1.1
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_Declare(
+    taocpp_json
+    GIT_REPOSITORY https://github.com/taocpp/json.git
+    GIT_TAG 1.0.0-beta.14
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(fmt taocpp_json)
+EOF
+
+cmake -B "$TEMP_BUILD/build" -S "$TEMP_BUILD" -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
+
+# Update amalgamate config to use fetched dependencies
+cat > "$TOP/amalgamate/amalgamate-config.json" << EOF
+{
+    "target": "../amalgamation/slwoggy.hpp",
+    "sources": [
+        "include/log.hpp"
+    ],
+    "include_paths": [
+        "include",
+        "$TEMP_BUILD/build/_deps/fmt-src/include",
+        "$TEMP_BUILD/build/_deps/taocpp_json-src/include"
+    ]
+}
+EOF
+
 # Run amalgamate.py from the amalgamate directory
 cd "$TOP/amalgamate"
 python3 amalgamate.py -c amalgamate-config.json -s "$TOP" -p amalgamate-prologue.hpp
 cd "$TOP"
+
+# Clean up temporary build directory
+rm -rf "$TEMP_BUILD"
+
+# Restore original amalgamate config
+cat > "$TOP/amalgamate/amalgamate-config.json" << 'EOF'
+{
+    "target": "../amalgamation/slwoggy.hpp",
+    "sources": [
+        "include/log.hpp"
+    ],
+    "include_paths": [
+        "include"
+    ]
+}
+EOF
 
 # Replace version placeholder with actual version
 # First, escape any special characters in version string for sed
@@ -52,7 +114,6 @@ if g++ -std=c++20 -I"$TOP/amalgamation" -c "$TOP/test_amalgamation.cpp" -o "$TOP
     rm -f "$TOP/test_amalgamation.cpp" "$TOP/test_amalgamation.o"
 else
     echo "✗ Amalgamation compilation failed"
-    echo "  Run: g++ -std=c++20 -Iamalgamation -Ithird_party/fmt/include -Ithird_party/taocpp-json/include -c test_amalgamation.cpp"
     echo "  This indicates a bug: the amalgamation should be self-contained and compile with only -Iamalgamation."
     echo "  Please check the error output and report this issue."
 fi

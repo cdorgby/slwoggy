@@ -4,18 +4,17 @@ project(slwoggy_integration_test)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Method 1: add_subdirectory for local testing
-# In real usage, you would use FetchContent with a Git repository
-add_subdirectory(.. slwoggy)
+# Method 1: FetchContent from GitHub
+include(FetchContent)
 
-# Alternatively, for FetchContent from GitHub:
-# include(FetchContent)
-# FetchContent_Declare(
-#     slwoggy
-#     GIT_REPOSITORY https://github.com/your-org/slwoggy.git
-#     GIT_TAG main
-# )
-# FetchContent_MakeAvailable(slwoggy)
+FetchContent_Declare(
+    slwoggy
+    GIT_REPOSITORY https://github.com/cdorgby/slwoggy.git
+    GIT_TAG cmake-refactor
+    GIT_SHALLOW TRUE  # Only fetch the specific commit, not full history
+)
+
+FetchContent_MakeAvailable(slwoggy)
 
 # Create test executable
 add_executable(integration_test main.cpp)

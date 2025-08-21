@@ -4,8 +4,6 @@
         "include/log.hpp"
     ],
     "include_paths": [
-        "include",
-        "third_party/fmt/include",
-        "third_party/taocpp-json/include"
+        "include"
     ]
 }
