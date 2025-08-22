@@ -151,10 +151,19 @@ endif()
 add_library(slwoggy INTERFACE)
 add_library(slwoggy::slwoggy ALIAS slwoggy)
 
-# Set include directories (build interface only - no installation support)
-target_include_directories(slwoggy INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
+# Check if amalgamation directory exists
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation" AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation")
+    # Use amalgamation directory if it exists (single-header mode)
+    message(STATUS "Using amalgamation directory for include path")
+    target_include_directories(slwoggy INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/amalgamation>
+    )
+else()
+    # Use standard include directory (multi-header mode)
+    target_include_directories(slwoggy INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+endif()
 
 # Propagate include directories from dependencies
 target_link_libraries(slwoggy INTERFACE 
