@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <shared_mutex>
+#include <mutex>
 #include <string_view>
 #include <vector>
 #include <cstring>
@@ -19,7 +20,8 @@
 #include "log_types.hpp"
 #include "log_utils.hpp"
 
-namespace slwoggy {
+namespace slwoggy
+{
 
 /**
  * @brief Internal module configuration data
@@ -273,8 +275,9 @@ class log_module_registry
                     for (const auto *module : modules)
                     {
                         if (!module) continue;
-                        
-                        if (detail::wildcard_match(module->name, module_pattern)) {
+
+                        if (detail::wildcard_match(module->name, module_pattern))
+                        {
                             set_module_level(module->name, level);
                         }
                     }

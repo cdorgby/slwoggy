@@ -34,6 +34,8 @@ option(SLWOGGY_METRICS_BUFFER_POOL "Enable buffer pool metrics" OFF)
 option(SLWOGGY_METRICS_DISPATCHER "Enable dispatcher metrics" OFF)
 option(SLWOGGY_METRICS_STRUCTURED "Enable structured logging metrics" OFF)
 option(SLWOGGY_METRICS_MSG_RATE "Enable message rate tracking" OFF)
+option(SLWOGGY_METRICS_ROTATION "Enable log rotation metrics" OFF)
+option(SLWOGGY_METRICS_COMPRESSION "Enable compression metrics" OFF)
 option(SLWOGGY_METRICS_ALL "Enable all metrics" OFF)
 
 # Automatically enable examples and tests for Debug builds
@@ -163,6 +165,11 @@ target_link_libraries(slwoggy INTERFACE
 # Set C++ standard requirement
 target_compile_features(slwoggy INTERFACE cxx_std_20)
 
+# Add warning flags
+target_compile_options(slwoggy INTERFACE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>
+)
+
 # Platform-specific link libraries
 if(UNIX AND NOT APPLE)
     target_link_libraries(slwoggy INTERFACE pthread m dl)
@@ -195,13 +202,14 @@ else()
     if(SLWOGGY_METRICS_MSG_RATE)
         list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_DISPATCHER_MSG_RATE)
     endif()
+    if (SLWOGGY_METRICS_ROTATION)
+        list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_ROTATION_METRICS)
+    endif()
+    if (SLWOGGY_METRICS_COMPRESSION)
+        list(APPEND _SLWOGGY_COMPILE_DEFINITIONS LOG_COLLECT_COMPRESSION_METRICS)
+    endif()
 endif()
 
-# Always collect rotation and compression metrics (they're lightweight)
-list(APPEND _SLWOGGY_COMPILE_DEFINITIONS
-    LOG_COLLECT_ROTATION_METRICS
-    LOG_COLLECT_COMPRESSION_METRICS
-)
 
 # Apply compile definitions
 if(_SLWOGGY_COMPILE_DEFINITIONS)

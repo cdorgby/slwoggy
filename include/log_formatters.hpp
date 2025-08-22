@@ -15,7 +15,7 @@
 #include "log_types.hpp"
 #include "log_buffer.hpp"
 #include "log_structured.hpp"
-#include "log_structured_impl.hpp"    // IWYU pragma: keep
+#include "log_structured_impl.hpp" // IWYU pragma: keep
 
 namespace slwoggy
 {
@@ -215,10 +215,9 @@ class taocpp_json_formatter
       private:
         char *begin_;
         char *end_;
-        char *current_;
 
       public:
-        direct_buffer_streambuf(char *buffer, size_t size) : begin_(buffer), end_(buffer + size), current_(buffer)
+        direct_buffer_streambuf(char *buffer, size_t size) : begin_(buffer), end_(buffer + size)
         {
             // Set up the put area for the entire buffer
             setp(begin_, end_);
@@ -284,9 +283,7 @@ class taocpp_json_formatter
         c.key("message");
         auto msg = buffer->get_message();
         // Strip trailing quote from logfmt-formatted messages
-        if (!buffer->is_padding_enabled() && !msg.empty() && msg.back() == '"') {
-            msg.remove_suffix(1);
-        }
+        if (!buffer->is_padding_enabled() && !msg.empty() && msg.back() == '"') { msg.remove_suffix(1); }
         c.string(msg);
         c.member();
 

@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
     // Default parameters
     std::string sink_type = "raw";
     std::string output_file = "/tmp/log.txt";
-    bool show_detailed_stats = false;
+    [[maybe_unused]] bool show_detailed_stats = false;
 
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
@@ -33,7 +33,9 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
             output_file = argv[++i];
         } else if (strcmp(argv[i], "-d") == 0) {
+#if defined(LOG_COLLECT_DISPATCHER_METRICS) || defined(LOG_COLLECT_BUFFER_POOL_METRICS) || defined(LOG_COLLECT_STRUCTURED_METRICS)
             show_detailed_stats = true;
+#endif
         } else if (strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
