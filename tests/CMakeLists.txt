@@ -36,7 +36,7 @@ function(add_metrics_definitions TARGET)
         )
     endif()
     # Apply SLWOGGY_RELIABLE_DELIVERY setting from parent
-    if(LOG_RELIABLE_DELIVERY)
+    if(SLWOGGY_RELIABLE_DELIVERY)
         target_compile_definitions(${TARGET} PRIVATE
             SLWOGGY_RELIABLE_DELIVERY
         )
