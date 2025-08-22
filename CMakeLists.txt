@@ -25,9 +25,11 @@ endif()
 
 # Early amalgamation detection
 set(SLWOGGY_AMALGAMATION_PRESENT OFF)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation" AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/slwoggy.hpp")
     set(SLWOGGY_AMALGAMATION_PRESENT ON)
-    message(STATUS "Amalgamation directory detected")
+    message(STATUS "Amalgamation single-header detected")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation" AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/amalgamation")
+    message(WARNING "Amalgamation directory found but slwoggy.hpp is missing")
 endif()
 
 # Options
@@ -38,28 +40,22 @@ if(SLWOGGY_IGNORE_AMALGAMATION)
     message(STATUS "Ignoring amalgamation directory (SLWOGGY_IGNORE_AMALGAMATION=ON)")
 endif()
 
-# Build options - automatically disabled when using amalgamation
-if(SLWOGGY_AMALGAMATION_PRESENT)
-    option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
-    option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
-    option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
-else()
-    option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
-    option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
-    option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
-endif()
+# Build options
+option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
+option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
+option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
 option(SLWOGGY_RELIABLE_DELIVERY "Enable reliable delivery mode" ON)
 
 # Metrics options (OFF by default for Release builds, disabled with amalgamation)
 if(SLWOGGY_AMALGAMATION_PRESENT)
-    # Force metrics off when using amalgamation
-    set(SLWOGGY_METRICS_BUFFER_POOL OFF)
-    set(SLWOGGY_METRICS_DISPATCHER OFF)
-    set(SLWOGGY_METRICS_STRUCTURED OFF)
-    set(SLWOGGY_METRICS_MSG_RATE OFF)
-    set(SLWOGGY_METRICS_ROTATION OFF)
-    set(SLWOGGY_METRICS_COMPRESSION OFF)
-    set(SLWOGGY_METRICS_ALL OFF)
+    # Force metrics off when using amalgamation (use CACHE to persist)
+    set(SLWOGGY_METRICS_BUFFER_POOL OFF CACHE BOOL "Enable buffer pool metrics" FORCE)
+    set(SLWOGGY_METRICS_DISPATCHER OFF CACHE BOOL "Enable dispatcher metrics" FORCE)
+    set(SLWOGGY_METRICS_STRUCTURED OFF CACHE BOOL "Enable structured logging metrics" FORCE)
+    set(SLWOGGY_METRICS_MSG_RATE OFF CACHE BOOL "Enable message rate tracking" FORCE)
+    set(SLWOGGY_METRICS_ROTATION OFF CACHE BOOL "Enable log rotation metrics" FORCE)
+    set(SLWOGGY_METRICS_COMPRESSION OFF CACHE BOOL "Enable compression metrics" FORCE)
+    set(SLWOGGY_METRICS_ALL OFF CACHE BOOL "Enable all metrics" FORCE)
 else()
     option(SLWOGGY_METRICS_BUFFER_POOL "Enable buffer pool metrics" OFF)
     option(SLWOGGY_METRICS_DISPATCHER "Enable dispatcher metrics" OFF)
@@ -75,6 +71,10 @@ if(NOT SLWOGGY_AMALGAMATION_PRESENT AND (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CM
     set(SLWOGGY_BUILD_EXAMPLES ON CACHE BOOL "Build example applications" FORCE)
     set(SLWOGGY_BUILD_TESTS ON CACHE BOOL "Build tests" FORCE)
     set(SLWOGGY_METRICS_ALL ON CACHE BOOL "Enable all metrics" FORCE)
+elseif(SLWOGGY_AMALGAMATION_PRESENT)
+    # When using amalgamation, force these off even in Debug mode
+    set(SLWOGGY_BUILD_EXAMPLES OFF CACHE BOOL "Build example applications" FORCE)
+    set(SLWOGGY_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
 endif()
 
 # Custom MemCheck build type
