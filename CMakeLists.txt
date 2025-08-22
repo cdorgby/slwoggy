@@ -217,7 +217,7 @@ if(_SLWOGGY_COMPILE_DEFINITIONS)
 endif()
 
 # Add SLWOGGY_RELIABLE_DELIVERY if enabled
-if(LOG_RELIABLE_DELIVERY)
+if(SLWOGGY_RELIABLE_DELIVERY)
     target_compile_definitions(slwoggy INTERFACE SLWOGGY_RELIABLE_DELIVERY)
 endif()
 
@@ -274,6 +274,6 @@ message(STATUS "  Version: ${GIT_VERSION}")
 message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Examples: ${SLWOGGY_BUILD_EXAMPLES}")
 message(STATUS "  Tests: ${SLWOGGY_BUILD_TESTS}")
-message(STATUS "  Reliable delivery: ${LOG_RELIABLE_DELIVERY}")
+message(STATUS "  Reliable delivery: ${SLWOGGY_RELIABLE_DELIVERY}")
 message(STATUS "  Metrics: ${_SLWOGGY_COMPILE_DEFINITIONS}")
 message(STATUS "")
