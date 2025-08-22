@@ -6,7 +6,7 @@ on:
     tags:
       - 'v*'
   
-  # Allow manual triggering
+  # Allow manual triggering (for testing purposes only)
   workflow_dispatch:
     inputs:
       release_type:
@@ -26,22 +26,108 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # Need full history for git describe to work
+          # Need full history for git describe to work and to verify tag type
           fetch-depth: 0
           # Initialize submodules for dependencies
           submodules: recursive
       
+      - name: Verify release conditions
+        id: verify
+        run: |
+          echo "=== Verifying release conditions ==="
+          
+          # Get the current tag name
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "Current tag: $TAG_NAME"
+          
+          # Check if this is an annotated tag
+          if git describe --exact-match --tags 2>/dev/null | grep -q "^$TAG_NAME$"; then
+            # Check if it's annotated (will fail for lightweight tags)
+            if git cat-file -p "$TAG_NAME" 2>/dev/null | grep -q "^tag "; then
+              echo "✓ Tag is annotated"
+              IS_ANNOTATED="true"
+            else
+              echo "✗ Tag is lightweight (not annotated)"
+              IS_ANNOTATED="false"
+            fi
+          else
+            echo "✗ Not on a tag"
+            IS_ANNOTATED="false"
+          fi
+          
+          # Get the branch name that contains this tag
+          BRANCHES=$(git branch -r --contains "$TAG_NAME" | grep -v HEAD | sed 's/.*origin\///')
+          echo "Branches containing this tag:"
+          echo "$BRANCHES"
+          
+          # Check if tag is on a proper release branch
+          # Pattern: version-X.Y or release-X.Y or release/X.Y or version/X.Y
+          VALID_BRANCH="false"
+          for BRANCH in $BRANCHES; do
+            if echo "$BRANCH" | grep -qE '^(version|release)[-/][0-9]+\.[0-9]+$'; then
+              echo "✓ Found valid release branch: $BRANCH"
+              VALID_BRANCH="true"
+              RELEASE_BRANCH="$BRANCH"
+              break
+            fi
+          done
+          
+          if [ "$VALID_BRANCH" = "false" ]; then
+            echo "✗ Tag is not on a properly named release branch"
+            echo "  Expected pattern: version-X.Y or release-X.Y"
+          fi
+          
+          # Verify tag format matches branch version
+          if [ "$VALID_BRANCH" = "true" ]; then
+            # Extract version from branch name (e.g., version-0.1 -> 0.1)
+            BRANCH_VERSION=$(echo "$RELEASE_BRANCH" | sed -E 's/^(version|release)[-\/]//')
+            
+            # Check if tag starts with v followed by the branch version
+            if echo "$TAG_NAME" | grep -qE "^v${BRANCH_VERSION}\.[0-9]+"; then
+              echo "✓ Tag version matches branch version"
+              VERSION_MATCH="true"
+            else
+              echo "✗ Tag $TAG_NAME doesn't match branch version $BRANCH_VERSION"
+              echo "  Expected pattern: v${BRANCH_VERSION}.x"
+              VERSION_MATCH="false"
+            fi
+          else
+            VERSION_MATCH="false"
+          fi
+          
+          # Final decision
+          if [ "$IS_ANNOTATED" = "true" ] && [ "$VALID_BRANCH" = "true" ] && [ "$VERSION_MATCH" = "true" ]; then
+            echo ""
+            echo "=== All release conditions met ✓ ==="
+            echo "proceed=true" >> $GITHUB_OUTPUT
+            echo "branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
+          else
+            echo ""
+            echo "=== Release conditions NOT met ✗ ==="
+            echo "Requirements:"
+            echo "  1. Tag must be annotated (git tag -a)"
+            echo "  2. Tag must be on a release branch (version-X.Y or release-X.Y)"
+            echo "  3. Tag version must match branch (e.g., v0.1.x for version-0.1)"
+            echo ""
+            echo "Skipping amalgamation build for main branch"
+            echo "proceed=false" >> $GITHUB_OUTPUT
+            exit 0  # Exit successfully but skip remaining steps
+          fi
+      
       - name: Setup Python
+        if: steps.verify.outputs.proceed == 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
       
       - name: Install dependencies
+        if: steps.verify.outputs.proceed == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y g++ python3
       
       - name: Generate amalgamation
+        if: steps.verify.outputs.proceed == 'true'
         run: |
           echo "Creating slwoggy amalgamation build..."
           ./create-amalgamation.sh
@@ -59,6 +145,7 @@ jobs:
           echo "  Lines: $(wc -l < amalgamation/slwoggy.hpp) lines"
       
       - name: Get version info
+        if: steps.verify.outputs.proceed == 'true'
         id: version
         run: |
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -76,6 +163,7 @@ jobs:
           fi
       
       - name: Create build package
+        if: steps.verify.outputs.proceed == 'true'
         run: |
           # Create a clean directory for the build
           mkdir -p slwoggy-build
@@ -173,14 +261,54 @@ jobs:
           ls -la slwoggy-build/
       
       - name: Upload build artifact
+        if: steps.verify.outputs.proceed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.version.outputs.artifact_name }}
           path: slwoggy-build/
           retention-days: 90
       
+      - name: Commit amalgamation to release branch
+        if: steps.verify.outputs.proceed == 'true'
+        run: |
+          echo "Committing amalgamation to release branch: ${{ steps.verify.outputs.branch }}"
+          
+          # Configure git
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Switch to the release branch
+          git checkout "${{ steps.verify.outputs.branch }}"
+          
+          # Check if amalgamation directory already exists
+          if [ -d "amalgamation" ]; then
+            echo "Updating existing amalgamation..."
+          else
+            echo "Creating new amalgamation directory..."
+          fi
+          
+          # Copy the generated amalgamation
+          cp -r amalgamation amalgamation.new
+          rm -rf amalgamation
+          mv amalgamation.new amalgamation
+          
+          # Add and commit if there are changes
+          git add amalgamation/
+          if git diff --staged --quiet; then
+            echo "No changes to amalgamation, skipping commit"
+          else
+            git commit -m "Update amalgamation for ${{ steps.version.outputs.version }}
+            
+            Generated from tag ${{ steps.version.outputs.version }}
+            [skip ci]"
+            
+            # Push to the release branch
+            git push origin "${{ steps.verify.outputs.branch }}"
+            echo "✓ Amalgamation committed to ${{ steps.verify.outputs.branch }}"
+          fi
+      
       - name: Create release (for tagged versions)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.verify.outputs.proceed == 'true' && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
           files: |
