@@ -19,6 +19,10 @@ on:
           - release
           - test
 
+permissions:
+  contents: write
+  actions: read
+  
 jobs:
   create-amalgamation:
     runs-on: ubuntu-latest
@@ -319,9 +323,15 @@ jobs:
             # Use single-line commit message to avoid YAML heredoc indentation issues
             git commit -m "Update amalgamation for ${{ steps.version.outputs.version }} [skip ci]"
             
-            # Push to the release branch
+            # Move the tag to point to the amalgamation commit
+            echo "Moving tag ${{ steps.version.outputs.version }} to point to amalgamation commit..."
+            git tag -f "${{ steps.version.outputs.version }}" HEAD
+            
+            # Push both the branch and the updated tag
             git push origin "${{ steps.verify.outputs.branch }}"
+            git push --force origin "${{ steps.version.outputs.version }}"
             echo "✓ Amalgamation committed to ${{ steps.verify.outputs.branch }}"
+            echo "✓ Tag ${{ steps.version.outputs.version }} moved to amalgamation commit"
           fi
       
       - name: Create release (for tagged versions)
