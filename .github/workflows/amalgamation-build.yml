@@ -56,7 +56,10 @@ jobs:
           fi
           
           # Get the branch name that contains this tag
-          BRANCHES=$(git branch -r --contains "$TAG_NAME" | grep -v HEAD | sed 's/.*origin\///')
+          # Get the commit hash that the tag points to
+          TAG_COMMIT=$(git rev-parse "$TAG_NAME")
+          # Get the branch name that contains this tag's commit
+          BRANCHES=$(git branch -r --contains "$TAG_COMMIT" | grep -v HEAD | sed 's/.*origin\///')
           echo "Branches containing this tag:"
           echo "$BRANCHES"
           
