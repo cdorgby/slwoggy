@@ -72,7 +72,6 @@ Then in your code:
 using namespace slwoggy;
 
 int main() {
-    log_line_dispatcher::instance().add_sink(make_stdout_sink());
     LOG(info) << "Hello from slwoggy!" << endl;
     return 0;
 }
