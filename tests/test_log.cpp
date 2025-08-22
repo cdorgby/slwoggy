@@ -471,7 +471,7 @@ TEST_CASE("Multi-line log tests", "[log][multiline]") {
     }
 }
 
-#ifndef LOG_RELIABLE_DELIVERY
+#ifndef SLWOGGY_RELIABLE_DELIVERY
 TEST_CASE("Multiple concurrent log_line instances", "[log][concurrent]") {
     SECTION("Multiple log_lines in same scope") {
         log_sink_test test_sink;
@@ -585,9 +585,9 @@ TEST_CASE("Multiple concurrent log_line instances", "[log][concurrent]") {
     }
 }
 #else
-// Placeholder test for when LOG_RELIABLE_DELIVERY is enabled
+// Placeholder test for when SLWOGGY_RELIABLE_DELIVERY is enabled
 TEST_CASE("Multiple concurrent log_line instances", "[log][concurrent][skipped]") {
-    INFO("Test skipped: Buffer pool exhaustion tests incompatible with LOG_RELIABLE_DELIVERY - would deadlock");
+    INFO("Test skipped: Buffer pool exhaustion tests incompatible with SLWOGGY_RELIABLE_DELIVERY - would deadlock");
     REQUIRE(true); // Dummy assertion to make test pass
 }
 #endif
@@ -1244,10 +1244,10 @@ TEST_CASE("Log format and color verification", "[log][format]") {
 
 TEST_CASE("Lock-free sink operations", "[log][sink][lockfree]") {
 // Test should work fine with reliable delivery now that ref counting is fixed
-// #ifdef LOG_RELIABLE_DELIVERY
+// #ifdef SLWOGGY_RELIABLE_DELIVERY
 //     // These stress tests are designed for non-blocking mode where logs can be dropped.
 //     // With reliable delivery, they can deadlock or behave incorrectly.
-//     SKIP("Lock-free sink operation tests incompatible with LOG_RELIABLE_DELIVERY");
+//     SKIP("Lock-free sink operation tests incompatible with SLWOGGY_RELIABLE_DELIVERY");
 // #else
     SECTION("Add and remove sinks dynamically") {
         auto& dispatcher = log_line_dispatcher::instance();
@@ -1438,7 +1438,7 @@ TEST_CASE("Lock-free sink operations", "[log][sink][lockfree]") {
         dispatcher.set_sink(0, original_sink);
         dispatcher.set_sink(1, nullptr);
     }
-// #endif // LOG_RELIABLE_DELIVERY
+// #endif // SLWOGGY_RELIABLE_DELIVERY
 }
 
 TEST_CASE("Buffer pool benchmarks", "[!benchmark]") {

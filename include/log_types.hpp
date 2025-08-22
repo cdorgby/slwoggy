@@ -26,11 +26,11 @@ inline constexpr size_t CACHE_LINE_SIZE = 64; // Common cache line size
 #endif
 
 // Buffer pool configuration
-// Define LOG_RELIABLE_DELIVERY to enable blocking behavior when buffer pool is exhausted.
+// Define SLWOGGY_RELIABLE_DELIVERY to enable blocking behavior when buffer pool is exhausted.
 // When enabled: Threads block until buffers are available (no message loss, ~2M msg/sec)
 // When disabled: Threads get nullptr immediately (higher throughput ~5M msg/sec, may drop messages)
-// #ifndef LOG_RELIABLE_DELIVERY
-// #define LOG_RELIABLE_DELIVERY  // Default to reliable delivery
+// #ifndef SLWOGGY_RELIABLE_DELIVERY
+// #define SLWOGGY_RELIABLE_DELIVERY  // Default to reliable delivery
 // #endif
 
 // Buffer pool constants

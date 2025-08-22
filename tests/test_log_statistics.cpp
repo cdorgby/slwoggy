@@ -121,7 +121,7 @@ TEST_CASE("Buffer pool statistics", "[statistics]") {
     
 }
 
-#ifndef LOG_RELIABLE_DELIVERY
+#ifndef SLWOGGY_RELIABLE_DELIVERY
 TEST_CASE("Buffer pool exhaustion tests", "[statistics][exhaustion]") {
     StatsTestFixture fixture;
     
@@ -757,9 +757,9 @@ TEST_CASE("Buffer pool exhaustion tests", "[statistics][exhaustion]") {
     }
 }
 #else
-// Placeholder test for when LOG_RELIABLE_DELIVERY is enabled
+// Placeholder test for when SLWOGGY_RELIABLE_DELIVERY is enabled
 TEST_CASE("Buffer pool exhaustion tests", "[statistics][exhaustion][skipped]") {
-    INFO("Tests skipped: Buffer pool exhaustion tests incompatible with LOG_RELIABLE_DELIVERY - would deadlock");
+    INFO("Tests skipped: Buffer pool exhaustion tests incompatible with SLWOGGY_RELIABLE_DELIVERY - would deadlock");
     REQUIRE(true); // Dummy assertion to make test pass
 }
 #endif
