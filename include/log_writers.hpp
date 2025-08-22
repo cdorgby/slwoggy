@@ -34,9 +34,9 @@ class file_writer
   public:
     file_writer(const std::string &filename, rotate_policy policy = rotate_policy{})
     : filename_(filename),
-      policy_(policy),
       fd_(-1),
-      close_fd_(true)
+      close_fd_(true),
+      policy_(policy)
     {
         if (policy_.mode != rotate_policy::kind::none)
         {
@@ -149,11 +149,7 @@ class file_writer
             rotation_handle_->add_bytes_written(total_written);
 
             // Check if rotation needed after this write
-            if (rotation_handle_->should_rotate(0))
-            {
-                int new_fd = rotation_handle_->get_next_fd();
-                // new_fd will be used for the NEXT write
-            }
+            if (rotation_handle_->should_rotate(0)) { rotation_handle_->get_next_fd(); }
         }
         return total_written;
     }
@@ -187,22 +183,10 @@ class writev_file_writer : public file_writer
     size_t bulk_write(log_buffer_base **buffers, size_t count, const Formatter &formatter) const
     {
         // Determine which FD to use (with rotation support)
-        int write_fd      = fd_;
-        size_t total_size = 0;
+        int write_fd = fd_;
 
         // If rotation is enabled, get current FD but don't rotate yet
-        if (rotation_handle_)
-        {
-            // Calculate total size first
-            for (size_t i = 0; i < count; ++i)
-            {
-                if (!buffers[i]->filtered_ && buffers[i]->len() > 0) { total_size += buffers[i]->len(); }
-            }
-
-            write_fd = rotation_handle_->get_current_fd();
-
-            // Don't rotate BEFORE write - data should go to current file
-        }
+        if (rotation_handle_) { write_fd = rotation_handle_->get_current_fd(); }
 
         if (write_fd < 0 || count == 0) return 0;
 
@@ -254,11 +238,7 @@ class writev_file_writer : public file_writer
                 rotation_handle_->add_bytes_written(written);
 
                 // Check if rotation needed after this batch
-                if (rotation_handle_->should_rotate(0))
-                {
-                    int new_fd = rotation_handle_->get_next_fd();
-                    // new_fd will be used for the NEXT write
-                }
+                if (rotation_handle_->should_rotate(0)) { rotation_handle_->get_next_fd(); }
             }
         }
 

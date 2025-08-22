@@ -4,6 +4,8 @@ using namespace slwoggy;
 
 int main(int argc, char *argv[])
 {
+    (void)argc;
+    (void)argv;
     // Test the default LOG macro
     LOG(info) << "Starting log_mods test";
 

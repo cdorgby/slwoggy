@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <shared_mutex>
 #include <vector>
 
@@ -56,13 +57,13 @@ struct structured_log_key_registry
     static constexpr uint16_t INTERNAL_KEY_FILE   = 3; // file - source file
     static constexpr uint16_t INTERNAL_KEY_LINE   = 4; // line - source line
     static constexpr uint16_t FIRST_USER_KEY_ID   = 5; // User keys start here
-    
+
     // Internal metadata key names - used for consistency
-    static constexpr const char* INTERNAL_KEY_NAME_TS     = "ts";
-    static constexpr const char* INTERNAL_KEY_NAME_LEVEL  = "level";
-    static constexpr const char* INTERNAL_KEY_NAME_MODULE = "module";
-    static constexpr const char* INTERNAL_KEY_NAME_FILE   = "file";
-    static constexpr const char* INTERNAL_KEY_NAME_LINE   = "line";
+    static constexpr const char *INTERNAL_KEY_NAME_TS     = "ts";
+    static constexpr const char *INTERNAL_KEY_NAME_LEVEL  = "level";
+    static constexpr const char *INTERNAL_KEY_NAME_MODULE = "module";
+    static constexpr const char *INTERNAL_KEY_NAME_FILE   = "file";
+    static constexpr const char *INTERNAL_KEY_NAME_LINE   = "line";
 
     /**
      * @brief Get the singleton instance of the key registry

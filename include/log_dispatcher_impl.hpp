@@ -302,7 +302,6 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
         }
     }
     
-    size_t processed = 0;
     
     if (config && !config->sinks.empty() && expected_processed > 0)
     {
@@ -312,13 +311,12 @@ inline size_t log_line_dispatcher::process_buffer_batch(log_buffer_base** buffer
         {
             if (config->sinks[i])
             {
-                size_t sink_processed = config->sinks[i]->process_batch(&buffers[start_idx], processable_count);
+                config->sinks[i]->process_batch(&buffers[start_idx], processable_count);
                 
                 // Use the first sink's processed count for metrics
                 // Different sinks may process different counts if they have filters
                 if (first_sink)
                 {
-                    processed = sink_processed;
                     first_sink = false;
                 }
             }
@@ -357,7 +355,10 @@ inline bool log_line_dispatcher::process_queue(log_buffer_base** buffers, size_t
             if (buf_idx + 1 < dequeued_count && config && !config->sinks.empty())
             {
                 size_t remaining_count = dequeued_count - buf_idx - 1;
-                size_t processed = process_buffer_batch(buffers, buf_idx + 1, remaining_count, config);
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
+                size_t processed =
+#endif
+                    process_buffer_batch(buffers, buf_idx + 1, remaining_count, config);
 #ifdef LOG_COLLECT_DISPATCHER_METRICS
                 total_dispatched_ += processed;
 #endif
@@ -406,7 +407,9 @@ inline bool log_line_dispatcher::process_queue(log_buffer_base** buffers, size_t
         else
         {
             // No sinks - check each buffer individually for markers
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
             size_t start_idx = buf_idx;
+#endif
             while (buf_idx < dequeued_count)
             {
                 log_buffer_base *buf = buffers[buf_idx];
@@ -483,7 +486,9 @@ inline void log_line_dispatcher::drain_queue(moodycamel::ConsumerToken& token)
             else
             {
                 // No sinks - check each buffer individually for markers
+#ifdef LOG_COLLECT_DISPATCHER_METRICS
                 size_t start_idx = buf_idx;
+#endif
                 while (buf_idx < dequeued_count)
                 {
                     log_buffer_base *buf = buffers[buf_idx];
