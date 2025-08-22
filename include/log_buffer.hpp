@@ -554,7 +554,7 @@ class buffer_pool
         thread_local moodycamel::ConsumerToken consumer_token(available_buffers_);
 
         log_buffer_base *buffer = nullptr;
-#ifdef LOG_RELIABLE_DELIVERY
+#ifdef SLWOGGY_RELIABLE_DELIVERY
         available_buffers_.wait_dequeue(consumer_token, buffer);
 #else
         available_buffers_.try_dequeue(consumer_token, buffer);
@@ -745,7 +745,7 @@ class buffer_pool
     using buffer_type = log_buffer<LOG_BUFFER_SIZE>;
 
     std::unique_ptr<buffer_type[]> buffer_storage_;
-#ifdef LOG_RELIABLE_DELIVERY
+#ifdef SLWOGGY_RELIABLE_DELIVERY
     moodycamel::BlockingConcurrentQueue<log_buffer_base *> available_buffers_;
 #else
     moodycamel::ConcurrentQueue<log_buffer_base *> available_buffers_;

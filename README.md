@@ -977,23 +977,23 @@ slwoggy offers two modes for handling buffer pool exhaustion:
 
 ```cpp
 // In log_types.hpp
-#define LOG_RELIABLE_DELIVERY 1  // Default: enabled
+#define SLWOGGY_RELIABLE_DELIVERY 1  // Default: enabled
 ```
 
-**With LOG_RELIABLE_DELIVERY enabled (default)**:
+**With SLWOGGY_RELIABLE_DELIVERY enabled (default)**:
 - Guarantees no log loss under high load
 - Blocks when buffer pool is exhausted
 - Writers wait until buffers become available
 - Best for: Critical logging, debugging, audit trails
 
-**With LOG_RELIABLE_DELIVERY disabled**:
+**With SLWOGGY_RELIABLE_DELIVERY disabled**:
 - Drops logs when buffer pool is exhausted  
 - Never blocks the application
 - Operations silently no-op when buffer unavailable
 - Best for: High-performance production systems
 
 ```cpp
-// When LOG_RELIABLE_DELIVERY is disabled:
+// When SLWOGGY_RELIABLE_DELIVERY is disabled:
 LOG(info) << "This silently fails if buffer pool exhausted";
 // No exception, no blocking, just silent drop
 
@@ -1303,7 +1303,7 @@ make tests && ctest
 
 ### Build Options
 
-- **LOG_RELIABLE_DELIVERY** (default: ON) - When enabled, LOG() calls block if buffer pool is exhausted instead of dropping messages
+- **LOG_RELIABLE_DELIVERY** (default: ON) - When enabled, LOG() calls block if buffer pool is exhausted instead of dropping messages (defines SLWOGGY_RELIABLE_DELIVERY macro)
 - **SLWOGGY_BUILD_TESTS** (default: OFF) - Build test suite
 - **SLWOGGY_BUILD_EXAMPLES** (default: ON) - Build example applications
 

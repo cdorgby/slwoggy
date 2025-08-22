@@ -29,6 +29,7 @@
 
 #include "moodycamel/concurrentqueue.h"
 #include "moodycamel/blockingconcurrentqueue.h"
+#include <condition_variable>
 
 #include "log_types.hpp"
 #include "log_buffer.hpp"
