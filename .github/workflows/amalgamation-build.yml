@@ -273,24 +273,42 @@ jobs:
         run: |
           echo "Committing amalgamation to release branch: ${{ steps.verify.outputs.branch }}"
           
+          # Validate branch name format for safety
+          if ! echo "${{ steps.verify.outputs.branch }}" | grep -qE '^[a-zA-Z0-9._/-]+$'; then
+            echo "Error: Invalid branch name format"
+            exit 1
+          fi
+          
           # Configure git
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # Switch to the release branch
-          git checkout "${{ steps.verify.outputs.branch }}"
+          # Save the generated amalgamation before switching branches
+          if [ -d "amalgamation" ]; then
+            echo "Saving generated amalgamation..."
+            cp -r amalgamation /tmp/amalgamation.generated
+          else
+            echo "Error: amalgamation directory not found after generation"
+            exit 1
+          fi
           
-          # Check if amalgamation directory already exists
+          # Fetch latest remote refs
+          git fetch origin
+          
+          # Switch to the release branch (create local tracking branch if needed)
+          git checkout -B "${{ steps.verify.outputs.branch }}" "origin/${{ steps.verify.outputs.branch }}"
+          
+          # Safely replace amalgamation directory
           if [ -d "amalgamation" ]; then
             echo "Updating existing amalgamation..."
+            rm -rf amalgamation.backup
+            mv amalgamation amalgamation.backup
           else
             echo "Creating new amalgamation directory..."
           fi
           
-          # Copy the generated amalgamation
-          cp -r amalgamation amalgamation.new
-          rm -rf amalgamation
-          mv amalgamation.new amalgamation
+          # Move the generated amalgamation into place
+          mv /tmp/amalgamation.generated amalgamation
           
           # Add and commit if there are changes
           git add amalgamation/
