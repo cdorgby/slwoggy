@@ -6,7 +6,7 @@
     ],
     "settings": {
         "cmake.configureOnOpen": true,
-        "cmake.buildDirectory": "${workspaceFolder}/build/linux",
+        "cmake.buildDirectory": "${workspaceFolder}/build",
         "C_Cpp.intelliSenseEngine": "disabled",
         "clangd.arguments": [
             "--background-index",
