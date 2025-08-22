@@ -27,7 +27,7 @@ endif()
 option(SLWOGGY_BUILD_EXAMPLES "Build example applications" OFF)
 option(SLWOGGY_BUILD_TESTS "Build tests" OFF)
 option(SLWOGGY_BUILD_AMALGAMATION "Build amalgamation header" OFF)
-option(LOG_RELIABLE_DELIVERY "Enable reliable delivery mode" ON)
+option(SLWOGGY_RELIABLE_DELIVERY "Enable reliable delivery mode" ON)
 
 # Metrics options (OFF by default for Release builds)
 option(SLWOGGY_METRICS_BUFFER_POOL "Enable buffer pool metrics" OFF)
