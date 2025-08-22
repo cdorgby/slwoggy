@@ -41,7 +41,7 @@ jobs:
           echo "Current tag: $TAG_NAME"
           
           # Check if this is an annotated tag
-          if git describe --exact-match --tags 2>/dev/null | grep -q "^$TAG_NAME$"; then
+          if git tag --points-at HEAD | grep -q "^$TAG_NAME$"; then
             # Check if it's annotated by checking the object type
             if [ "$(git cat-file -t "$TAG_NAME" 2>/dev/null)" = "tag" ]; then
               echo "✓ Tag is annotated"
