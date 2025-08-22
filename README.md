@@ -1303,13 +1303,13 @@ make tests && ctest
 
 ### Build Options
 
-- **LOG_RELIABLE_DELIVERY** (default: ON) - When enabled, LOG() calls block if buffer pool is exhausted instead of dropping messages (defines SLWOGGY_RELIABLE_DELIVERY macro)
+- **SLWOGGY_RELIABLE_DELIVERY** (default: ON) - When enabled, LOG() calls block if buffer pool is exhausted instead of dropping messages (defines SLWOGGY_RELIABLE_DELIVERY macro)
 - **SLWOGGY_BUILD_TESTS** (default: OFF) - Build test suite
 - **SLWOGGY_BUILD_EXAMPLES** (default: ON) - Build example applications
 
 ```bash
 # Build with reliable delivery disabled (allows message drops)
-cmake .. -DLOG_RELIABLE_DELIVERY=OFF
+cmake .. -DSLWOGGY_RELIABLE_DELIVERY=OFF
 
 # Build with tests
 cmake .. -DSLWOGGY_BUILD_TESTS=ON
