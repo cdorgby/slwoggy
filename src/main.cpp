@@ -160,7 +160,7 @@ int main(int argc, char *argv[])
             else {
                 // Add padding to reach target size using printf precision
                 int pad_size = target_size - base_size;
-                if (pad_size > MAX_PADDING - 1) pad_size = MAX_PADDING - 1;
+                if (pad_size > static_cast<int>(MAX_PADDING - 1)) pad_size = static_cast<int>(MAX_PADDING - 1);
 
                 // Use %.*s to specify exact number of characters from padding buffer
                 auto l = LOG(info);

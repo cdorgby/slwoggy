@@ -6,6 +6,7 @@
  */
 #pragma once
 
+#include <cstddef>
 #include <utility>
 #include <cstring>
 #include <cassert>
@@ -32,23 +33,16 @@ namespace slwoggy
  * @tparam Derived The derived model class
  * @tparam Base The concept interface class
  */
-template<typename Derived, typename Base>
-struct type_erasure_helper : Base
+template <typename Derived, typename Base> struct type_erasure_helper : Base
 {
-    Base* clone_in_place(void* buf) const override
+    Base *clone_in_place(void *buf) const override { return new (buf) Derived(static_cast<const Derived &>(*this)); }
+
+    Base *move_in_place(void *buf) noexcept override
     {
-        return new (buf) Derived(static_cast<const Derived&>(*this));
+        return new (buf) Derived(std::move(static_cast<Derived &>(*this)));
     }
-    
-    Base* move_in_place(void* buf) noexcept override
-    {
-        return new (buf) Derived(std::move(static_cast<Derived&>(*this)));
-    }
-    
-    Base* heap_clone() const override
-    {
-        return new Derived(static_cast<const Derived&>(*this));
-    }
+
+    Base *heap_clone() const override { return new Derived(static_cast<const Derived &>(*this)); }
 };
 
 /**
@@ -82,7 +76,7 @@ struct type_erasure_helper : Base
  *
  * ## Usage Example:
  *
-  * @code
+ * @code
  * // Define the concept interface
  * struct drawable_concept {
  * virtual ~drawable_concept() = default;
@@ -129,32 +123,32 @@ struct type_erasure_helper : Base
  * template<typename F>
  * struct callable_model : callable_concept {
  *     F func_;
- *     
+ *
  *     explicit callable_model(F f) : func_(std::move(f)) {}
- *     
+ *
  *     void call() override { func_(); }
- *     
+ *
  *     // Boilerplate implementations:
  *     callable_concept* clone_in_place(void* buf) const override {
  *         return new (buf) callable_model(func_);
  *     }
- *     
+ *
  *     callable_concept* move_in_place(void* buf) noexcept override {
  *         return new (buf) callable_model(std::move(func_));
  *     }
- *     
+ *
  *     callable_concept* heap_clone() const override {
  *         return new callable_model(func_);
  *     }
  * };
- * 
+ *
  * // Alternative: Model using the type_erasure_helper to eliminate boilerplate
  * template<typename F>
  * struct callable_model_v2 : type_erasure_helper<callable_model_v2<F>, callable_concept> {
  *     F func_;
- *     
+ *
  *     explicit callable_model_v2(F f) : func_(std::move(f)) {}
- *     
+ *
  *     void call() override { func_(); }
  *     // No need to implement clone_in_place, move_in_place, or heap_clone!
  * };
@@ -164,16 +158,16 @@ struct type_erasure_helper : Base
  *
  * // Usage
  * function f1{callable_model{[]{ std::cout << "Lambda\n"; }}};
- * 
+ *
  * void regular_function() { std::cout << "Function\n"; }
  * function f2{callable_model{&regular_function}};
- * 
+ *
  * struct Functor {
  *     int value;
  *     void operator()() { std::cout << "Functor: " << value << "\n"; }
  * };
  * function f3{callable_model{Functor{42}}};
- * 
+ *
  * // All can be called uniformly
  * f1->call();  // Output: Lambda
  * f2->call();  // Output: Function
@@ -185,7 +179,7 @@ struct type_erasure_helper : Base
  * // Using type_erased in STL containers to store heterogeneous objects
  * #include <vector>
  * #include <algorithm>
- * 
+ *
  * // Animal hierarchy example
  * struct animal_concept {
  *     virtual ~animal_concept() = default;
@@ -195,58 +189,58 @@ struct type_erasure_helper : Base
  *     virtual animal_concept* move_in_place(void* buf) noexcept = 0;
  *     virtual animal_concept* heap_clone() const = 0;
  * };
- * 
+ *
  * // Using the type_erasure_helper to eliminate boilerplate
  * template<typename Animal>
  * struct animal_model : type_erasure_helper<animal_model<Animal>, animal_concept> {
  *     Animal animal_;
- *     
+ *
  *     explicit animal_model(Animal a) : animal_(std::move(a)) {}
- *     
+ *
  *     std::string speak() const override { return animal_.speak(); }
  *     int age() const override { return animal_.age(); }
  *     // No need to implement clone_in_place, move_in_place, or heap_clone!
  * };
- * 
+ *
  * using animal = type_erased<animal_concept, 32>;
- * 
+ *
  * // Concrete animal types
- * struct Dog { 
+ * struct Dog {
  *     int age_ = 5;
  *     std::string speak() const { return "Woof!"; }
  *     int age() const { return age_; }
  * };
- * 
- * struct Cat { 
+ *
+ * struct Cat {
  *     int age_ = 3;
  *     std::string speak() const { return "Meow!"; }
  *     int age() const { return age_; }
  * };
- * 
- * struct Parrot { 
+ *
+ * struct Parrot {
  *     int age_ = 15;
  *     std::string phrase_ = "Hello!";
  *     std::string speak() const { return phrase_; }
  *     int age() const { return age_; }
  * };
- * 
+ *
  * // Usage in STL containers
  * std::vector<animal> zoo;
- * 
+ *
  * // Add different animals
  * zoo.emplace_back(animal_model<Dog>{Dog{}});
  * zoo.emplace_back(animal_model<Cat>{Cat{}});
  * zoo.emplace_back(animal_model<Parrot>{Parrot{20, "Polly wants a cracker!"}});
- * 
+ *
  * // Iterate over all animals
  * for (const auto& a : zoo) {
  *     std::cout << a->speak() << " (age: " << a->age() << ")\n";
  * }
- * // Output: 
+ * // Output:
  * // Woof! (age: 5)
  * // Meow! (age: 3)
  * // Polly wants a cracker! (age: 20)
- * 
+ *
  * // Use STL algorithms
  * auto oldest = std::max_element(zoo.begin(), zoo.end(),
  *     [](const animal& a, const animal& b) {
@@ -254,19 +248,19 @@ struct type_erasure_helper : Base
  *     });
  * std::cout << "Oldest animal says: " << (*oldest)->speak() << "\n";
  * // Output: Oldest animal says: Polly wants a cracker!
- * 
+ *
  * // Copy the container (tests copy semantics)
  * std::vector<animal> zoo_copy = zoo;
- * 
+ *
  * // Move animals around (tests move semantics)
  * std::vector<animal> new_zoo = std::move(zoo);
- * 
+ *
  * // Sort by age
  * std::sort(new_zoo.begin(), new_zoo.end(),
  *     [](const animal& a, const animal& b) {
  *         return a->age() < b->age();
  *     });
- * 
+ *
  * // Benefits of type_erased in containers:
  * // 1. Store different types in the same container without inheritance
  * // 2. Value semantics - no need for pointers or smart pointers

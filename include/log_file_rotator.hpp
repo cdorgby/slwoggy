@@ -2,7 +2,7 @@
  * @file log_file_rotator.hpp
  * @brief File rotation support for log files
  * @author dorgby.net
- * 
+ *
  * This file provides comprehensive file rotation capabilities including:
  * - Size-based rotation (rotate when file reaches specified size)
  * - Time-based rotation (rotate at intervals or specific times)
@@ -24,13 +24,13 @@
 #include <vector>
 
 #ifndef _WIN32
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/types.h>
+    #include <fcntl.h>
+    #include <unistd.h>
+    #include <sys/stat.h>
+    #include <sys/types.h>
 #else
-#include <io.h>
-#include <windows.h>
+    #include <io.h>
+    #include <windows.h>
 #endif
 
 #include "moodycamel/concurrentqueue.h"
@@ -46,7 +46,7 @@ class rotation_handle;
 
 /**
  * @brief State machine for compression status
- * 
+ *
  * State transitions:
  * - idle -> queued: When file is enqueued for compression
  * - queued -> compressing: When compression thread starts processing
@@ -66,7 +66,7 @@ enum class compression_state : uint8_t
 
 /**
  * @brief Rotation policy configuration
- * 
+ *
  * Defines when and how log files should be rotated, including
  * rotation triggers, retention policies, and post-rotation actions.
  */
@@ -77,12 +77,12 @@ struct rotate_policy
      */
     enum class kind
     {
-        none,          ///< No rotation (default)
-        size,          ///< Rotate based on file size
-        time,          ///< Rotate based on time interval
-        size_or_time   ///< Rotate on size OR time (whichever triggers first)
+        none,        ///< No rotation (default)
+        size,        ///< Rotate based on file size
+        time,        ///< Rotate based on time interval
+        size_or_time ///< Rotate on size OR time (whichever triggers first)
     };
-    kind mode = kind::none;  ///< Active rotation mode
+    kind mode = kind::none; ///< Active rotation mode
 
     /// @name Size-based rotation
     /// @{
@@ -99,30 +99,30 @@ struct rotate_policy
     /// @note Applied in precedence order: keep_files, max_total_bytes, max_age
     /// @warning Retention may be violated during ENOSPC conditions
     /// @{
-    int keep_files = 5;                  ///< Maximum number of rotated files to keep
-    std::chrono::seconds max_age{0};     ///< Delete files older than this (0 = no age limit)
-    uint64_t max_total_bytes = 0;        ///< Maximum total size of all log files (0 = no limit)
+    int keep_files = 5;              ///< Maximum number of rotated files to keep
+    std::chrono::seconds max_age{0}; ///< Delete files older than this (0 = no age limit)
+    uint64_t max_total_bytes = 0;    ///< Maximum total size of all log files (0 = no limit)
     /// @}
 
     /// @name Post-rotation actions
     /// @{
-    bool compress       = false;         ///< Compress rotated files with gzip
-    bool sync_on_rotate = false;         ///< Call fdatasync before rotation for durability
+    bool compress       = false; ///< Compress rotated files with gzip
+    bool sync_on_rotate = false; ///< Call fdatasync before rotation for durability
     /// @}
 
     /// @name Error handling
     /// @{
-    int max_retries = 10;                ///< Maximum retry attempts on rotation failure
+    int max_retries = 10; ///< Maximum retry attempts on rotation failure
     /// @}
 };
 
 #ifdef LOG_COLLECT_ROTATION_METRICS
 /**
  * @brief Metrics for monitoring rotation behavior
- * 
+ *
  * Provides comprehensive metrics about file rotation operations,
  * including rotation counts, timing, error conditions, and ENOSPC handling.
- * 
+ *
  * @note All metrics are thread-safe using atomic operations
  */
 struct rotation_metrics
@@ -164,17 +164,17 @@ struct rotation_metrics
         uint64_t total_rotations;
         uint64_t avg_rotation_time_us;
         uint64_t total_rotation_time_us;
-        
+
         // Data loss tracking
         uint64_t dropped_records;
         uint64_t dropped_bytes;
-        
+
         // ENOSPC handling
         uint64_t enospc_pending_deleted;
         uint64_t enospc_gz_deleted;
         uint64_t enospc_raw_deleted;
         uint64_t enospc_bytes_freed;
-        
+
         // Error tracking
         uint64_t zero_gap_fallbacks;
         uint64_t compression_failures;
@@ -182,34 +182,34 @@ struct rotation_metrics
         uint64_t prepare_fd_failures;
         uint64_t fsync_failures;
     };
-    
+
     stats get_stats() const
     {
         stats s;
-        
+
         // Rotation activity
-        s.total_rotations = rotations_total.load();
-        auto count = rotation_duration_us_count.load();
+        s.total_rotations        = rotations_total.load();
+        auto count               = rotation_duration_us_count.load();
         s.total_rotation_time_us = rotation_duration_us_sum.load();
-        s.avg_rotation_time_us = (count > 0) ? s.total_rotation_time_us / count : 0;
-        
+        s.avg_rotation_time_us   = (count > 0) ? s.total_rotation_time_us / count : 0;
+
         // Data loss tracking
         s.dropped_records = dropped_records_total.load();
-        s.dropped_bytes = dropped_bytes_total.load();
-        
+        s.dropped_bytes   = dropped_bytes_total.load();
+
         // ENOSPC handling
         s.enospc_pending_deleted = enospc_deletions_pending.load();
-        s.enospc_gz_deleted = enospc_deletions_gz.load();
-        s.enospc_raw_deleted = enospc_deletions_raw.load();
-        s.enospc_bytes_freed = enospc_deleted_bytes.load();
-        
+        s.enospc_gz_deleted      = enospc_deletions_gz.load();
+        s.enospc_raw_deleted     = enospc_deletions_raw.load();
+        s.enospc_bytes_freed     = enospc_deleted_bytes.load();
+
         // Error tracking
-        s.zero_gap_fallbacks = zero_gap_fallback_total.load();
-        s.compression_failures = compression_failures.load();
+        s.zero_gap_fallbacks          = zero_gap_fallback_total.load();
+        s.compression_failures        = compression_failures.load();
         s.compression_queue_overflows = compression_queue_overflows.load();
-        s.prepare_fd_failures = prepare_fd_failures.load();
-        s.fsync_failures = fsync_failures.load();
-        
+        s.prepare_fd_failures         = prepare_fd_failures.load();
+        s.fsync_failures              = fsync_failures.load();
+
         return s;
     }
 
@@ -219,11 +219,11 @@ struct rotation_metrics
 
 /**
  * @brief Handle for managing a rotating log file
- * 
+ *
  * This class represents a handle to a log file with rotation capabilities.
  * It manages the current file descriptor, tracks bytes written, and
  * coordinates with the rotation service for seamless file rotation.
- * 
+ *
  * @note This class is thread-safe and can be shared across multiple writers
  */
 class rotation_handle : public std::enable_shared_from_this<rotation_handle>
@@ -260,7 +260,7 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
     // Metrics for observability
     std::atomic<uint64_t> dropped_records_{0};
     std::atomic<uint64_t> dropped_bytes_{0};
-    
+
   public:
     // Public methods for metrics (maintains encapsulation)
     void increment_dropped_records() { dropped_records_.fetch_add(1, std::memory_order_relaxed); }
@@ -353,14 +353,14 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
 
 /**
  * @brief Singleton service managing all file rotation operations
- * 
+ *
  * This service runs a background thread that handles:
  * - File rotation when size/time thresholds are reached
  * - Retention policy enforcement (deleting old files)
  * - Compression of rotated files
  * - ENOSPC emergency cleanup
  * - Zero-gap rotation using atomic operations
- * 
+ *
  * @note Thread-safe singleton accessed via instance() method
  */
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
@@ -369,12 +369,12 @@ class rotation_handle : public std::enable_shared_from_this<rotation_handle>
  */
 struct compression_stats
 {
-    uint64_t files_queued;           ///< Total files queued for compression
-    uint64_t files_compressed;       ///< Total files successfully compressed
-    uint64_t files_cancelled;        ///< Total files cancelled before/during compression
-    uint64_t queue_overflows;        ///< Times queue was full when trying to enqueue
-    size_t current_queue_size;       ///< Current number of items in queue
-    size_t queue_high_water_mark;    ///< Maximum queue size ever reached
+    uint64_t files_queued;        ///< Total files queued for compression
+    uint64_t files_compressed;    ///< Total files successfully compressed
+    uint64_t files_cancelled;     ///< Total files cancelled before/during compression
+    uint64_t queue_overflows;     ///< Times queue was full when trying to enqueue
+    size_t current_queue_size;    ///< Current number of items in queue
+    size_t queue_high_water_mark; ///< Maximum queue size ever reached
 };
 #endif
 
@@ -405,7 +405,7 @@ class file_rotation_service
     // Rotator thread
     std::thread rotator_thread_;
     std::atomic<bool> running_;
-    
+
     // Compression thread infrastructure
     std::thread compression_thread_;
     std::atomic<bool> compression_running_{false};
@@ -414,7 +414,7 @@ class file_rotation_service
     std::atomic<size_t> compression_queue_high_water_{0};
     size_t compression_queue_max_{10};
     std::chrono::milliseconds compression_delay_{500};
-    
+
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
     // Compression statistics
     std::atomic<uint64_t> compression_files_queued_{0};
@@ -429,13 +429,12 @@ class file_rotation_service
     void handle_rotation(const rotation_message &msg);
     void handle_close(const rotation_message &msg);
     void drain_queue();
-    
+
     // Helper functions for rotation
-    bool perform_zero_gap_rotation(const std::filesystem::path& base_path,
-                                    const std::filesystem::path& rotated_path,
-                                    const std::string& temp_filename,
-                                    rotation_handle* handle);
-    void sync_directory(const std::filesystem::path& base_path);
+    bool perform_zero_gap_rotation(const std::filesystem::path &base_path,
+                                   const std::filesystem::path &rotated_path,
+                                   const std::string &temp_filename);
+    void sync_directory(const std::filesystem::path &base_path);
 
     std::string generate_rotated_filename(const std::string &base);
     std::string generate_temp_filename(const std::string &base);
@@ -446,13 +445,13 @@ class file_rotation_service
     void apply_retention_timestamped(rotation_handle *handle);
     std::shared_ptr<rotation_handle::rotated_file_entry> add_to_cache(rotation_handle *handle, const std::string &filename, size_t size);
     void initialize_cache(rotation_handle *handle);
-    
+
     // Compression functions
     bool compress_file_sync(std::shared_ptr<rotation_handle::rotated_file_entry> entry);
     void compression_thread_func();
     bool enqueue_for_compression(std::shared_ptr<rotation_handle::rotated_file_entry> entry);
     void drain_compression_queue();
-    
+
     void cleanup_expired_handles();
 
   public:
@@ -484,27 +483,25 @@ class file_rotation_service
     {
         queue_.enqueue({rotation_message::CLOSE, handle, fd, ""});
     }
-    
+
     /**
      * @brief Start the compression thread
      * @param delay Batching delay - how long to wait for more items to batch together
-     * @param max_queue_size Maximum dispatch queue size - prevents unbounded growth, 
+     * @param max_queue_size Maximum dispatch queue size - prevents unbounded growth,
      *                       NOT a limit on total files compressed
      */
-    void start_compression_thread(
-        std::chrono::milliseconds delay = std::chrono::milliseconds{500},
-        size_t max_queue_size = 10);
-    
+    void start_compression_thread(std::chrono::milliseconds delay = std::chrono::milliseconds{500}, size_t max_queue_size = 10);
+
     /**
      * @brief Stop the compression thread
      */
     void stop_compression_thread();
-    
+
     /**
      * @brief Check if compression thread is running
      */
     bool is_compression_enabled() const { return compression_running_.load(); }
-    
+
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
     /**
      * @brief Get compression thread statistics
@@ -512,31 +509,31 @@ class file_rotation_service
     compression_stats get_compression_stats() const
     {
         compression_stats stats;
-        stats.files_queued = compression_files_queued_.load();
+        stats.files_queued     = compression_files_queued_.load();
         stats.files_compressed = compression_files_compressed_.load();
-        stats.files_cancelled = compression_files_cancelled_.load();
-#ifdef LOG_COLLECT_ROTATION_METRICS
+        stats.files_cancelled  = compression_files_cancelled_.load();
+    #ifdef LOG_COLLECT_ROTATION_METRICS
         stats.queue_overflows = rotation_metrics::instance().compression_queue_overflows.load();
-#else
+    #else
         stats.queue_overflows = 0;
-#endif
-        stats.current_queue_size = compression_queue_size_.load();
+    #endif
+        stats.current_queue_size    = compression_queue_size_.load();
         stats.queue_high_water_mark = compression_queue_high_water_.load();
         return stats;
     }
-    
+
     /**
      * @brief Reset compression statistics (for testing)
      */
     void reset_compression_stats()
     {
-        compression_files_queued_ = 0;
+        compression_files_queued_     = 0;
         compression_files_compressed_ = 0;
-        compression_files_cancelled_ = 0;
+        compression_files_cancelled_  = 0;
         compression_queue_high_water_ = compression_queue_size_.load();
-#ifdef LOG_COLLECT_ROTATION_METRICS
+    #ifdef LOG_COLLECT_ROTATION_METRICS
         rotation_metrics::instance().compression_queue_overflows = 0;
-#endif
+    #endif
     }
 #endif
 };

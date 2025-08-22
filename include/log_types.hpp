@@ -12,7 +12,7 @@
 #include <algorithm>
 #include <chrono>
 
-#include "fmt_config.hpp"  // IWYU pragma: keep
+#include "fmt_config.hpp" // IWYU pragma: keep
 
 namespace slwoggy
 {
@@ -20,7 +20,14 @@ namespace slwoggy
 // Cache line size detection
 #if defined(__cpp_lib_hardware_interference_size)
     #include <new>
+    #if defined(__GNUC__) && (__GNUC__ > 11 || (__GNUC__ == 11 && __GNUC_MINOR__ >= 1))
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Winterference-size"
+    #endif
 inline constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
+    #if defined(__GNUC__) && (__GNUC__ > 11 || (__GNUC__ == 11 && __GNUC_MINOR__ >= 1))
+        #pragma GCC diagnostic pop
+    #endif
 #else
 inline constexpr size_t CACHE_LINE_SIZE = 64; // Common cache line size
 #endif
@@ -34,9 +41,9 @@ inline constexpr size_t CACHE_LINE_SIZE = 64; // Common cache line size
 // #endif
 
 // Buffer pool constants
-inline constexpr size_t BUFFER_POOL_SIZE        = 512;        // Number of buffers in the pool
-inline constexpr size_t MAX_BATCH_SIZE          = 256;        // Max buffers to dequeue in one batch (half of pool)
-inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 512;        // Max queue size before blocking (same as pool size)
+inline constexpr size_t BUFFER_POOL_SIZE        = 512;       // Number of buffers in the pool
+inline constexpr size_t MAX_BATCH_SIZE          = 256;       // Max buffers to dequeue in one batch (half of pool)
+inline constexpr size_t MAX_DISPATCH_QUEUE_SIZE = 512;       // Max queue size before blocking (same as pool size)
 inline constexpr size_t LOG_SINK_BUFFER_SIZE    = 64 * 1024; // Intermediate buffer for batching buffers for writes
 
 // Log buffer size
@@ -50,7 +57,7 @@ inline constexpr auto BATCH_POLL_INTERVAL   = std::chrono::microseconds(1);  // 
 
 // Structured logging constants
 // Maximum structured keys per buffer is limited to 255 because we store the count
-// in a single uint8_t byte in the metadata format. While uint8_t can represent 
+// in a single uint8_t byte in the metadata format. While uint8_t can represent
 // 0-255 (256 values), the count represents "number of KV pairs", so the maximum
 // is 255 pairs. If you increase this beyond 255, you'll need to change the metadata
 // format to use uint16_t for the count, which affects binary compatibility.
@@ -62,7 +69,7 @@ inline constexpr int ROTATION_MAX_RETRIES      = 10;                           /
 inline constexpr auto ROTATION_INITIAL_BACKOFF = std::chrono::milliseconds(1); // Initial backoff for retries
 inline constexpr auto ROTATION_MAX_BACKOFF     = std::chrono::seconds(1);      // Maximum backoff for retries
 inline constexpr int ROTATION_LINK_ATTEMPTS    = 3;                            // Attempts for atomic link operation
-inline constexpr size_t MIN_EXTENSION_SIZE     = 2;                            // Minimum valid file extension size (e.g., ".x")
+inline constexpr size_t MIN_EXTENSION_SIZE     = 2; // Minimum valid file extension size (e.g., ".x")
 
 // Compression thread constants
 constexpr size_t COMPRESS_THREAD_MAX_BATCH = 10; // Max files to compress in one batch
@@ -72,9 +79,9 @@ constexpr size_t COMPRESS_THREAD_MAX_BATCH = 10; // Max files to compress in one
 // #define LOG_COLLECT_BUFFER_POOL_METRICS 1 // Enable buffer pool statistics
 // #define LOG_COLLECT_DISPATCHER_METRICS  1 // Enable dispatcher statistics
 // #define LOG_COLLECT_STRUCTURED_METRICS  1 // Enable structured logging statistics
-// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires LOG_COLLECT_DISPATCHER_METRICS)
-// #define LOG_COLLECT_ROTATION_METRICS    1 // Enable file rotation statistics
-// #define LOG_COLLECT_COMPRESSION_METRICS 1 // Enable compression thread statistics
+// #define LOG_COLLECT_DISPATCHER_MSG_RATE 1 // Enable sliding window message rate (requires
+// LOG_COLLECT_DISPATCHER_METRICS) #define LOG_COLLECT_ROTATION_METRICS    1 // Enable file rotation statistics #define
+// LOG_COLLECT_COMPRESSION_METRICS 1 // Enable compression thread statistics
 
 /**
  * @brief Concept for types that can be logged

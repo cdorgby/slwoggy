@@ -74,7 +74,10 @@ struct log_site_registry
         std::lock_guard<std::mutex> lock(registry_mutex());
         sites().emplace_back(log_site_descriptor{file, line, function ? function : "unknown", min_level});
 
-        if (file && std::strlen(file) > longest_file()) { longest_file() = static_cast<int32_t>(std::strlen(file)); }
+        if (file && static_cast<int32_t>(std::strlen(file)) > longest_file())
+        {
+            longest_file() = static_cast<int32_t>(std::strlen(file));
+        }
         return sites().back();
     }
 
@@ -216,13 +219,13 @@ struct log_site_registry
      *          with thousands of LOG() statements, this can be expensive.
      *          Each LOG() statement that survives compile-time filtering creates one entry.
      * @note Thread-safe: returns a snapshot at the time of the call
-     * 
+     *
      * Example:
      * @code
      * auto all_sites = log_site_registry::get_all_sites();
      * std::cout << "Total sites: " << all_sites.size() << "\n";
      * for (const auto& site : all_sites) {
-     *     std::cout << site.file << ":" << site.line 
+     *     std::cout << site.file << ":" << site.line
      *               << " level=" << log_level_names[static_cast<int>(site.min_level)]
      *               << " function=" << site.function << "\n";
      * }

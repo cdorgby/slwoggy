@@ -2,7 +2,7 @@
 /**
  * @file log_file_rotator_impl.hpp
  * @brief Implementation of file rotation service with compression support
- * 
+ *
  * This file contains the implementation of the file rotation service that handles:
  * - Zero-gap atomic file rotation
  * - Time and size-based rotation policies
@@ -10,7 +10,7 @@
  * - Automatic ENOSPC handling with cleanup priorities
  * - Optional background compression with batching
  * - Platform-specific sync operations
- * 
+ *
  * The service runs a background thread for rotation operations and optionally
  * a compression thread for asynchronous gzip compression of rotated files.
  */
@@ -24,7 +24,8 @@
 #include <string.h>
 
 // Platform-specific sync implementation
-inline int log_fdatasync(int fd) {
+inline int log_fdatasync(int fd)
+{
 #ifdef _WIN32
     // Windows: use _commit to flush file buffers
     return ::_commit(fd);
@@ -43,25 +44,27 @@ namespace slwoggy
 {
 
 #ifdef _WIN32
-// Windows doesn't support file rotation yet
-#warning "File rotation is not supported on Windows"
+    // Windows doesn't support file rotation yet
+    #warning "File rotation is not supported on Windows"
 #endif
 
 // Internal constants (not user-tunable)
 static constexpr size_t MIN_TIMESTAMP_LENGTH = 19; // YYYYMMDD-HHMMSS-NNN minimum length for parsing
 
 // Thread-safe error string helper
-inline std::string get_error_string(int err) {
+inline std::string get_error_string(int err)
+{
     char errbuf[256];
-    
+
 #ifdef _GNU_SOURCE
     // GNU version returns char* which may or may not use the buffer
-    const char* msg = strerror_r(err, errbuf, sizeof(errbuf));
+    const char *msg = strerror_r(err, errbuf, sizeof(errbuf));
     return std::string(msg);
 #else
     // POSIX version returns int and always uses the buffer
     int ret = strerror_r(err, errbuf, sizeof(errbuf));
-    if (ret != 0) {
+    if (ret != 0)
+    {
         // strerror_r failed, return a generic message
         return "Unknown error " + std::to_string(err);
     }
@@ -71,33 +74,31 @@ inline std::string get_error_string(int err) {
 
 // Helper function to convert filesystem time to system clock time
 // This is more robust than trying to calculate epoch differences
-inline std::chrono::system_clock::time_point 
-filesystem_time_to_system_time(const std::filesystem::file_time_type& ftime)
+inline std::chrono::system_clock::time_point filesystem_time_to_system_time(const std::filesystem::file_time_type &ftime)
 {
     // C++20 would allow std::chrono::clock_cast, but for C++17 compatibility
     // we use a more portable approach
-    
+
     // Get current time in both clocks to calculate offset
-    auto sys_now = std::chrono::system_clock::now();
+    auto sys_now  = std::chrono::system_clock::now();
     auto file_now = std::filesystem::file_time_type::clock::now();
-    
+
     // Calculate the difference and apply to the target time
     // This assumes the clock offset is relatively stable
-    auto file_epoch = file_now.time_since_epoch();
-    auto sys_epoch = sys_now.time_since_epoch();
+    auto file_epoch  = file_now.time_since_epoch();
+    auto sys_epoch   = sys_now.time_since_epoch();
     auto ftime_epoch = ftime.time_since_epoch();
-    
+
     // Convert to common duration type (nanoseconds for precision)
-    auto file_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(file_epoch);
-    auto sys_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(sys_epoch);
+    auto file_ns  = std::chrono::duration_cast<std::chrono::nanoseconds>(file_epoch);
+    auto sys_ns   = std::chrono::duration_cast<std::chrono::nanoseconds>(sys_epoch);
     auto ftime_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(ftime_epoch);
-    
+
     // Calculate offset and apply
     auto offset_ns = sys_ns - file_ns;
     auto result_ns = ftime_ns + offset_ns;
-    
-    return std::chrono::system_clock::time_point(
-        std::chrono::duration_cast<std::chrono::system_clock::duration>(result_ns));
+
+    return std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(result_ns));
 }
 
 #ifdef LOG_COLLECT_ROTATION_METRICS
@@ -107,11 +108,11 @@ inline void rotation_metrics::dump_metrics() const
     LOG(info) << "Rotation Metrics:";
     LOG(info) << "  Dropped: " << dropped_records_total.load() << " records, " << dropped_bytes_total.load() << " bytes";
     LOG(info) << "  Rotations: " << rotations_total.load() << " total";
-    
+
     auto count = rotation_duration_us_count.load();
     if (count > 0)
     {
-        auto sum = rotation_duration_us_sum.load();
+        auto sum    = rotation_duration_us_sum.load();
         auto avg_us = sum / count;
         LOG(info) << "  Avg rotation time: " << avg_us << " us";
     }
@@ -133,11 +134,9 @@ inline file_rotation_service::~file_rotation_service()
 {
     // Signal shutdown
     running_.store(false);
-    
+
     // Stop compression thread if running
-    if (compression_running_.load()) {
-        stop_compression_thread();
-    }
+    if (compression_running_.load()) { stop_compression_thread(); }
 
     // Send sentinel message to wake thread
     queue_.enqueue({rotation_message::SHUTDOWN, nullptr, -1, ""});
@@ -199,11 +198,9 @@ inline void file_rotation_service::rotator_thread_func()
 }
 
 // Helper: Perform atomic zero-gap rotation
-inline bool file_rotation_service::perform_zero_gap_rotation(
-    const std::filesystem::path& base_path,
-    const std::filesystem::path& rotated_path,
-    const std::string& temp_filename,
-    rotation_handle* handle)
+inline bool file_rotation_service::perform_zero_gap_rotation(const std::filesystem::path &base_path,
+                                                             const std::filesystem::path &rotated_path,
+                                                             const std::string &temp_filename)
 {
     int link_attempts = 0;
     while (link_attempts < ROTATION_LINK_ATTEMPTS)
@@ -234,17 +231,14 @@ inline bool file_rotation_service::perform_zero_gap_rotation(
             break;
         }
     }
-    
+
     // Fall back to two-rename sequence
 #ifdef LOG_COLLECT_ROTATION_METRICS
     rotation_metrics::instance().zero_gap_fallback_total.fetch_add(1);
 #endif
     LOG(warn) << "Hard link failed, using fallback rotation with gap: " << get_error_string(errno);
-    
-    if (rename(base_path.c_str(), rotated_path.c_str()) == 0)
-    {
-        rename(temp_filename.c_str(), base_path.c_str());
-    }
+
+    if (rename(base_path.c_str(), rotated_path.c_str()) == 0) { rename(temp_filename.c_str(), base_path.c_str()); }
     else if (errno == EEXIST)
     {
         // Rotated name exists, caller should retry with new name
@@ -254,7 +248,7 @@ inline bool file_rotation_service::perform_zero_gap_rotation(
 }
 
 // Helper: Ensure directory metadata is synced
-inline void file_rotation_service::sync_directory(const std::filesystem::path& base_path)
+inline void file_rotation_service::sync_directory(const std::filesystem::path &base_path)
 {
     std::string dir_path = base_path.parent_path().string();
     if (dir_path.empty()) dir_path = ".";
@@ -279,27 +273,26 @@ inline void file_rotation_service::sync_directory(const std::filesystem::path& b
         fsync(dir_fd); // Single fsync after batch
         close(dir_fd);
     }
-    else 
-    { 
-        LOG(error) << "Failed to fsync directory - renames not durable!"; 
-    }
+    else { LOG(error) << "Failed to fsync directory - renames not durable!"; }
 }
 
 inline void file_rotation_service::handle_rotation(const rotation_message &msg)
 {
     // This function handles PHASE 2 of rotation
     // The writer has already swapped to the next fd
+#ifdef LOG_COLLECT_ROTATION_METRICS
     auto rotation_start = std::chrono::steady_clock::now();
-    namespace fs = std::filesystem;
+#endif
+    namespace fs        = std::filesystem;
 
     // Step 1: Durability - fdatasync before rotation if configured
     if (msg.handle->policy_.sync_on_rotate && msg.old_fd >= 0)
     {
-        if (log_fdatasync(msg.old_fd) != 0) 
-        { 
+        if (log_fdatasync(msg.old_fd) != 0)
+        {
 #ifdef LOG_COLLECT_ROTATION_METRICS
             rotation_metrics::instance().fsync_failures.fetch_add(1);
-#endif 
+#endif
         }
     }
 
@@ -310,21 +303,21 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
         LOG(fatal) << "Rotation message without temp file - programming error!";
         abort();
     }
-    
+
     close(msg.old_fd);
-    
+
     // Generate timestamped filename and perform rotation
     fs::path base_path(msg.handle->base_filename_);
     std::string rotated_name;
     fs::path rotated_path;
-    
+
     // Retry rotation with new filenames if collision occurs
     for (int retry = 0; retry < ROTATION_LINK_ATTEMPTS; ++retry)
     {
         rotated_name = generate_rotated_filename(msg.handle->base_filename_);
         rotated_path = rotated_name;
-        
-        if (perform_zero_gap_rotation(base_path, rotated_path, msg.temp_filename, msg.handle.get()))
+
+        if (perform_zero_gap_rotation(base_path, rotated_path, msg.temp_filename))
         {
             break; // Success
         }
@@ -337,40 +330,37 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     // Step 4: Update cache with rotated file
     std::shared_ptr<rotation_handle::rotated_file_entry> entry;
     struct stat st;
-    if (::stat(rotated_name.c_str(), &st) == 0)
-    {
-        entry = add_to_cache(msg.handle.get(), rotated_name, st.st_size);
-    }
-    else
-    {
-        LOG(error) << "Failed to get file size for cache: " << get_error_string(errno);
-    }
+    if (::stat(rotated_name.c_str(), &st) == 0) { entry = add_to_cache(msg.handle.get(), rotated_name, st.st_size); }
+    else { LOG(error) << "Failed to get file size for cache: " << get_error_string(errno); }
 
     // Step 5: Apply retention policies
     apply_retention_timestamped(msg.handle.get());
 
     // Step 6: Compress if needed
-    if (msg.handle->policy_.compress && entry) 
-    { 
+    if (msg.handle->policy_.compress && entry)
+    {
         // Check if compression thread is running
-        if (compression_running_.load()) {
+        if (compression_running_.load())
+        {
             // Queue for async compression
-            if (!enqueue_for_compression(entry)) {
+            if (!enqueue_for_compression(entry))
+            {
                 // Queue was full, compression skipped
 #ifdef LOG_COLLECT_ROTATION_METRICS
                 rotation_metrics::instance().compression_queue_overflows.fetch_add(1, std::memory_order_relaxed);
 #endif
                 LOG(warn) << "Compression queue full, skipping compression for: " << entry->filename;
             }
-        } else {
+        }
+        else
+        {
             // Compress synchronously in rotation thread
             compress_file_sync(entry);
         }
     }
 
     // Step 7: Update next rotation time for time-based policies
-    if (msg.handle->policy_.mode == rotate_policy::kind::time || 
-        msg.handle->policy_.mode == rotate_policy::kind::size_or_time)
+    if (msg.handle->policy_.mode == rotate_policy::kind::time || msg.handle->policy_.mode == rotate_policy::kind::size_or_time)
     {
         msg.handle->compute_next_rotation_time();
     }
@@ -379,10 +369,9 @@ inline void file_rotation_service::handle_rotation(const rotation_message &msg)
     prepare_next_fd_with_retry(msg.handle.get());
 
     // Step 9: Track metrics
-    auto rotation_end = std::chrono::steady_clock::now();
-    auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
-        rotation_end - rotation_start).count();
 #ifdef LOG_COLLECT_ROTATION_METRICS
+    auto rotation_end = std::chrono::steady_clock::now();
+    auto duration_us  = std::chrono::duration_cast<std::chrono::microseconds>(rotation_end - rotation_start).count();
     rotation_metrics::instance().rotations_total.fetch_add(1);
     rotation_metrics::instance().rotation_duration_us_sum.fetch_add(duration_us);
     rotation_metrics::instance().rotation_duration_us_count.fetch_add(1);
@@ -406,30 +395,27 @@ inline std::string file_rotation_service::generate_rotated_filename(const std::s
     // Split base into directory, stem and extension
     namespace fs = std::filesystem;
     fs::path base_path(base);
-    fs::path dir = base_path.parent_path();
+    fs::path dir     = base_path.parent_path();
     std::string stem = base_path.stem().string();
-    std::string ext = base_path.extension().string();
-    
+    std::string ext  = base_path.extension().string();
+
     // If no extension or invalid extension format, use .log
-    if (ext.empty() || ext.size() < MIN_EXTENSION_SIZE || !ext.starts_with(".")) {
-        ext = ".log";
-    }
+    if (ext.empty() || ext.size() < MIN_EXTENSION_SIZE || !ext.starts_with(".")) { ext = ".log"; }
 
     // Retry on filename collision
     for (int seq = 1; seq < 10000; ++seq)
     {
         std::ostringstream final_name;
-        if (!dir.empty()) {
+        if (!dir.empty())
+        {
             final_name << dir.string() << "/" << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(3) << seq << ext;
-        } else {
-            final_name << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(3) << seq << ext;
         }
+        else { final_name << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(3) << seq << ext; }
 
         struct stat st;
         // Check if either the uncompressed or compressed version exists
         std::string gz_name = final_name.str() + ".gz";
-        if ((stat(final_name.str().c_str(), &st) != 0 && errno == ENOENT) &&
-            (stat(gz_name.c_str(), &st) != 0 && errno == ENOENT))
+        if ((stat(final_name.str().c_str(), &st) != 0 && errno == ENOENT) && (stat(gz_name.c_str(), &st) != 0 && errno == ENOENT))
         {
             // Neither file exists - use this name
             return final_name.str();
@@ -439,11 +425,11 @@ inline std::string file_rotation_service::generate_rotated_filename(const std::s
     // Fallback: add microseconds for uniqueness
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count() % 1000000;
     std::ostringstream final_name;
-    if (!dir.empty()) {
+    if (!dir.empty())
+    {
         final_name << dir.string() << "/" << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(6) << us << ext;
-    } else {
-        final_name << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(6) << us << ext;
     }
+    else { final_name << stem << timestamp.str() << "-" << std::setfill('0') << std::setw(6) << us << ext; }
     return final_name.str();
 }
 
@@ -486,9 +472,10 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
             // Use compare-and-swap to atomically check and set the FD
             // This prevents race conditions where multiple threads might prepare FDs
             // Use weak version in case of spurious failures on some architectures
-            int expected = -1;
+            int expected   = -1;
             bool exchanged = false;
-            while (expected == -1 && !(exchanged = handle->next_fd_.compare_exchange_weak(expected, new_fd, std::memory_order_acq_rel))) {
+            while (expected == -1 && !(exchanged = handle->next_fd_.compare_exchange_weak(expected, new_fd, std::memory_order_acq_rel)))
+            {
                 // Retry on spurious failure (expected still -1)
                 // If expected changed, another thread set it, exit loop
             }
@@ -539,8 +526,8 @@ inline void file_rotation_service::prepare_next_fd_with_retry(rotation_handle *h
     }
 
     // Max retries exceeded - enter error state
-    LOG(error) << "Failed to prepare next fd after " << ROTATION_MAX_RETRIES << " attempts for " << handle->base_filename_
-               << " - entering error state";
+    LOG(error) << "Failed to prepare next fd after " << ROTATION_MAX_RETRIES << " attempts for "
+               << handle->base_filename_ << " - entering error state";
 
 #ifdef LOG_COLLECT_ROTATION_METRICS
     rotation_metrics::instance().prepare_fd_failures.fetch_add(1);
@@ -586,13 +573,17 @@ inline void file_rotation_service::apply_retention_timestamped(rotation_handle *
         {
             // Mark as cancelled if compression is queued or in progress
             compression_state expected = compression_state::queued;
-            if (files[i]->comp_state.compare_exchange_strong(expected, compression_state::cancelled)) {
+            if (files[i]->comp_state.compare_exchange_strong(expected, compression_state::cancelled))
+            {
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
                 compression_files_cancelled_.fetch_add(1);
 #endif
-            } else {
+            }
+            else
+            {
                 expected = compression_state::compressing;
-                if (files[i]->comp_state.compare_exchange_strong(expected, compression_state::cancelled)) {
+                if (files[i]->comp_state.compare_exchange_strong(expected, compression_state::cancelled))
+                {
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
                     compression_files_cancelled_.fetch_add(1);
 #endif
@@ -614,7 +605,7 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
 {
     // ENOSPC last-resort cleanup - VIOLATES retention policies!
     std::lock_guard<std::mutex> lock(handle->cache_mutex_);
-    auto &files   = handle->rotated_files_cache_;
+    auto &files = handle->rotated_files_cache_;
 #ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
 #endif
@@ -625,7 +616,7 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     for (size_t i = 0; i < files.size(); ++i)
     {
         // Check for proper suffix to avoid false positives
-        const auto& fname = files[i]->filename;
+        const auto &fname = files[i]->filename;
         if (fname.size() >= 8 && fname.substr(fname.size() - 8) == ".pending")
         {
             LOG(info) << "ENOSPC: Deleting pending file: " << files[i]->filename;
@@ -643,7 +634,7 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     for (size_t i = 0; i < files.size(); ++i)
     {
         // Check for proper suffix to avoid false positives
-        const auto& fname = files[i]->filename;
+        const auto &fname = files[i]->filename;
         if (fname.size() >= 3 && fname.substr(fname.size() - 3) == ".gz")
         {
             LOG(info) << "ENOSPC: Deleting compressed file: " << files[i]->filename;
@@ -673,23 +664,24 @@ inline bool file_rotation_service::emergency_cleanup(rotation_handle *handle)
     return false;
 }
 
-inline std::shared_ptr<rotation_handle::rotated_file_entry> file_rotation_service::add_to_cache(rotation_handle *handle, const std::string &filename, size_t size)
+inline std::shared_ptr<rotation_handle::rotated_file_entry>
+file_rotation_service::add_to_cache(rotation_handle *handle, const std::string &filename, size_t size)
 {
     std::lock_guard<std::mutex> lock(handle->cache_mutex_);
 
     namespace fs = std::filesystem;
     auto ftime   = fs::last_write_time(filename);
-    
+
     // Use robust conversion helper
     auto sctp = filesystem_time_to_system_time(ftime);
 
-    auto entry = std::make_shared<rotation_handle::rotated_file_entry>();
-    entry->filename = filename;
-    entry->timestamp = sctp;
-    entry->size = size;
+    auto entry        = std::make_shared<rotation_handle::rotated_file_entry>();
+    entry->filename   = filename;
+    entry->timestamp  = sctp;
+    entry->size       = size;
     entry->comp_state = compression_state::idle;
-    entry->handle = handle->shared_from_this();
-    
+    entry->handle     = handle->shared_from_this();
+
     handle->rotated_files_cache_.push_back(entry);
     return entry;
 }
@@ -703,7 +695,7 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
     fs::path dir = base_path.parent_path();
     if (dir.empty()) dir = ".";
     std::string base_stem = base_path.stem().string();
-    std::string ext = base_path.extension().string();
+    std::string ext       = base_path.extension().string();
 
     // Format: base_stem-YYYYMMDD-HHMMSS-NNN.ext[.gz|.pending]
     std::string prefix = base_stem + "-";
@@ -724,35 +716,36 @@ inline void file_rotation_service::initialize_cache(rotation_handle *handle)
 
                     // Check for the expected extensions
                     bool matches = false;
-                    if (!ext.empty()) {
+                    if (!ext.empty())
+                    {
                         // If original file had extension, look for that extension
-                        matches = filename.ends_with(ext) || 
-                                 filename.ends_with(ext + ".gz") || 
-                                 filename.ends_with(ext + ".pending");
-                    } else {
+                        matches = filename.ends_with(ext) || filename.ends_with(ext + ".gz") ||
+                                  filename.ends_with(ext + ".pending");
+                    }
+                    else
+                    {
                         // If no extension, default to .log
-                        matches = filename.ends_with(".log") || 
-                                 filename.ends_with(".log.gz") || 
-                                 filename.ends_with(".log.pending");
+                        matches = filename.ends_with(".log") || filename.ends_with(".log.gz") ||
+                                  filename.ends_with(".log.pending");
                     }
 
                     if (filename.size() > time_pos + 6 && filename[date_pos + 8] == '-' && filename[time_pos + 6] == '-' && matches)
                     {
 
                         auto ftime = fs::last_write_time(entry);
-                        auto sctp = filesystem_time_to_system_time(ftime);
+                        auto sctp  = filesystem_time_to_system_time(ftime);
 
                         // Use stat to get file size to avoid exceptions
                         struct stat st;
                         if (::stat(entry.path().c_str(), &st) == 0)
                         {
-                            auto file_entry = std::make_shared<rotation_handle::rotated_file_entry>();
-                            file_entry->filename = entry.path().string();
-                            file_entry->timestamp = sctp;
-                            file_entry->size = static_cast<size_t>(st.st_size);
+                            auto file_entry        = std::make_shared<rotation_handle::rotated_file_entry>();
+                            file_entry->filename   = entry.path().string();
+                            file_entry->timestamp  = sctp;
+                            file_entry->size       = static_cast<size_t>(st.st_size);
                             file_entry->comp_state = compression_state::idle;
-                            file_entry->handle = handle->shared_from_this();
-                            
+                            file_entry->handle     = handle->shared_from_this();
+
                             handle->rotated_files_cache_.push_back(file_entry);
                         }
                         else
@@ -821,15 +814,16 @@ inline void file_rotation_service::drain_queue()
 
 inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_handle::rotated_file_entry> entry)
 {
-    const std::string& filename = entry->filename;
-    std::string gz_pending = filename + ".gz.pending";
-    std::string gz_final = filename + ".gz";
-    
+    const std::string &filename = entry->filename;
+    std::string gz_pending      = filename + ".gz.pending";
+    std::string gz_final        = filename + ".gz";
+
     // Clean up any leftover .pending file from previous failed attempt
     ::unlink(gz_pending.c_str());
 
     // Check if cancelled before starting
-    if (entry->comp_state == compression_state::cancelled) {
+    if (entry->comp_state == compression_state::cancelled)
+    {
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
         compression_files_cancelled_.fetch_add(1);
 #endif
@@ -838,27 +832,29 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
 
     // Check if source file exists before compression
     struct stat st;
-    if (::stat(filename.c_str(), &st) != 0) {
+    if (::stat(filename.c_str(), &st) != 0)
+    {
         // File gone, mark as done
         entry->comp_state = compression_state::done;
         return false;
     }
-    
+
     // Check cancellation periodically during compression
-    auto cancel_checker = [entry]() -> bool {
-        return entry->comp_state == compression_state::cancelled;
-    };
-    
+    auto cancel_checker = [entry]() -> bool { return entry->comp_state == compression_state::cancelled; };
+
     // Compress the file with cancellation support
-    bool ok = slwoggy::gzip::file_to_gzip_with_cancel(filename, gz_pending, 
-                                                       MZ_DEFAULT_COMPRESSION, cancel_checker);
-    
-    if (!ok || entry->comp_state == compression_state::cancelled) {
-        if (entry->comp_state == compression_state::cancelled) {
+    bool ok = slwoggy::gzip::file_to_gzip_with_cancel(filename, gz_pending, MZ_DEFAULT_COMPRESSION, cancel_checker);
+
+    if (!ok || entry->comp_state == compression_state::cancelled)
+    {
+        if (entry->comp_state == compression_state::cancelled)
+        {
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
             compression_files_cancelled_.fetch_add(1);
 #endif
-        } else {
+        }
+        else
+        {
 #ifdef LOG_COLLECT_ROTATION_METRICS
             rotation_metrics::instance().compression_failures.fetch_add(1, std::memory_order_relaxed);
 #endif
@@ -866,12 +862,14 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
         ::unlink(gz_pending.c_str());
         return false;
     }
-    
+
     // Atomic rename from .pending to final .gz
-    if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0) {
+    if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0)
+    {
         // If rename failed, try to clean up existing .gz and retry
         ::unlink(gz_final.c_str());
-        if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0) {
+        if (::rename(gz_pending.c_str(), gz_final.c_str()) != 0)
+        {
             // Still failed - clean up pending file and report error
             ::unlink(gz_pending.c_str());
 #ifdef LOG_COLLECT_ROTATION_METRICS
@@ -881,25 +879,24 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
             return false;
         }
     }
-    
+
     // Sync directory for durability after rename
     sync_directory(filename);
-    
+
     // Successfully compressed - delete the original uncompressed file
     ::unlink(filename.c_str());
-    
+
     // Sync directory again after unlink to ensure deletion is durable
     sync_directory(filename);
-    
+
     // Update entry to reflect compression
-    if (auto handle = entry->handle.lock()) {
+    if (auto handle = entry->handle.lock())
+    {
         std::lock_guard<std::mutex> lock(handle->cache_mutex_);
         entry->filename = gz_final;
-        if (::stat(gz_final.c_str(), &st) == 0) {
-            entry->size = st.st_size;
-        }
+        if (::stat(gz_final.c_str(), &st) == 0) { entry->size = st.st_size; }
     }
-    
+
     entry->comp_state = compression_state::done;
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
     compression_files_compressed_.fetch_add(1);
@@ -911,48 +908,53 @@ inline bool file_rotation_service::compress_file_sync(std::shared_ptr<rotation_h
 inline void file_rotation_service::compression_thread_func()
 {
     std::vector<std::shared_ptr<rotation_handle::rotated_file_entry>> batch;
-    
-    while (compression_running_.load()) {
+
+    while (compression_running_.load())
+    {
         batch.clear();
-        
+
         // Wait for first item
         std::shared_ptr<rotation_handle::rotated_file_entry> entry;
         compression_queue_.wait_dequeue(entry);
-        
-        if (!entry) continue;  // Null entry used to wake thread
+
+        if (!entry) continue; // Null entry used to wake thread
         if (!compression_running_.load()) break;
-        
+
         batch.push_back(entry);
         compression_queue_size_.fetch_sub(1);
-        
+
         // Wait compression_delay_ while collecting more items for batching
         auto deadline = log_fast_timestamp() + compression_delay_;
         do {
             auto remaining = deadline - log_fast_timestamp();
             if (remaining <= std::chrono::milliseconds::zero()) break;
-            
+
             // Use short timeout to check for shutdown periodically
-            auto timeout = std::min(std::chrono::duration_cast<std::chrono::milliseconds>(remaining), 
-                                   std::chrono::milliseconds{100});
-            if (compression_queue_.wait_dequeue_timed(entry, timeout)) {
-                if (entry) {
+            auto timeout = std::min(std::chrono::duration_cast<std::chrono::milliseconds>(remaining),
+                                    std::chrono::milliseconds{100});
+            if (compression_queue_.wait_dequeue_timed(entry, timeout))
+            {
+                if (entry)
+                {
                     batch.push_back(entry);
                     compression_queue_size_.fetch_sub(1);
                     if (batch.size() >= COMPRESS_THREAD_MAX_BATCH) break;
                 }
             }
         } while (compression_running_.load() && log_fast_timestamp() < deadline);
-        
+
         // Process batch
-        for (auto& e : batch) {
+        for (auto &e : batch)
+        {
             compression_state expected = compression_state::queued;
-            if (e->comp_state.compare_exchange_strong(expected, compression_state::compressing)) {
+            if (e->comp_state.compare_exchange_strong(expected, compression_state::compressing))
+            {
                 compress_file_sync(e);
             }
             // If not queued anymore, it was cancelled - skip
         }
     }
-    
+
     // Drain queue on shutdown
     drain_compression_queue();
 }
@@ -960,41 +962,45 @@ inline void file_rotation_service::compression_thread_func()
 inline bool file_rotation_service::enqueue_for_compression(std::shared_ptr<rotation_handle::rotated_file_entry> entry)
 {
     // Check queue size
-    if (compression_queue_size_.load() >= compression_queue_max_) {
+    if (compression_queue_size_.load() >= compression_queue_max_)
+    {
         // Queue full, skip compression
         return false;
     }
-    
+
     // Try to transition state
     compression_state expected = compression_state::idle;
-    if (!entry->comp_state.compare_exchange_strong(expected, compression_state::queued)) {
+    if (!entry->comp_state.compare_exchange_strong(expected, compression_state::queued))
+    {
         // Already queued or in progress
         return false;
     }
-    
+
     compression_queue_.enqueue(entry);
     size_t new_size = compression_queue_size_.fetch_add(1) + 1;
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
     compression_files_queued_.fetch_add(1);
 #endif
-    
+
     // Update high water mark
     size_t prev_high = compression_queue_high_water_.load();
-    while (new_size > prev_high && 
-           !compression_queue_high_water_.compare_exchange_weak(prev_high, new_size)) {
+    while (new_size > prev_high && !compression_queue_high_water_.compare_exchange_weak(prev_high, new_size))
+    {
         // Loop until we successfully update or someone else sets a higher value
     }
-    
+
     return true;
 }
 
 inline void file_rotation_service::drain_compression_queue()
 {
     std::shared_ptr<rotation_handle::rotated_file_entry> entry;
-    while (compression_queue_.try_dequeue(entry)) {
+    while (compression_queue_.try_dequeue(entry))
+    {
         compression_queue_size_.fetch_sub(1);
         // Mark as cancelled so it won't be processed if picked up
-        if (entry) {
+        if (entry)
+        {
             entry->comp_state = compression_state::cancelled;
 #ifdef LOG_COLLECT_COMPRESSION_METRICS
             compression_files_cancelled_.fetch_add(1);
@@ -1003,25 +1009,22 @@ inline void file_rotation_service::drain_compression_queue()
     }
 }
 
-inline void file_rotation_service::start_compression_thread(
-    std::chrono::milliseconds delay,
-    size_t max_queue_size)
+inline void file_rotation_service::start_compression_thread(std::chrono::milliseconds delay, size_t max_queue_size)
 {
     bool expected = false;
-    if (compression_running_.compare_exchange_strong(expected, true)) {
-        compression_delay_ = delay;
+    if (compression_running_.compare_exchange_strong(expected, true))
+    {
+        compression_delay_     = delay;
         compression_queue_max_ = max_queue_size;
-        compression_thread_ = std::thread(&file_rotation_service::compression_thread_func, this);
+        compression_thread_    = std::thread(&file_rotation_service::compression_thread_func, this);
     }
 }
 
 inline void file_rotation_service::stop_compression_thread()
 {
     compression_running_ = false;
-    compression_queue_.enqueue(nullptr);  // Wake thread
-    if (compression_thread_.joinable()) {
-        compression_thread_.join();
-    }
+    compression_queue_.enqueue(nullptr); // Wake thread
+    if (compression_thread_.joinable()) { compression_thread_.join(); }
 }
 
 // directly in compress_file_sync via the shared_ptr<rotated_file_entry>
@@ -1048,31 +1051,29 @@ inline std::shared_ptr<rotation_handle> file_rotation_service::open(const std::s
 
     // Open initial fd
     int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
-    if (fd < 0) { 
-        throw std::runtime_error("Failed to open: " + filename + " - " + get_error_string(errno)); 
-    }
+    if (fd < 0) { throw std::runtime_error("Failed to open: " + filename + " - " + get_error_string(errno)); }
     handle->current_fd_.store(fd);
-    
+
     // Check if file is a regular file when rotation/compression is requested
-    if (policy.mode != rotate_policy::kind::none || policy.compress) {
+    if (policy.mode != rotate_policy::kind::none || policy.compress)
+    {
         struct stat st;
-        if (fstat(fd, &st) == 0 && !S_ISREG(st.st_mode)) {
+        if (fstat(fd, &st) == 0 && !S_ISREG(st.st_mode))
+        {
             // This is a special file (device, pipe, socket, etc.)
             // Disable rotation and compression for special files
             LOG(warn) << "File '" << filename << "' is not a regular file, disabling rotation and compression";
             handle->policy_ = {};
         }
     }
-    
+
     // Get the current file size to properly handle existing files
     struct stat st;
-    if (fstat(fd, &st) == 0) {
-        handle->bytes_written_.store(st.st_size);
-    }
+    if (fstat(fd, &st) == 0) { handle->bytes_written_.store(st.st_size); }
 
     // Initialize file cache with one-time directory scan
     initialize_cache(handle.get());
-    
+
     // Apply retention policy to pre-existing files immediately
     apply_retention_timestamped(handle.get());
 

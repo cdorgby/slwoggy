@@ -26,11 +26,11 @@ namespace slwoggy
 
 /**
  * @brief Configuration for inline hex dump formatting
- * 
+ *
  * Allows customization of how individual hex bytes are formatted
  * in inline_hex mode. Each byte can have a prefix, suffix, and
  * be surrounded by brackets, with configurable separators between bytes.
- * 
+ *
  * Examples of different configurations:
  * - {"0x", "", " ", "", ""}    produces: 0x00 0x01 0x02
  * - {"", "h", " ", "", ""}      produces: 00h 01h 02h
@@ -38,12 +38,13 @@ namespace slwoggy
  * - {"", "", " ", "[", "]"}     produces: [00] [01] [02]
  * - {"0x", "", ", ", "<", ">"}  produces: <0x00>, <0x01>, <0x02>
  */
-struct hex_inline_config {
-    const char* prefix = "";      ///< String to prepend to each hex byte (e.g., "0x")
-    const char* suffix = "";      ///< String to append to each hex byte (e.g., "h")
-    const char* separator = "";   ///< String between consecutive bytes (e.g., "-" or " ")
-    const char* left_bracket = "";  ///< Left bracket before each byte (e.g., "[" or "<")
-    const char* right_bracket = ""; ///< Right bracket after each byte (e.g., "]" or ">")
+struct hex_inline_config
+{
+    const char *prefix        = ""; ///< String to prepend to each hex byte (e.g., "0x")
+    const char *suffix        = ""; ///< String to append to each hex byte (e.g., "h")
+    const char *separator     = ""; ///< String between consecutive bytes (e.g., "-" or " ")
+    const char *left_bracket  = ""; ///< Left bracket before each byte (e.g., "[" or "<")
+    const char *right_bracket = ""; ///< Right bracket after each byte (e.g., "]" or ">")
 };
 
 /**
@@ -55,8 +56,8 @@ struct hex_inline_config {
 struct log_line_base
 {
     log_buffer_base *buffer_;
-    bool needs_header_{true};      // should the write_header() be called before first text write
-    bool human_readable_{false};   // true for human-readable format with padding, false for structured/logfmt
+    bool needs_header_{true};    // should the write_header() be called before first text write
+    bool human_readable_{false}; // true for human-readable format with padding, false for structured/logfmt
 
     log_line_base() = delete;
 
@@ -306,35 +307,36 @@ struct log_line_base
 
     /**
      * @brief Hex dump output format options
-     * 
+     *
      * Controls the format of hex dump output for binary data logging.
      */
-    enum class hex_dump_format {
-        full,       ///< Full hex dump with offset, hex bytes, and ASCII sidebar (like hexdump -C)
-        no_ascii,   ///< Hex dump with offset and hex bytes only, no ASCII representation
-        inline_hex  ///< Compact inline hex string without offsets or formatting
+    enum class hex_dump_format
+    {
+        full,      ///< Full hex dump with offset, hex bytes, and ASCII sidebar (like hexdump -C)
+        no_ascii,  ///< Hex dump with offset and hex bytes only, no ASCII representation
+        inline_hex ///< Compact inline hex string without offsets or formatting
     };
-    
+
     /// Number of bytes per line in hex dump output (standard hexdump width)
     static constexpr size_t HEX_BYTES_PER_LINE = 16;
 
     /**
      * @brief Dump binary data in hex format (best effort within current buffer)
-     * 
+     *
      * Dumps binary data in the specified hex format, writing as much as possible
      * to the current buffer. Automatically handles duplicate line compression
      * using '*' notation (like hexdump -C) for full and no_ascii formats.
-     * 
+     *
      * @param data Pointer to binary data to dump
      * @param len Length of data in bytes
      * @param format Output format (full, no_ascii, or inline_hex)
      * @param max_lines Maximum number of lines to write (default 8)
      * @param inline_config Configuration for inline_hex format (prefix, suffix, separator, brackets)
      * @return Number of bytes actually dumped (may be less than len if buffer fills)
-     * 
+     *
      * @note This method writes as much as fits in the current buffer. For large
      *       data that may exceed buffer capacity, use hex_dump_full() instead.
-     * 
+     *
      * Example:
      * @code
      * uint8_t data[64];
@@ -342,26 +344,27 @@ struct log_line_base
      * // Output: 0000: 00 01 02 03  04 05 06 07  08 09 0a 0b  0c 0d 0e 0f  |................|
      * @endcode
      */
-    size_t hex_dump_best_effort(const void* data, size_t len, 
-                                hex_dump_format format = hex_dump_format::full,
-                                size_t max_lines = 8,
-                                const hex_inline_config& inline_config = {});
-    
+    size_t hex_dump_best_effort(const void *data,
+                                size_t len,
+                                hex_dump_format format                 = hex_dump_format::full,
+                                size_t max_lines                       = 8,
+                                const hex_inline_config &inline_config = {});
+
     /**
      * @brief Dump entire binary data across multiple buffers if needed
-     * 
+     *
      * Dumps all binary data, automatically continuing across multiple log buffers
      * if the data exceeds the capacity of a single buffer. Shows progress
      * indicators (e.g., "binary data len: 1024/4096") when continuing.
-     * 
+     *
      * @param data Pointer to binary data to dump
      * @param len Length of data in bytes
      * @param format Output format (full, no_ascii, or inline_hex)
      * @param inline_config Configuration for inline_hex format
-     * 
+     *
      * @note This method will flush buffers as needed to ensure all data is dumped.
      *       Offsets are maintained across buffer boundaries for consistent output.
-     * 
+     *
      * Example:
      * @code
      * uint8_t large_data[4096];
@@ -369,23 +372,24 @@ struct log_line_base
      * // Output spans multiple log entries with progress tracking
      * @endcode
      */
-    void hex_dump_full(const void* data, size_t len,
-                      hex_dump_format format = hex_dump_format::full,
-                      const hex_inline_config& inline_config = {});
+    void hex_dump_full(const void *data,
+                       size_t len,
+                       hex_dump_format format                 = hex_dump_format::full,
+                       const hex_inline_config &inline_config = {});
 
     // Convenience method for span
-    template<typename T>
+    template <typename T>
     size_t hex_dump_best_effort(std::span<const T> data,
-                                hex_dump_format format = hex_dump_format::full,
-                                size_t max_lines = 8,
-                                const hex_inline_config& inline_config = {}) {
+                                hex_dump_format format                 = hex_dump_format::full,
+                                size_t max_lines                       = 8,
+                                const hex_inline_config &inline_config = {})
+    {
         return hex_dump_best_effort(data.data(), data.size() * sizeof(T), format, max_lines, inline_config);
     }
 
-    template<typename T>
-    void hex_dump_full(std::span<const T> data,
-                      hex_dump_format format = hex_dump_format::full,
-                      const hex_inline_config& inline_config = {}) {
+    template <typename T>
+    void hex_dump_full(std::span<const T> data, hex_dump_format format = hex_dump_format::full, const hex_inline_config &inline_config = {})
+    {
         hex_dump_full(data.data(), data.size() * sizeof(T), format, inline_config);
     }
 
@@ -412,7 +416,6 @@ struct log_line_base
         // Finalize the old buffer before swapping
         if (old_buffer) { old_buffer->finalize(); }
 
-
         return old_buffer;
     }
 
@@ -438,41 +441,33 @@ struct log_line_base
      * @return The number of characters written for the header
      */
     virtual size_t write_header() = 0;
-    
+
     // Helper function to format a single line of hex dump
-    size_t format_hex_line_inline(char* buffer, size_t buffer_size, 
-                                  const uint8_t* bytes, size_t byte_count,
-                                  const hex_inline_config& config);
-    
+    size_t format_hex_line_inline(char *buffer, size_t buffer_size, const uint8_t *bytes, size_t byte_count, const hex_inline_config &config);
+
     // Helper function to format a single line with offset and optional ASCII
-    size_t format_hex_line_formatted(char* buffer, size_t buffer_size,
-                                     const uint8_t* bytes, size_t byte_count,
-                                     size_t offset, bool include_ascii);
-    
+    size_t format_hex_line_formatted(char *buffer, size_t buffer_size, const uint8_t *bytes, size_t byte_count, size_t offset, bool include_ascii);
+
     // Helper for inline hex dump - no duplicate detection, just raw hex
-    size_t hex_dump_inline_impl(const uint8_t* bytes, size_t len, size_t max_lines,
-                               const hex_inline_config& config);
-    
+    size_t hex_dump_inline_impl(const uint8_t *bytes, size_t len, const hex_inline_config &config);
+
     // Helper for formatted hex dump with duplicate detection
-    size_t hex_dump_formatted_impl(const uint8_t* bytes, size_t len, 
-                                   bool include_ascii, size_t max_lines);
-    
+    size_t hex_dump_formatted_impl(const uint8_t *bytes, size_t len, bool include_ascii, size_t max_lines);
+
     // Helper for full hex dump with offset continuation
-    size_t hex_dump_formatted_full_impl(const uint8_t* bytes, size_t len,
-                                        size_t start_offset, size_t total_len,
-                                        bool include_ascii, size_t max_lines);
+    size_t hex_dump_formatted_full_impl(const uint8_t *bytes, size_t len, size_t start_offset, size_t total_len, bool include_ascii, size_t max_lines);
 };
 
 /**
  * @brief Log line implementation for structured logging format (logfmt)
- * 
+ *
  * This class outputs logs in logfmt format: msg="text" key=value key2=value2
  * It automatically adds internal metadata fields and wraps the message in quotes.
- * 
+ *
  * The output format starts with msg="..." which is a format prefix, not a
  * structured field. This prefix won't interfere with user-defined "msg" fields
  * added via .add("msg", value).
- * 
+ *
  * Automatically added metadata fields:
  * - ts: Timestamp in nanoseconds since epoch
  * - level: Log level as string
@@ -502,10 +497,7 @@ class log_line_structured : public log_line_base
 
     ~log_line_structured() override
     {
-        if (buffer_)
-        {
-            buffer_->append_or_replace_last('"');
-        }
+        if (buffer_) { buffer_->append_or_replace_last('"'); }
     }
 
     size_t write_header() override final;
@@ -513,14 +505,14 @@ class log_line_structured : public log_line_base
 
 /**
  * @brief Log line implementation for traditional text format with header
- * 
+ *
  * This class outputs logs in human-readable format with aligned columns:
  * TTTTTTTT.mmm [LEVEL] module     file:line message
- * 
+ *
  * The header provides context information in a fixed-width format for easy
  * visual scanning and alignment across multiple log lines.
  */
-class log_line_headered: public log_line_base
+class log_line_headered : public log_line_base
 {
   public:
     log_line_headered(log_level level, log_module_info &mod, std::string_view file, uint32_t line)

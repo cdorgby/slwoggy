@@ -100,42 +100,42 @@
  * @code
  * // By default, logs go to stdout. No configuration needed:
  * LOG(info) << "This appears on stdout immediately";
- * 
+ *
  * // To use a custom sink, the first add_sink() replaces the default:
  * log_line_dispatcher::instance().add_sink(make_raw_file_sink("/var/log/app.log"));
- * 
+ *
  * // Now logs go to the file instead of stdout
  * LOG(info) << "This goes to the file";
- * 
+ *
  * // Add additional sinks (they append, not replace):
  * log_line_dispatcher::instance().add_sink(make_json_sink());
- * 
+ *
  * // Now logs go to both the file and stdout (as JSON)
  * @endcode
  *
  * Per-Sink Filtering:
- * @code  
+ * @code
  * // Console shows warnings and above
  * auto console = make_stdout_sink(level_filter{log_level::warn});
- * 
+ *
  * // File captures everything for debugging
  * auto debug_file = make_raw_file_sink("/var/log/debug.log");
- * 
+ *
  * // Error log captures only errors and fatal
- * auto error_file = make_raw_file_sink("/var/log/errors.log", {}, 
+ * auto error_file = make_raw_file_sink("/var/log/errors.log", {},
  *                                       level_filter{log_level::error});
- * 
+ *
  * // Complex filter: warnings and errors only (not debug or fatal)
  * and_filter warn_error_only;
  * warn_error_only.add(level_filter{log_level::warn})
  *                .add(max_level_filter{log_level::error});
  * auto filtered = make_stdout_sink(warn_error_only);
- * 
+ *
  * // Composite OR filter: debug messages OR errors and above
  * or_filter debug_or_severe;
  * debug_or_severe.add(level_range_filter{log_level::debug, log_level::debug})
  *                .add(level_filter{log_level::error});
- * 
+ *
  * // NOT filter: everything except info level
  * auto no_info = make_stdout_sink(not_filter{level_range_filter{
  *     log_level::info, log_level::info}});
@@ -217,7 +217,7 @@
  *
  * Metrics collection is optional and must be enabled at compile time by defining:
  * - LOG_COLLECT_BUFFER_POOL_METRICS - Buffer pool statistics with usage tracking
- * - LOG_COLLECT_DISPATCHER_METRICS - Dispatcher and queue statistics  
+ * - LOG_COLLECT_DISPATCHER_METRICS - Dispatcher and queue statistics
  * - LOG_COLLECT_STRUCTURED_METRICS - Structured logging drop statistics
  * - LOG_COLLECT_DISPATCHER_MSG_RATE - Sliding window message rate tracking
  * - LOG_COLLECT_ROTATION_METRICS - File rotation statistics
@@ -346,15 +346,15 @@
  * // Monitor rotation metrics
  * auto rot_stats = rotation_metrics::instance().get_stats();
  * if (rot_stats.failed_rotations > 0 || rot_stats.enospc_errors > 0) {
- *     std::cerr << "WARNING: Rotation issues - " << rot_stats.failed_rotations 
+ *     std::cerr << "WARNING: Rotation issues - " << rot_stats.failed_rotations
  *               << " failures, " << rot_stats.enospc_errors << " disk full errors\n";
  * }
  * #endif
- * 
+ *
  * #ifdef LOG_COLLECT_COMPRESSION_METRICS
  * // Monitor compression metrics
  * auto comp_stats = file_rotation_service::instance().get_compression_stats();
- * std::cout << "Compression queue: " << comp_stats.current_queue_size 
+ * std::cout << "Compression queue: " << comp_stats.current_queue_size
  *           << "/" << comp_stats.queue_high_water_mark << " (max)\n";
  * #endif
  *
@@ -435,11 +435,12 @@ template <typename T> struct formatter<std::weak_ptr<T>, char> : formatter<const
 } // namespace std
 
 /**
- * @brief keep the filename + @p KeepParts parts of the path (KeepParts = 1 e.g. "/dev/swloggy/src/main.cpp" -> "src/main.cpp")
- * 
+ * @brief keep the filename + @p KeepParts parts of the path (KeepParts = 1 e.g. "/dev/swloggy/src/main.cpp" ->
+ * "src/main.cpp")
+ *
  * @tparam N Length of the path string
  * @tparam KeepParts Number of path parts to keep (default: 1)
- * @return constexpr const char* 
+ * @return constexpr const char*
  */
 template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(const char (&path)[N])
 {
@@ -478,20 +479,19 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 
 /**
  * @brief Macro to get shortened source file path at compile time
- * 
+ *
  * Uses get_path_suffix() to extract just the last directory and filename
  * from __FILE__. This provides consistent, shorter file paths in logs
  * while preserving enough context to identify the source location.
- * 
+ *
  * @return Shortened file path (e.g., "src/main.cpp" from "/path/to/project/src/main.cpp")
  */
 #define file_source() get_path_suffix(__FILE__)
 
-
 /**
  * @brief Base macro for log line creation with specified type
  * @internal
- * 
+ *
  * This macro contains the common logic for all LOG variants:
  * 1. Compile-time filtering: Logs below GLOBAL_MIN_LOG_LEVEL are completely eliminated
  * 2. Site registration: Each unique LOG() location is registered once via static init
@@ -526,7 +526,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 /**
  * @brief Base macro for log line creation with compile-time module lookup
  * @internal
- * 
+ *
  * Similar to LOG_BASE but uses a different module specified at compile time.
  * Module is looked up once and cached in a static variable.
  */
@@ -562,7 +562,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 
 /**
  * @brief Log macros that allow specifying a module name at the call site
- * 
+ *
  * These macros use a module specified at compile time, looked up once
  * and cached in a static variable for efficiency.
  *
@@ -578,7 +578,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
  * // Log with "network" module settings using text format
  * LOG_MOD_TEXT(info, "network") << "Connection established";
  * LOG_MOD(info, "network") << "Same as above - defaults to text";
- * 
+ *
  * // Log with "database" module using structured format
  * LOG_MOD_STRUCT(error, "database")
  *     .add("query_id", 123)
@@ -591,7 +591,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 
 /**
  * @brief Creates a structured log line (logfmt format) with automatic source location
- * 
+ *
  * Outputs logs in logfmt format with automatic metadata fields.
  * Ideal for machine parsing, log aggregation systems, and structured queries.
  *
@@ -610,7 +610,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
  * @code
  * LOG_STRUCTURED(info) << "User logged in";
  * // Output: msg="User logged in" ts=1234567890 level=info module=auth file=login.cpp line=42
- * 
+ *
  * LOG_STRUCTURED(debug).add("user_id", 123)
  *                      .add("latency_ms", 45)
  *                      .format("Request processed in {}ms", 45);
@@ -621,7 +621,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 
 /**
  * @brief Creates a traditional text log line with header and automatic source location
- * 
+ *
  * Outputs logs in traditional human-readable format with aligned columns.
  * Ideal for console output, development, and human inspection.
  *
@@ -646,7 +646,7 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
 
 /**
  * @brief Default log macro - uses the configured default log line type
- * 
+ *
  * The behavior depends on LOG_LINE_TYPE definition:
  * - If LOG_LINE_TYPE is defined before including log.hpp, uses that type
  * - Otherwise defaults to log_line_headered (traditional format)
@@ -659,6 +659,6 @@ template <size_t N, int KeepParts = 1> constexpr const char *get_path_suffix(con
  */
 #define LOG(_level) LOG_TEXT(_level)
 
-#include "log_line_impl.hpp"       // IWYU pragma: keep
-#include "log_dispatcher_impl.hpp" // IWYU pragma: keep
+#include "log_line_impl.hpp"         // IWYU pragma: keep
+#include "log_dispatcher_impl.hpp"   // IWYU pragma: keep
 #include "log_file_rotator_impl.hpp" // IWYU pragma: keep
