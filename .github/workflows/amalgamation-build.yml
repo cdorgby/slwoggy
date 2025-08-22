@@ -322,7 +322,8 @@ jobs:
           Generated from tag ${{ steps.version.outputs.version }}
           [skip ci]
           EOF
-            git commit -F /tmp/commit_msg
+            # Use single-line commit message to avoid YAML heredoc indentation issues
+            git commit -m "Update amalgamation for ${{ steps.version.outputs.version }} [skip ci]"
             
             # Push to the release branch
             git push origin "${{ steps.verify.outputs.branch }}"
