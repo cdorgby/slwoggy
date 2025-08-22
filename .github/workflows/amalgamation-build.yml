@@ -17,6 +17,7 @@ on:
         options:
           - development
           - release
+          - test
 
 jobs:
   create-amalgamation:
@@ -39,21 +40,6 @@ jobs:
           # Get the current tag name
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           echo "Current tag: $TAG_NAME"
-          
-          # Check if this is an annotated tag
-          if git tag --points-at HEAD | grep -q "^$TAG_NAME$"; then
-            # Check if it's annotated by checking the object type
-            if [ "$(git cat-file -t "$TAG_NAME" 2>/dev/null)" = "tag" ]; then
-              echo "✓ Tag is annotated"
-              IS_ANNOTATED="true"
-            else
-              echo "✗ Tag is lightweight (not annotated)"
-              IS_ANNOTATED="false"
-            fi
-          else
-            echo "✗ Not on a tag"
-            IS_ANNOTATED="false"
-          fi
           
           # Get the branch name that contains this tag
           # Get the commit hash that the tag points to
@@ -99,7 +85,7 @@ jobs:
           fi
           
           # Final decision
-          if [ "$IS_ANNOTATED" = "true" ] && [ "$VALID_BRANCH" = "true" ] && [ "$VERSION_MATCH" = "true" ]; then
+          if [ "$VALID_BRANCH" = "true" ] && [ "$VERSION_MATCH" = "true" ]; then
             echo ""
             echo "=== All release conditions met ✓ ==="
             echo "proceed=true" >> $GITHUB_OUTPUT
@@ -108,9 +94,8 @@ jobs:
             echo ""
             echo "=== Release conditions NOT met ✗ ==="
             echo "Requirements:"
-            echo "  1. Tag must be annotated (git tag -a)"
-            echo "  2. Tag must be on a release branch (version-X.Y or release-X.Y)"
-            echo "  3. Tag version must match branch (e.g., v0.1.x for version-0.1)"
+            echo "  1. Tag must be on a release branch (version-X.Y or release-X.Y)"
+            echo "  2. Tag version must match branch (e.g., v0.1.x for version-0.1)"
             echo ""
             echo "Skipping amalgamation build for main branch"
             echo "proceed=false" >> $GITHUB_OUTPUT
