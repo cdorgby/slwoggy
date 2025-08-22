@@ -42,8 +42,8 @@ jobs:
           
           # Check if this is an annotated tag
           if git describe --exact-match --tags 2>/dev/null | grep -q "^$TAG_NAME$"; then
-            # Check if it's annotated (will fail for lightweight tags)
-            if git cat-file -p "$TAG_NAME" 2>/dev/null | grep -q "^tag "; then
+            # Check if it's annotated by checking the object type
+            if [ "$(git cat-file -t "$TAG_NAME" 2>/dev/null)" = "tag" ]; then
               echo "✓ Tag is annotated"
               IS_ANNOTATED="true"
             else
@@ -315,10 +315,14 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to amalgamation, skipping commit"
           else
-            git commit -m "Update amalgamation for ${{ steps.version.outputs.version }}
-            
-            Generated from tag ${{ steps.version.outputs.version }}
-            [skip ci]"
+            # Use heredoc for proper multi-line commit message
+            cat > /tmp/commit_msg <<EOF
+          Update amalgamation for ${{ steps.version.outputs.version }}
+          
+          Generated from tag ${{ steps.version.outputs.version }}
+          [skip ci]
+          EOF
+            git commit -F /tmp/commit_msg
             
             # Push to the release branch
             git push origin "${{ steps.verify.outputs.branch }}"
