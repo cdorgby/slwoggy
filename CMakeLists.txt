@@ -208,9 +208,9 @@ if(_SLWOGGY_COMPILE_DEFINITIONS)
     target_compile_definitions(slwoggy INTERFACE ${_SLWOGGY_COMPILE_DEFINITIONS})
 endif()
 
-# Add LOG_RELIABLE_DELIVERY if enabled
+# Add SLWOGGY_RELIABLE_DELIVERY if enabled
 if(LOG_RELIABLE_DELIVERY)
-    target_compile_definitions(slwoggy INTERFACE LOG_RELIABLE_DELIVERY)
+    target_compile_definitions(slwoggy INTERFACE SLWOGGY_RELIABLE_DELIVERY)
 endif()
 
 # Version definition

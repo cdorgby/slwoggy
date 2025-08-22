@@ -35,10 +35,10 @@ function(add_metrics_definitions TARGET)
             LOG_COLLECT_COMPRESSION_METRICS
         )
     endif()
-    # Apply LOG_RELIABLE_DELIVERY setting from parent
+    # Apply SLWOGGY_RELIABLE_DELIVERY setting from parent
     if(LOG_RELIABLE_DELIVERY)
         target_compile_definitions(${TARGET} PRIVATE
-            LOG_RELIABLE_DELIVERY
+            SLWOGGY_RELIABLE_DELIVERY
         )
     endif()
 endfunction()
