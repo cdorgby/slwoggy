@@ -304,8 +304,8 @@ jobs:
           # Move the generated amalgamation into place
           mv /tmp/amalgamation.generated amalgamation
           
-          # Add and commit if there are changes
-          git add amalgamation/
+          # Add and commit if there are changes (force-add since amalgamation is in .gitignore)
+          git add -f amalgamation/
           if git diff --staged --quiet; then
             echo "No changes to amalgamation, skipping commit"
           else
