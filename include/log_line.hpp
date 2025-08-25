@@ -24,6 +24,29 @@
 namespace slwoggy
 {
 
+// Forward declaration for concept
+struct log_line_base;
+
+/**
+ * @brief Concept for types that can provide structured logging data
+ *
+ * Types satisfying this concept can be passed directly to log.add()
+ * and will contribute their own key-value pairs to the log entry.
+ *
+ * Example:
+ * @code
+ * struct Connection {
+ *     void add_log_context(log_line_base& line) const {
+ *         line.add("conn_id", id_).add("remote_ip", ip_);
+ *     }
+ * };
+ * @endcode
+ */
+template <typename T>
+concept LogStructuredDataProvider = requires(T t, log_line_base &line) {
+    { t.add_log_context(line) } -> std::same_as<void>;
+};
+
 /**
  * @brief Configuration for inline hex dump formatting
  *
@@ -280,7 +303,9 @@ struct log_line_base
      *       << "User login completed";
      * @endcode
      */
-    template <typename T> log_line_base &add(std::string_view key, T &&value) &
+    template <typename T>
+        requires(!LogStructuredDataProvider<T>)
+    log_line_base &add(std::string_view key, T &&value) &
     {
         if (!buffer_) return *this;
 
@@ -296,6 +321,14 @@ struct log_line_base
             // Silently ignore metadata errors to not break logging
         }
 
+        return *this;
+    }
+
+    template <typename T>
+        requires LogStructuredDataProvider<std::decay_t<T>>
+    log_line_base &add(T &&provider)
+    {
+        if (buffer_) { std::forward<T>(provider).add_log_context(*this); }
         return *this;
     }
 
