@@ -252,7 +252,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Size-based rotation", "[rotation][size]
 TEST_CASE_METHOD(rotation_test_fixture, "Time-based rotation", "[rotation][time]")
 {
 #ifdef LOG_COLLECT_ROTATION_METRICS
-    auto &metrics = rotation_metrics::instance();
+    [[maybe_unused]] auto &metrics = rotation_metrics::instance();
 #endif
 
     SECTION("Rotation on time boundary during write")
@@ -370,7 +370,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         // First, create 8 pre-existing rotated files to simulate previous run
         // Use timestamps that look like real rotated files
         auto now = std::chrono::system_clock::now();
-        auto now_t = std::chrono::system_clock::to_time_t(now);
+        [[maybe_unused]] auto now_t = std::chrono::system_clock::to_time_t(now);
         
         for (int i = 0; i < 8; ++i) {
             // Create timestamp going back in time
@@ -417,7 +417,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         // The oldest 4 files should have been deleted
         size_t final_count = count_rotated_files();
         INFO("Final rotated file count: " << final_count);
-        REQUIRE(final_count == policy.keep_files);
+        REQUIRE(final_count == static_cast<size_t>(policy.keep_files));
         
         // Verify the remaining files are the newest ones
         std::vector<std::string> remaining_files;
@@ -447,7 +447,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         std::this_thread::sleep_for(500ms);
         
         // Should still have exactly 5 files
-        REQUIRE(count_rotated_files() == policy.keep_files);
+        REQUIRE(count_rotated_files() == static_cast<size_t>(policy.keep_files));
     }
     
     SECTION("Pre-existing compressed files counted in retention")
@@ -538,8 +538,8 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         // Compression is async so count may vary slightly
         size_t final_count = count_rotated_files();
         INFO("Final rotated file count: " << final_count);
-        REQUIRE(final_count >= policy.keep_files - 1);
-        REQUIRE(final_count <= policy.keep_files);
+        REQUIRE(final_count >= static_cast<size_t>(policy.keep_files - 1));
+        REQUIRE(final_count <= static_cast<size_t>(policy.keep_files));
         
         // List remaining files
         std::vector<std::string> remaining_files;
@@ -579,8 +579,8 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
         
         // Should still have around 6 files (compression timing may vary)
         size_t final_final_count = count_rotated_files();
-        REQUIRE(final_final_count >= policy.keep_files - 1);
-        REQUIRE(final_final_count <= policy.keep_files);
+        REQUIRE(final_final_count >= static_cast<size_t>(policy.keep_files - 1));
+        REQUIRE(final_final_count <= static_cast<size_t>(policy.keep_files));
     }
     
     SECTION("max_age retention")
@@ -618,7 +618,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Retention policies", "[rotation][retent
 TEST_CASE_METHOD(rotation_test_fixture, "Error handling", "[rotation][errors]")
 {
 #ifdef LOG_COLLECT_ROTATION_METRICS
-    auto &metrics = rotation_metrics::instance();
+    [[maybe_unused]] auto &metrics = rotation_metrics::instance();
 #endif
 
     SECTION("Handle missing directory")
@@ -662,7 +662,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Error handling", "[rotation][errors]")
 TEST_CASE_METHOD(rotation_test_fixture, "ENOSPC handling", "[rotation][enospc]")
 {
 #ifdef LOG_COLLECT_ROTATION_METRICS
-    auto &metrics = rotation_metrics::instance();
+    [[maybe_unused]] auto &metrics = rotation_metrics::instance();
 #endif
     
     // Check for environment variable pointing to a restricted space directory
@@ -890,7 +890,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Zero-gap rotation", "[rotation][zero-ga
 {
 #ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics          = rotation_metrics::instance();
-    auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
+    [[maybe_unused]] auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
 
     SECTION("Hard link success path")
     {
@@ -914,7 +914,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Zero-gap rotation", "[rotation][zero-ga
     SECTION("Fallback when hard link fails")
     {
         // Record initial fallback count
-        auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
+        [[maybe_unused]] auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
         
         rotate_policy policy;
         policy.mode      = rotate_policy::kind::size;
@@ -1010,7 +1010,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression", "[rotation][compression]"
 {
 #ifdef LOG_COLLECT_ROTATION_METRICS
     auto &metrics = rotation_metrics::instance();
-    auto initial_compressions = metrics.compression_failures.load();
+    [[maybe_unused]] auto initial_compressions = metrics.compression_failures.load();
 #else
     auto initial_compressions = 0;
 #endif
@@ -1622,7 +1622,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Compression performance", "[rotation][c
             // Wait for compression to complete
             std::this_thread::sleep_for(2000ms);
             
-            auto async_rotations = metrics.rotations_total.load() - initial_rotations;
+            [[maybe_unused]] auto async_rotations = metrics.rotations_total.load() - initial_rotations;
             REQUIRE(count_compressed_files() >= 1);  // At least 1 compressed
             
             // Async should be significantly faster for rotations
@@ -1685,8 +1685,8 @@ TEST_CASE_METHOD(rotation_test_fixture, "Metrics accuracy", "[rotation][metrics]
 
     // Reset/baseline metrics
     auto initial_rotations       = metrics.rotations_total.load();
-    auto initial_dropped_records = metrics.dropped_records_total.load();
-    auto initial_dropped_bytes   = metrics.dropped_bytes_total.load();
+    [[maybe_unused]] auto initial_dropped_records = metrics.dropped_records_total.load();
+    [[maybe_unused]] auto initial_dropped_bytes   = metrics.dropped_bytes_total.load();
 
     SECTION("Track rotation count")
     {
@@ -2034,7 +2034,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
 
     SECTION("Fsync failure metrics")
     {
-        auto initial_fsync_failures = metrics.fsync_failures.load();
+        [[maybe_unused]] auto initial_fsync_failures = metrics.fsync_failures.load();
 
         // Hard to simulate fsync failures in tests
         // Would need to mock/inject failures
@@ -2045,7 +2045,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
 
     SECTION("Compression failure metrics")
     {
-        auto initial_compression_failures = metrics.compression_failures.load();
+        [[maybe_unused]] auto initial_compression_failures = metrics.compression_failures.load();
 
         rotate_policy policy;
         policy.mode      = rotate_policy::kind::size;
@@ -2068,7 +2068,7 @@ TEST_CASE_METHOD(rotation_test_fixture, "Rotation failure metrics", "[rotation][
 
     SECTION("Zero-gap fallback metrics")
     {
-        auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
+        [[maybe_unused]] auto initial_fallbacks = metrics.zero_gap_fallback_total.load();
 
         // Create cross-device scenario (hard to simulate in tests)
         // Would need different mount points

@@ -235,7 +235,7 @@ TEST_CASE("Log output verification with test sink", "[log][sink]") {
         log_sink_test test_sink;
         LogSinkGuard guard(&test_sink);
         
-        auto c = new char[100];
+        [[maybe_unused]] auto c = new char[100];
         LOG(info) << "Test message";
         
         log_line_dispatcher::instance().flush();
@@ -1357,7 +1357,7 @@ TEST_CASE("Lock-free sink operations", "[log][sink][lockfree]") {
         // Both sinks should have captured some logs
         REQUIRE(test_sink.count() > 0);
         REQUIRE(test_sink2.count() > 0);
-        REQUIRE((test_sink.count() + test_sink2.count()) <= logs_sent.load());
+        REQUIRE((test_sink.count() + test_sink2.count()) <= static_cast<size_t>(logs_sent.load()));
         
         // Restore original
         dispatcher.set_sink(0, original_sink);
