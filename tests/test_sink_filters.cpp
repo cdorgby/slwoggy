@@ -533,7 +533,7 @@ TEST_CASE("Thread safety of sink filters", "[sink_filters][threading]") {
         std::vector<std::thread> threads;
         
         for (int t = 0; t < num_threads; ++t) {
-            threads.emplace_back([t, messages_per_thread]() {
+            threads.emplace_back([t]() {
                 for (int i = 0; i < messages_per_thread; ++i) {
                     LOG(debug) << "Debug T" << t << " M" << i << endl;  // Filtered out
                     LOG(info) << "Info T" << t << " M" << i << endl;    // Passes filter
