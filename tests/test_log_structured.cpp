@@ -28,12 +28,12 @@ public:
     public:
         capturing_formatter(test_structured_sink* parent) : parent_(parent) {}
         
-        size_t calculate_size(const log_buffer_base* buffer) const {
+        size_t calculate_size(const log_buffer_base* /*buffer*/) const {
             // We don't actually format, just capture
             return 0;
         }
         
-        size_t format(const log_buffer_base* buffer, char* output, size_t size) const {
+        size_t format(const log_buffer_base* buffer, char* /*output*/, size_t /*size*/) const {
             if (!buffer) return 0;
 
             captured_log entry;
@@ -481,4 +481,87 @@ TEST_CASE("Log buffer with metadata", "[structured]") {
         
         buffer->release();
     }
+}
+
+TEST_CASE("Basic data provider", "[structured]") {
+    GlobalTestSinkManager::reset();
+    
+    struct UserContext {
+        int user_id = 42;
+        std::string session = "abc123";
+        
+        void add_log_context(log_line_base& line) const {
+            line.add("user_id", user_id)
+                .add("session", session);
+        }
+    };
+    
+    UserContext ctx;
+    LOG(info).add(ctx) << "User action" << endl;
+    
+    log_line_dispatcher::instance().flush();
+    get_test_sink()->wait_for_logs(1);
+    
+    REQUIRE(get_test_sink()->count() == 1);
+    auto& entry = get_test_sink()->get(0);
+    
+    REQUIRE(entry.text.find("User action") != std::string::npos);
+    REQUIRE(entry.metadata.at("user_id") == "42");
+    REQUIRE(entry.metadata.at("session") == "abc123");
+}
+
+TEST_CASE("Data provider chaining", "[structured]") {
+    GlobalTestSinkManager::reset();
+    
+    struct RequestInfo {
+        std::string request_id = "req-456";
+        void add_log_context(log_line_base& line) const {
+            line.add("request_id", request_id);
+        }
+    };
+    
+    RequestInfo req;
+    
+    LOG(info)
+        .add("action", "purchase")
+        .add(req)
+        .add("amount", 99.99)
+        << "Transaction" << endl;
+    
+    log_line_dispatcher::instance().flush();
+    get_test_sink()->wait_for_logs(1);
+    
+    auto& entry = get_test_sink()->get(0);
+    REQUIRE(entry.metadata.at("action") == "purchase");
+    REQUIRE(entry.metadata.at("request_id") == "req-456");
+    REQUIRE(entry.metadata.at("amount") == "99.99");
+}
+
+TEST_CASE("Nested data providers", "[structured]") {
+    GlobalTestSinkManager::reset();
+    
+    struct Inner {
+        int value = 100;
+        void add_log_context(log_line_base& line) const {
+            line.add("inner", value);
+        }
+    };
+    
+    struct Outer {
+        Inner inner;
+        int value = 200;
+        void add_log_context(log_line_base& line) const {
+            line.add("outer", value).add(inner);
+        }
+    };
+    
+    Outer provider;
+    LOG(info).add(provider) << "Nested test" << endl;
+    
+    log_line_dispatcher::instance().flush();
+    get_test_sink()->wait_for_logs(1);
+    
+    auto& entry = get_test_sink()->get(0);
+    REQUIRE(entry.metadata.at("outer") == "200");
+    REQUIRE(entry.metadata.at("inner") == "100");
 }
