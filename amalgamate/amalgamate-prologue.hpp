@@ -12,6 +12,15 @@
  * Generated on: %Y-%m-%d %H:%M:%S
  */
 
+// Mark that this is the amalgamated version
+#define SLWOGGY_AMALGAMATED_HEADER 1
+
+// Configure miniz for header-only mode with inline functions
+// This prevents multiple definition errors when included in multiple translation units
+#ifndef MINIZ_EXPORT
+#define MINIZ_EXPORT inline
+#endif
+
 // Default to __FILE__ if SOURCE_FILE_NAME is not defined
 // This allows the amalgamated header to work without CMake
 #ifndef SOURCE_FILE_NAME
