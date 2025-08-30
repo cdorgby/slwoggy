@@ -15,6 +15,7 @@
 #include "fmt_config.hpp" // IWYU pragma: keep
 #include <memory>
 #include <cassert>
+#include <thread>
 
 #include "moodycamel/blockingconcurrentqueue.h" // IWYU pragma: keep
 #include "moodycamel/concurrentqueue.h"         // IWYU pragma: keep
@@ -62,6 +63,7 @@ class log_buffer_base
 
   public:
     // Cold metadata - less frequently accessed
+    std::thread::id owner_thread_id_{std::this_thread::get_id()}; ///< Thread that created this log
     std::string_view file_;
     std::chrono::steady_clock::time_point timestamp_; ///< Timestamp when log was created
     const log_module_info_detail *module_;            ///< Module info for filtering
@@ -576,6 +578,7 @@ class buffer_pool
         {
             buffer->add_ref();
             buffer->set_padding_enabled(human_readable);
+            buffer->owner_thread_id_ = std::this_thread::get_id();
 
 #ifdef LOG_COLLECT_BUFFER_POOL_METRICS
             // Update usage tracking

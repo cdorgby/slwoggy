@@ -9,6 +9,7 @@
 #include <cstring>
 #include <streambuf>
 #include <ostream>
+#include <thread>
 #include <tao/json/events/to_stream.hpp>
 #include <tao/json/events/to_pretty_stream.hpp>
 
@@ -277,6 +278,12 @@ class taocpp_json_formatter
         // Line
         c.key("line");
         c.number(static_cast<std::uint64_t>(buffer->line_));
+        c.member();
+
+        c.key("thread_id");
+        // Use lower 32 bits for shorter display, consistent with header format
+        size_t thread_hash = std::hash<std::thread::id>{}(buffer->owner_thread_id_);
+        c.number(static_cast<std::uint64_t>(thread_hash & 0xFFFFFFFF));
         c.member();
 
         // Message

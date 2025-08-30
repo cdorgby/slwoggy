@@ -51,19 +51,21 @@ namespace slwoggy
 struct structured_log_key_registry
 {
     // Internal metadata key IDs - always registered with fixed IDs
-    static constexpr uint16_t INTERNAL_KEY_TS     = 0; // ts - timestamp
-    static constexpr uint16_t INTERNAL_KEY_LEVEL  = 1; // level - log level
-    static constexpr uint16_t INTERNAL_KEY_MODULE = 2; // module - module name
-    static constexpr uint16_t INTERNAL_KEY_FILE   = 3; // file - source file
-    static constexpr uint16_t INTERNAL_KEY_LINE   = 4; // line - source line
-    static constexpr uint16_t FIRST_USER_KEY_ID   = 5; // User keys start here
+    static constexpr uint16_t INTERNAL_KEY_TS        = 0; // ts - timestamp
+    static constexpr uint16_t INTERNAL_KEY_LEVEL     = 1; // level - log level
+    static constexpr uint16_t INTERNAL_KEY_MODULE    = 2; // module - module name
+    static constexpr uint16_t INTERNAL_KEY_FILE      = 3; // file - source file
+    static constexpr uint16_t INTERNAL_KEY_LINE      = 4; // line - source line
+    static constexpr uint16_t INTERNAL_KEY_THREAD_ID = 5; // thread_id - hashed thread ID
+    static constexpr uint16_t FIRST_USER_KEY_ID      = 6; // User keys start here
 
     // Internal metadata key names - used for consistency
-    static constexpr const char *INTERNAL_KEY_NAME_TS     = "ts";
-    static constexpr const char *INTERNAL_KEY_NAME_LEVEL  = "level";
-    static constexpr const char *INTERNAL_KEY_NAME_MODULE = "module";
-    static constexpr const char *INTERNAL_KEY_NAME_FILE   = "file";
-    static constexpr const char *INTERNAL_KEY_NAME_LINE   = "line";
+    static constexpr const char *INTERNAL_KEY_NAME_TS        = "ts";
+    static constexpr const char *INTERNAL_KEY_NAME_LEVEL     = "level";
+    static constexpr const char *INTERNAL_KEY_NAME_MODULE    = "module";
+    static constexpr const char *INTERNAL_KEY_NAME_FILE      = "file";
+    static constexpr const char *INTERNAL_KEY_NAME_LINE      = "line";
+    static constexpr const char *INTERNAL_KEY_NAME_THREAD_ID = "thread_id";
 
     /**
      * @brief Get the singleton instance of the key registry
@@ -98,6 +100,7 @@ struct structured_log_key_registry
             if (key == INTERNAL_KEY_NAME_MODULE) return INTERNAL_KEY_MODULE;
             if (key == INTERNAL_KEY_NAME_FILE) return INTERNAL_KEY_FILE;
             if (key == INTERNAL_KEY_NAME_LINE) return INTERNAL_KEY_LINE;
+            if (key == INTERNAL_KEY_NAME_THREAD_ID) return INTERNAL_KEY_THREAD_ID;
             // Fall through for user-defined keys
         }
 
@@ -160,6 +163,7 @@ struct structured_log_key_registry
         case INTERNAL_KEY_MODULE: return INTERNAL_KEY_NAME_MODULE;
         case INTERNAL_KEY_FILE: return INTERNAL_KEY_NAME_FILE;
         case INTERNAL_KEY_LINE: return INTERNAL_KEY_NAME_LINE;
+        case INTERNAL_KEY_THREAD_ID: return INTERNAL_KEY_NAME_THREAD_ID;
         default:
             // Fall through for user keys
             break;
@@ -274,6 +278,7 @@ struct structured_log_key_registry
         register_internal_key(INTERNAL_KEY_NAME_MODULE, INTERNAL_KEY_MODULE);
         register_internal_key(INTERNAL_KEY_NAME_FILE, INTERNAL_KEY_FILE);
         register_internal_key(INTERNAL_KEY_NAME_LINE, INTERNAL_KEY_LINE);
+        register_internal_key(INTERNAL_KEY_NAME_THREAD_ID, INTERNAL_KEY_THREAD_ID);
 
         // User keys start after internal ones
         next_key_id_ = FIRST_USER_KEY_ID;
