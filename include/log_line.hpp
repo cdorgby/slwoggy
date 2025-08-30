@@ -12,6 +12,7 @@
 #include <utility>
 #include <memory>
 #include <span>
+#include <thread>
 
 #include "fmt_config.hpp" // IWYU pragma: keep
 
@@ -439,11 +440,12 @@ struct log_line_base
         // Set buffer metadata if we got a new buffer
         if (buffer_)
         {
-            buffer_->level_     = old_buffer->level_;
-            buffer_->file_      = old_buffer->file_;
-            buffer_->module_    = old_buffer->module_;
-            buffer_->line_      = old_buffer->line_;
-            buffer_->timestamp_ = old_buffer->timestamp_;
+            buffer_->level_           = old_buffer->level_;
+            buffer_->file_            = old_buffer->file_;
+            buffer_->module_          = old_buffer->module_;
+            buffer_->line_            = old_buffer->line_;
+            buffer_->timestamp_       = old_buffer->timestamp_;
+            buffer_->owner_thread_id_ = old_buffer->owner_thread_id_;
         }
 
         // Finalize the old buffer before swapping
@@ -525,6 +527,9 @@ class log_line_structured : public log_line_base
             metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_MODULE, buffer_->module_->name);
             metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_FILE, buffer_->file_);
             metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_LINE, buffer_->line_);
+            // Use lower 32 bits of standard hash for consistency with header format
+            size_t thread_hash = std::hash<std::thread::id>{}(buffer_->owner_thread_id_);
+            metadata.add_kv_formatted(structured_log_key_registry::INTERNAL_KEY_THREAD_ID, static_cast<uint32_t>(thread_hash & 0xFFFFFFFF));
         }
     }
 
