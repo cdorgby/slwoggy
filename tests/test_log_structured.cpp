@@ -195,7 +195,7 @@ TEST_CASE("Structured log key registry", "[structured]") {
         REQUIRE(registry.get_key(4) == structured_log_key_registry::INTERNAL_KEY_NAME_LINE);
         REQUIRE(registry.get_key(5) == structured_log_key_registry::INTERNAL_KEY_NAME_THREAD_ID);
         
-        // Verify user keys start at ID 5 or higher
+        // Verify user keys start at FIRST_USER_KEY_ID (currently 6) or higher
         uint16_t user_key_id = registry.get_or_register_key("test_user_key");
         REQUIRE(user_key_id >= structured_log_key_registry::FIRST_USER_KEY_ID);
     }
