@@ -11,6 +11,7 @@
 #include "log_dispatcher.hpp"
 #include <cstring>
 #include <cassert>
+#include <thread>
 
 namespace slwoggy
 {
@@ -60,7 +61,7 @@ inline size_t log_line_headered::write_header()
     int64_t ms = diff_us / 1000;
     int64_t us = std::abs(diff_us % 1000);
 
-    // Format header: "TTTTTTTT.mmm [LEVEL]    file:line "
+    // Format header: "TTTTTTTT.mmm [LEVEL] [thread_id] module    file:line "
     // Note: header doesn't need padding since it's the first line
     size_t text_len_before = buffer_->len();
 
@@ -68,10 +69,14 @@ inline size_t log_line_headered::write_header()
     int file_width      = log_site_registry::longest_file();
     int actual_file_len = std::min(file_width, static_cast<int>(buffer_->file_.size()));
 
-    buffer_->format_to_buffer_with_padding("{:08}.{:03} [{:<5}] {:<10} {:>{}.{}}:{} ",
+    // Hash the thread ID to get a shorter representation
+    size_t thread_hash = std::hash<std::thread::id>{}(buffer_->owner_thread_id_);
+    
+    buffer_->format_to_buffer_with_padding("{:08}.{:03} [{:<5}] [{:08x}] {:<10} {:>{}.{}}:{} ",
                                            ms,
                                            us,
                                            log_level_names[static_cast<int>(buffer_->level_)],
+                                           static_cast<uint32_t>(thread_hash & 0xFFFFFFFF), // Use lower 32 bits for shorter display
                                            buffer_->module_->name,
                                            buffer_->file_.substr(0, actual_file_len),
                                            file_width,

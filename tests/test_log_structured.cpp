@@ -174,14 +174,18 @@ TEST_CASE("Structured log key registry", "[structured]") {
         REQUIRE(registry.get_or_register_key(structured_log_key_registry::INTERNAL_KEY_NAME_LEVEL) == structured_log_key_registry::INTERNAL_KEY_LEVEL);
         REQUIRE(registry.get_or_register_key(structured_log_key_registry::INTERNAL_KEY_NAME_MODULE) == structured_log_key_registry::INTERNAL_KEY_MODULE);
         REQUIRE(registry.get_or_register_key(structured_log_key_registry::INTERNAL_KEY_NAME_FILE) == structured_log_key_registry::INTERNAL_KEY_FILE);
-        REQUIRE(registry.get_or_register_key(structured_log_key_registry::INTERNAL_KEY_NAME_LINE) == structured_log_key_registry::INTERNAL_KEY_LINE);
-        
+        REQUIRE(registry.get_or_register_key(structured_log_key_registry::INTERNAL_KEY_NAME_LINE) ==
+                structured_log_key_registry::INTERNAL_KEY_LINE);
+        REQUIRE(registry.get_or_register_key(structured_log_key_registry::INTERNAL_KEY_NAME_THREAD_ID) ==
+                structured_log_key_registry::INTERNAL_KEY_THREAD_ID);
+
         // Verify the IDs are as expected
         REQUIRE(structured_log_key_registry::INTERNAL_KEY_TS == 0);
         REQUIRE(structured_log_key_registry::INTERNAL_KEY_LEVEL == 1);
         REQUIRE(structured_log_key_registry::INTERNAL_KEY_MODULE == 2);
         REQUIRE(structured_log_key_registry::INTERNAL_KEY_FILE == 3);
         REQUIRE(structured_log_key_registry::INTERNAL_KEY_LINE == 4);
+        REQUIRE(structured_log_key_registry::INTERNAL_KEY_THREAD_ID == 5);
         
         // Verify reverse lookup works
         REQUIRE(registry.get_key(0) == structured_log_key_registry::INTERNAL_KEY_NAME_TS);
@@ -189,6 +193,7 @@ TEST_CASE("Structured log key registry", "[structured]") {
         REQUIRE(registry.get_key(2) == structured_log_key_registry::INTERNAL_KEY_NAME_MODULE);
         REQUIRE(registry.get_key(3) == structured_log_key_registry::INTERNAL_KEY_NAME_FILE);
         REQUIRE(registry.get_key(4) == structured_log_key_registry::INTERNAL_KEY_NAME_LINE);
+        REQUIRE(registry.get_key(5) == structured_log_key_registry::INTERNAL_KEY_NAME_THREAD_ID);
         
         // Verify user keys start at ID 5 or higher
         uint16_t user_key_id = registry.get_or_register_key("test_user_key");
