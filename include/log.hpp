@@ -410,6 +410,7 @@
 #include "log_line.hpp"         // IWYU pragma: keep
 #include "log_dispatcher.hpp"   // IWYU pragma: keep
 #include "log_file_rotator.hpp" // IWYU pragma: keep
+#include "log_exit_handler.hpp" // IWYU pragma: keep
 
 // formatter specializations for smart pointers
 namespace std
